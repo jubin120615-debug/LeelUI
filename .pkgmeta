@@ -1,0 +1,22 @@
+package-as: LeelUI
+
+move-folders:
+  LeelUI/LeelMap: LeelMap
+  LeelUI/LeelMark: LeelMark
+  LeelUI/LeelSpot: LeelSpot
+  LeelUI/ForgLeveling: ForgLeveling
+
+ignore:
+  - README.md
+  - CHANGELOG.md
+  - "*.bak"
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+required-dependencies:
+  - questie
+
+optional-dependencies:
+  - leatrix-maps

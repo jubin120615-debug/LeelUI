@@ -1,0 +1,28 @@
+## Interface: 16001
+## Title: |cfff2b3c2르엘|r UI
+## Notes: 르엘을 위한 연분홍 통합 UI
+## Author: Leel
+## Version: 1.3.3
+## Category: 르엘 UI
+## X-Curse-Project-ID: 1794148
+## SavedVariables: LeelUIDB
+## IconTexture: Interface\AddOns\LeelUI\media\icon
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+Core.lua
+MyFonts\list.lua
+Fonts.lua
+Widgets.lua
+Auras.lua
+Cast.lua
+HUD.lua
+Party.lua
+Nameplates.lua
+Move.lua
+Config.lua
+Hub.lua
+Minimap.lua

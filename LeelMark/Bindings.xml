@@ -1,0 +1,5 @@
+<Bindings>
+	<Binding name="CLICK LeelMarkAuto:LeftButton" header="LEELMARK" category="ADDONS"/>
+	<Binding name="CLICK LeelMarkClear:LeftButton" category="ADDONS"/>
+	<Binding name="CLICK LeelMarkSweep:LeftButton" category="ADDONS"/>
+</Bindings>
