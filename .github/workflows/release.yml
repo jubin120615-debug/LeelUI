@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
@@ -37,8 +38,11 @@ jobs:
             git config user.email "github-actions@users.noreply.github.com"
             git tag "$v"
             git push origin "$v"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            # 봇이 올린 태그로는 작업이 안 돌아서, 그 태그로 이 작업을 한 번 더 실행
+            gh workflow run release.yml --ref "$v"
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - uses: BigWigsMods/packager@v2
-        if: github.ref_type == 'tag' || steps.tag.outputs.skip == 'false'
+        if: github.ref_type == 'tag'
