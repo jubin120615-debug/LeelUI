@@ -1,3 +1,7 @@
+# 1.3.9
+
+- CurseForge: Questie와 Leatrix Maps를 필수 연관 애드온으로 (앱에서 Leel UI를 설치하면 같이 설치돼요)
+
 # 1.3.8
 
 - 르엘 소통방: 급한 수정은 GitHub에서 바로, 평소엔 CurseForge 앱 업데이트 안내

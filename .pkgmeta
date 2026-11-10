@@ -17,6 +17,4 @@ manual-changelog:
 
 required-dependencies:
   - questie
-
-optional-dependencies:
   - leatrix-maps
