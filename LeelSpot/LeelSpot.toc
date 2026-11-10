@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: |cfff2b3c2Leel|r Spot
-## Notes: 눌러서 줍는 퀘스트 물건 위에 르엘 분홍 이름표 + 진행도. /lspot
+## Notes: 눌러서 줍는 퀘스트 물건 위에 르엘 분홍 이름표 + 진행도, 주울 시체에 반짝 상자. /lspot
 ## Author: 슈엘
-## Version: 0.2.5
+## Version: 0.3.0
 ## Category: 르엘 UI
 ## Group: LeelUI
 ## SavedVariables: LeelSpotDB

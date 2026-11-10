@@ -4,7 +4,7 @@
 local _, ns = ...
 local C = ns.C
 
-local W, H = 580, 460
+local W, H = 580, 492
 local RAIL = 214
 local HEAD = 54
 local TOP = 96   -- 머리 + 분류 알약 줄
@@ -51,7 +51,7 @@ local function Slash(key, msg)
 end
 
 StaticPopupDialogs["LEELUI_HUB_RELOAD"] = {
-    text = "|cfff2b3c2르엘 허브|r\n애드온을 켜고 끈 건 다시 불러와야 적용돼요.\n지금 다시 불러올까요?",
+    text = "|cfff2b3c2르엘 허브|r\n다시 불러와야 적용돼요.\n지금 다시 불러올까요?",
     button1 = "다시 불러오기",
     button2 = "나중에",
     OnAccept = function() ReloadUI() end,
@@ -65,16 +65,94 @@ local function MapDB() return LeelMapDB or {} end
 local function MarkDB() return LeelMarkDB or {} end
 local function SpotDB() return LeelSpotDB or {} end
 local function GuideDB() return ForgLevelingDB or {} end
+local function SpotRefresh() if LeelSpotAPI and LeelSpotAPI.Refresh then LeelSpotAPI.Refresh() end end
+local function SpotSet(k, v)
+    if not LeelSpotDB then return end
+    LeelSpotDB[k] = v
+    SpotRefresh()
+end
+
+-- 시전바 모양 고르기 (하나만 켜짐)
+local function SetCastStyle(style)
+    if (ns.db.castStyle or "bunny") == style then return end
+    ns.db.castStyle = style
+    StaticPopup_Show("LEELUI_HUB_RELOAD")
+end
 
 local MODULES = {
     {
-        key = "LeelUI", title = "|cfff2b3c2르엘|r UI", sub = "유닛, 이름표, 파티", icon = "hb_ui",
+        key = "LeelUI", title = "|cfff2b3c2르엘|r UI", sub = "위쪽 HUD, 미니맵", icon = "hb_ui",
         always = true,
-        desc = "르엘 UI 본체. 허브도 여기에 들어 있어요.",
+        desc = "내 체력, 대상 창이 있는 위쪽 HUD. 허브도 여기에 들어 있어요.",
         items = {
+            { t = "slider", label = "위쪽 HUD 크기", min = 50, max = 150,
+              get = function() return math.floor((ns.db.scale or 0.7) * 100 + 0.5) end,
+              set = function(v)
+                  ns:SetHudScale(v / 100)
+                  if InCombatLockdown() then Print("전투가 끝나면 HUD 크기가 바뀌어요.") end
+              end },
+            { t = "toggle", label = "기본 플레이어/대상 창 숨기기", hint = "다시 불러오기 후 적용",
+              get = function() return ns.db.hideBlizzard end,
+              set = function(v) ns.db.hideBlizzard = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+            { t = "toggle", label = "미니맵 아이콘",
+              get = function() return not ns.db.minimap.hide end,
+              set = function(v)
+                  ns:SetMinimapShown(v)
+                  if not v then Print("아이콘을 숨겼어요. /르엘 로 허브를 열 수 있어요.") end
+              end },
             { t = "toggle", label = "미니맵 아이콘 정리", hint = "길잡이 버튼은 숨기고 토끼 하나만",
               get = function() return ns.db.hub.tidy end,
               set = function(v) ns.db.hub.tidy = v; ns:ApplyHubTidy() end },
+            { t = "button", label = "HUD 위치 초기화",
+              run = function() ns:ResetPosition(); Print("HUD 위치를 처음대로 돌렸어요.") end },
+        },
+    },
+    {
+        key = "LeelUI_Plates", builtin = true, cat = "view",
+        title = "적 이름표", sub = "토끼 레벨, 몹 등급", icon = "hb_plate",
+        desc = "적 머리 위 분홍 이름표. 왼쪽 스위치는 다시 불러오기 후 적용.",
+        onoff = { reload = true, get = function() return ns.db.nameplates end,
+                  set = function(v) ns.db.nameplates = v end },
+        items = {
+            { t = "slider", label = "이름표 크기", min = 40, max = 150,
+              get = function() return math.floor((ns.db.npScale or 1) * 100 + 0.5) end,
+              set = function(v) ns.db.npScale = v / 100; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
+            { t = "toggle", label = "퀘스트 몹 표시", hint = "Questie 퀘스트 원",
+              get = function() return ns.db.questCircle ~= false end,
+              set = function(v) ns.db.questCircle = v; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
+        },
+    },
+    {
+        key = "LeelUI_Minimap", builtin = true, always = true, cat = "view",
+        title = "미니맵", sub = "르엘 미니맵", icon = "hb_minimap",
+        desc = "동그란 지도 + 아래 버튼 줄. 휠 = 확대/축소.\n옮기기: 아래 '이동 모드'. 애드온 아이콘은 네 칸 버튼 하나로.",
+        items = {
+            { t = "toggle", label = "르엘 미니맵 쓰기", hint = "끄면 블리자드 기본 (다시 불러오기)",
+              get = function() return ns.db.mmStyle ~= "blizz" end,
+              set = function(v) ns:SetMinimapStyle(v and "bar" or "blizz") end },
+            { t = "button", label = "미니맵 위치 초기화",
+              run = function() if ns.ResetMinimapPosition then ns:ResetMinimapPosition() end; Print("미니맵을 처음 자리로 돌렸어요.") end },
+            { t = "toggle", label = "다른 애드온 아이콘 모으기",
+              get = function() return ns.db.mmCollect ~= false end,
+              set = function(v) ns.db.mmCollect = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+        },
+    },
+    {
+        key = "LeelUI_Cast", builtin = true, always = true, cat = "view",
+        title = "시전바", sub = "깡충 토끼, 발자국", icon = "hb_cast",
+        desc = "모양을 바꾸면 다시 불러오기 후 적용.\n자리 옮기기는 아래 '이동 모드'.",
+        items = {
+            { t = "toggle", label = "깡충 토끼", hint = "알약 바 위를 토끼가 달려가요 (화면 가운데 아래)",
+              get = function() return (ns.db.castStyle or "bunny") == "bunny" end,
+              set = function() SetCastStyle("bunny") end },
+            { t = "toggle", label = "토끼 발자국", hint = "발자국 6개가 하나씩 찍혀요 (화면 가운데 아래)",
+              get = function() return ns.db.castStyle == "paw" end,
+              set = function() SetCastStyle("paw") end },
+            { t = "toggle", label = "예전 얇은 바", hint = "위쪽 HUD 아래에 붙은 얇은 바",
+              get = function() return ns.db.castStyle == "hud" end,
+              set = function() SetCastStyle("hud") end },
+            { t = "button", label = "시전바 위치 초기화",
+              run = function() if ns.ResetCastPosition then ns:ResetCastPosition() end; Print("시전바 위치를 처음대로 돌렸어요.") end },
         },
     },
     {
@@ -100,6 +178,29 @@ local MODULES = {
             { t = "toggle", label = "지역 레벨", get = function() return MapDB().levels end, cmd = "레벨" },
             { t = "toggle", label = "작은 창 지도", hint = "지도를 다시 열면 적용", get = function() return MapDB().mini end, cmd = "작게" },
             { t = "button", label = "지도 위치 초기화", cmd = "위치" },
+        },
+    },
+    {
+        key = "LeelUI_Party", builtin = true, cat = "party",
+        title = "파티 프레임", sub = "둥근 파티 창", icon = "hb_party",
+        desc = "르엘 파티 프레임. 왼쪽 스위치는 다시 불러오기 후 적용.\n자리 옮기기는 아래 '이동 모드'.",
+        onoff = { reload = true, get = function() return ns.db.party end,
+                  set = function(v) ns.db.party = v end },
+        items = {
+            { t = "slider", label = "파티 프레임 크기", min = 50, max = 150,
+              get = function() return math.floor((ns.db.partyScale or 0.75) * 100 + 0.5) end,
+              set = function(v)
+                  ns:SetPartyScale(v / 100)
+                  if InCombatLockdown() then Print("전투가 끝나면 파티 프레임 크기가 바뀌어요.") end
+              end },
+            { t = "toggle", label = "기본 파티 창 숨기기", hint = "다시 불러오기 후 적용",
+              get = function() return ns.db.partyHideBlizzard ~= false end,
+              set = function(v) ns.db.partyHideBlizzard = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+            { t = "button",
+              label = function() return "배치: " .. ((ns.PARTY_LAYOUT_NAMES or {})[ns.db.partyLayout or "row"] or "가로 줄") end,
+              run = function() ns:CyclePartyLayout() end },
+            { t = "button", label = "위치 초기화",
+              run = function() ns:ResetPartyPosition(); Print("파티 프레임 위치를 처음대로 돌렸어요.") end },
         },
     },
     {
@@ -143,6 +244,97 @@ local MODULES = {
                   ForgLevelingDB.minimapHide = not v
                   local b = _G.ForgLevelingMinimapButton
                   if b then b:SetShown(v) end
+              end },
+        },
+    },
+    {
+        key = "LeelUI_Shop", builtin = true, cat = "util",
+        title = "상점 토끼", sub = "자동 수리, 잡템 판매", icon = "hb_shop",
+        desc = "상인 창을 열면 알아서. Shift 누른 채 열면 이번엔 쉬어요.\n안 팔고 싶은 회색 템은 가방에서 Alt+클릭.",
+        onoff = { get = function() return ns.ShopDB().on end,
+                  set = function(v) ns.ShopDB().on = v end },
+        items = {
+            { t = "toggle", label = "자동 수리", hint = "돈이 모자라면 건너뛰어요",
+              get = function() return ns.ShopDB().repair end, set = function(v) ns.ShopDB().repair = v end },
+            { t = "toggle", label = "회색 잡템 자동 판매",
+              get = function() return ns.ShopDB().sell end, set = function(v) ns.ShopDB().sell = v end },
+            { t = "toggle", label = "판매 결과 알려주기", hint = "상인 창 위에 작은 판 + 채팅 한 줄",
+              get = function() return ns.ShopDB().report end, set = function(v) ns.ShopDB().report = v end },
+            { t = "button", label = function() return "안 팔기 목록 비우기 (" .. ns:ShopKeepCount() .. ")" end,
+              run = function() ns:ShopClearKeep() end },
+        },
+    },
+    {
+        key = "LeelUI_Quest", builtin = true, cat = "util",
+        title = "퀘스트 자동", sub = "받기, 완료", icon = "hb_quest",
+        desc = "말만 걸면 받고, 고를 보상이 없으면 완료까지. 보상 고르기는 직접.\nShift 누른 채 말 걸면 그때만 쉬어요.",
+        onoff = { get = function() return ns.QuestDB().on end, set = function(v) ns.QuestDB().on = v end },
+        items = {
+            { t = "toggle", label = "자동 수락",
+              get = function() return ns.QuestDB().accept end, set = function(v) ns.QuestDB().accept = v end },
+            { t = "toggle", label = "자동 완료", hint = "보상을 골라야 하면 멈춰요",
+              get = function() return ns.QuestDB().complete end, set = function(v) ns.QuestDB().complete = v end },
+            { t = "toggle", label = "가장 비싼 보상 표시", hint = "팔 때 제일 비싼 보상에 분홍 테",
+              get = function() return ns.QuestDB().best end, set = function(v) ns.QuestDB().best = v end },
+            { t = "toggle", label = "회색 퀘스트 건너뛰기", hint = "내 레벨보다 한참 낮은 퀘는 안 받아요",
+              get = function() return ns.QuestDB().skipTrivial end, set = function(v) ns.QuestDB().skipTrivial = v end },
+            { t = "toggle", label = "대화 하나뿐이면 넘기기", hint = "퀘스트 없이 대화 고르기 하나만 있을 때",
+              get = function() return ns.QuestDB().gossip end, set = function(v) ns.QuestDB().gossip = v end },
+        },
+    },
+    {
+        key = "LeelUI_Bags", builtin = true, cat = "util",
+        title = "르엘 가방", sub = "통합 가방, 남은 칸", icon = "hb_bag",
+        desc = "가방 5개를 분홍 창 하나로. 창 머리를 끌면 옮겨져요.\n미니맵 아래 숫자: 클릭 = 가방 열기, Shift+끌기 = 옮기기.",
+        onoff = { get = function() return ns.BagsDB().on end,
+                  set = function(v) ns.BagsDB().on = v; if ns.UpdateBags then ns.UpdateBags() end end },
+        items = {
+            { t = "header", label = "가방 창",
+              btn = { label = "위치 초기화", run = function() ns.BagsDB().winPos = nil; local w = _G.LeelUI_Bag; if w and w.Place then w.Place() end end } },
+            { t = "header", label = "남은 칸",
+              btn = { label = "숫자 위치 초기화", run = function() ns.BagsDB().chipPos = nil; local c = _G.LeelUI_BagChip; if c and c.Place then c.Place() end end } },
+            { t = "toggle", label = "미니맵 아래 숫자",
+              get = function() return ns.BagsDB().chip end,
+              set = function(v) ns.BagsDB().chip = v; if ns.UpdateBags then ns.UpdateBags() end end },
+            { t = "toggle", label = "거의 찼을 때 알림", hint = "남은 칸 3개 이하가 되는 순간 한 번",
+              get = function() return ns.BagsDB().warn end,
+              set = function(v) ns.BagsDB().warn = v end },
+            { t = "header", label = "꽉 찼을 때" },
+            { t = "toggle", label = "버릴 템 고르기 창", hint = "제일 싼 템 3개 + 각각 버리기 버튼 (전투가 끝나면 떠요)",
+              get = function() return ns.BagsDB().full ~= false end,
+              set = function(v) ns.BagsDB().full = v; if not v and ns.HideBagFull then ns.HideBagFull() end end },
+        },
+    },
+    {
+        key = "LeelUI_Loot", builtin = true, cat = "util",
+        title = "르엘 줍기", sub = "시체 반짝 상자", icon = "hb_loot",
+        needs = "LeelSpot", needsText = "상자는 Leel Spot이 그려요.\n애드온 목록에서 Leel Spot을 켜고 다시 불러오면 설정할 수 있어요.",
+        desc = "주울 게 남은 가장 가까운 시체 하나에 반짝 상자.\n높이는 '미리보기'를 누르고 시체 앞에서 맞추면 쉬워요.",
+        onoff = { get = function() return Loaded("LeelSpot") and SpotDB().loot ~= false end,
+                  set = function(v) SpotSet("loot", v) end },
+        items = {
+            { t = "toggle", label = "죽은 몹 이름표 숨기기", hint = "0% 체력바 대신 상자만",
+              get = function() return ns.db.npHideDead ~= false end,
+              set = function(v) ns.db.npHideDead = v; if ns.RefreshDeadPlates then ns:RefreshDeadPlates() end end },
+            { t = "toggle", label = "여러 시체 표시", hint = "가까운 건 큰 상자, 나머지는 작고 흐린 상자",
+              get = function() return SpotDB().lootMulti ~= false end,
+              set = function(v) SpotSet("lootMulti", v) end },
+            { t = "toggle", label = "통통 튀는 움직임",
+              get = function() return SpotDB().lootBob ~= false end,
+              set = function(v) SpotSet("lootBob", v) end },
+            { t = "slider", label = "상자 높이  (왼쪽 = 시체 쪽 아래)", min = -200, max = 40, fmt = "%d",
+              get = function() return SpotDB().lootY or -70 end,
+              set = function(v) SpotSet("lootY", v) end },
+            { t = "slider", label = "상자 크기", min = 60, max = 160,
+              get = function() return math.floor((SpotDB().lootSize or 1) * 100 + 0.5) end,
+              set = function(v) SpotSet("lootSize", v / 100) end },
+            { t = "button", label = "미리보기 5초",
+              run = function() if LeelSpotAPI and LeelSpotAPI.Preview then LeelSpotAPI.Preview(5) end end },
+            { t = "button", label = "기본값으로",
+              run = function()
+                  if not LeelSpotDB then return end
+                  LeelSpotDB.lootY, LeelSpotDB.lootSize, LeelSpotDB.lootBob = -70, 1.0, true
+                  SpotRefresh()
               end },
         },
     },
@@ -226,10 +418,33 @@ end
 local function ClearPane(pane)
     for _, r in ipairs(pane.rows) do r:Hide() end
     for _, r in ipairs(pane.choices or {}) do r:Hide() end
+    for _, r in ipairs(pane.sliders or {}) do r:Hide() end
     if pane.input then pane.input:Hide() end
     if dd then dd:Hide() end
     for _, b in ipairs(pane.btns) do b:Hide() end
+    for _, h in ipairs(pane.heads or {}) do h:Hide() end
     pane.note:SetText("")
+end
+
+-- 묶음 제목 줄: 분홍 작은 제목 + 가는 선 (+ 오른쪽 작은 글자 버튼)
+local function HeaderRow(pane, i)
+    pane.heads = pane.heads or {}
+    local h = pane.heads[i]
+    if h then return h end
+    h = CreateFrame("Frame", nil, pane)
+    h:SetHeight(20)
+    h.label = ns.Font(h, 11.5, C.acc); h.label:SetPoint("LEFT", 0, 0)
+    h.line = h:CreateTexture(nil, "BORDER")
+    h.line:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.25); h.line:SetHeight(1)
+    h.line:SetPoint("LEFT", h.label, "RIGHT", 8, 0)
+    h.btn = CreateFrame("Button", nil, h)
+    h.btn:SetHeight(18)
+    h.btn.fs = ns.Font(h.btn, 10.5, { 0.62, 0.54, 0.52 }); h.btn.fs:SetPoint("RIGHT", 0, 0)
+    h.btn:SetScript("OnEnter", function(self) self.fs:SetTextColor(C.accHi[1], C.accHi[2], C.accHi[3]) end)
+    h.btn:SetScript("OnLeave", function(self) self.fs:SetTextColor(0.62, 0.54, 0.52) end)
+    h.btn:SetPoint("RIGHT", 0, 0)
+    pane.heads[i] = h
+    return h
 end
 
 local function ToggleRow(pane, i)
@@ -240,6 +455,11 @@ local function ToggleRow(pane, i)
     r.name = ns.Font(r, 13); r.name:SetPoint("TOPLEFT", 0, -6)
     r.hint = ns.Font(r, 10.5, { 0.62, 0.54, 0.52 }); r.hint:SetPoint("TOPLEFT", r.name, "BOTTOMLEFT", 0, -2)
     r.sw = Switch(r); r.sw:SetPoint("RIGHT", 0, 0)
+    -- 하위 설정 표시 (└)
+    r.tv = r:CreateTexture(nil, "BORDER"); r.tv:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.45)
+    r.tv:SetWidth(1.5); r.tv:SetPoint("TOPLEFT", 6, 2); r.tv:SetPoint("BOTTOMLEFT", r, "LEFT", 6, 0)
+    r.th = r:CreateTexture(nil, "BORDER"); r.th:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.45)
+    r.th:SetHeight(1.5); r.th:SetPoint("LEFT", 6, 0); r.th:SetWidth(8)
     r.line = r:CreateTexture(nil, "BORDER")
     r.line:SetColorTexture(0.839, 0.627, 0.612, 0.10); r.line:SetHeight(1)
     r.line:SetPoint("BOTTOMLEFT"); r.line:SetPoint("BOTTOMRIGHT")
@@ -383,6 +603,49 @@ local function InputRow(pane)
     return r
 end
 
+-- 크기 줄: 이름 + 큰 숫자 + 분홍 트랙 (휠로도 조절)
+local function SliderRow(pane, i)
+    pane.sliders = pane.sliders or {}
+    local r = pane.sliders[i]
+    if r then return r end
+    r = CreateFrame("Frame", nil, pane)
+    r:SetHeight(50)
+    r.name = ns.Font(r, 13); r.name:SetPoint("TOPLEFT", 0, -4)
+    r.val = ns.Num(r, 17, C.accHi); r.val:SetPoint("TOPRIGHT", 0, -1)
+    local s = CreateFrame("Slider", nil, r)
+    s:SetOrientation("HORIZONTAL")
+    s:SetHeight(16)
+    s:SetPoint("TOPLEFT", 0, -26); s:SetPoint("TOPRIGHT", 0, -26)
+    s:SetValueStep(1)
+    s:SetObeyStepOnDrag(true)
+    s:EnableMouseWheel(true)
+    -- 트랙은 줄(r)에 붙이고 슬라이더를 그 위로 (손잡이가 가려지지 않게)
+    local tr = CreateFrame("Frame", nil, r)
+    tr:SetHeight(6); tr:SetPoint("LEFT", s, "LEFT"); tr:SetPoint("RIGHT", s, "RIGHT")
+    s:SetFrameLevel(tr:GetFrameLevel() + 3)
+    ns.RoundRect(tr, 3, nil, "BACKGROUND", 0, 0):SetColor({ 1, 1, 1 }, 0.14)
+    r.fill = CreateFrame("Frame", nil, tr)
+    r.fill:SetHeight(6); r.fill:SetPoint("LEFT")
+    ns.RoundRect(r.fill, 3, C.acc, "BORDER", 0, 0)
+    local thumb = s:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture(ns.MEDIA .. "circle"); thumb:SetSize(16, 16)
+    thumb:SetVertexColor(C.accHi[1], C.accHi[2], C.accHi[3], 1)
+    s:SetThumbTexture(thumb)
+    r.s = s
+    r.line = r:CreateTexture(nil, "BORDER")
+    r.line:SetColorTexture(0.839, 0.627, 0.612, 0.10); r.line:SetHeight(1)
+    r.line:SetPoint("BOTTOMLEFT"); r.line:SetPoint("BOTTOMRIGHT")
+    function r:Paint(v)
+        local lo, hi = self.s:GetMinMaxValues()
+        self.val:SetFormattedText(self.fmt or "%d%%", v)
+        local w = self.s:GetWidth(); if not w or w < 10 then w = 320 end
+        self.fill:SetWidth(math.max(6, (v - lo) / math.max(1, hi - lo) * w))
+    end
+    s:SetScript("OnSizeChanged", function() r:Paint(math.floor(s:GetValue() + 0.5)) end)
+    pane.sliders[i] = r
+    return r
+end
+
 local function PaneButton(pane, i)
     local b = pane.btns[i]
     if b then return b end
@@ -395,7 +658,7 @@ ShowPane = function()
     local pane, m = hub.pane, MODULES[sel]
     ClearPane(pane)
     pane.title:SetText(m.title)
-    pane.ver:SetText(MVersion(m) ~= "" and ("v" .. MVersion(m)) or "")
+    pane.ver:SetText("") -- 버전은 머리의 르엘 UI 버전 하나만
     pane.desc:SetText(m.desc or "")
 
     if not MExists(m) then
@@ -409,10 +672,60 @@ ShowPane = function()
         return
     end
 
-    local y, ti, bi, ci = -66, 0, 0, 0
+    if m.needs and not Loaded(m.needs) then
+        pane.note:SetText(m.needsText or (m.needs .. " 애드온이 필요해요."))
+        return
+    end
+
+    local y, ti, bi, ci, si, hi = -66, 0, 0, 0, 0, 0
     local lastBtn
     for _, it in ipairs(m.items) do
-        if it.t == "choice" then
+        if it.t == "header" then
+            lastBtn = nil
+            hi = hi + 1
+            local h = HeaderRow(pane, hi)
+            h:ClearAllPoints()
+            h:SetPoint("TOPLEFT", 18, y - 4); h:SetPoint("TOPRIGHT", -18, y - 4)
+            h.label:SetText(it.label)
+            if it.btn then
+                h.btn.fs:SetText(it.btn.label)
+                h.btn:SetWidth(h.btn.fs:GetStringWidth() + 4)
+                h.btn:SetScript("OnClick", function() it.btn.run(); C_Timer.After(0.05, ShowPane) end)
+                h.btn:Show()
+                h.line:SetPoint("RIGHT", h.btn, "LEFT", -8, 0)
+            else
+                h.btn:Hide()
+                h.line:SetPoint("RIGHT", h, "RIGHT", 0, 0)
+            end
+            h:Show()
+            y = y - 24
+        elseif it.t == "slider" then
+            lastBtn = nil
+            si = si + 1
+            local r = SliderRow(pane, si)
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", 18, y); r:SetPoint("TOPRIGHT", -18, y)
+            r.name:SetText(it.label)
+            r.fmt = it.fmt
+            local s = r.s
+            s:SetScript("OnValueChanged", nil)
+            s:SetMinMaxValues(it.min, it.max)
+            local v = it.get()
+            s:SetValue(v); r:Paint(v)
+            s:SetScript("OnValueChanged", function(_, nv, user)
+                nv = math.floor(nv + 0.5)
+                r:Paint(nv)
+                if user then it.set(nv) end
+            end)
+            s:SetScript("OnMouseWheel", function(self, d)
+                local nv = math.min(it.max, math.max(it.min, math.floor(self:GetValue() + 0.5) + d * 5))
+                self:SetValue(nv)
+                r:Paint(nv)
+                it.set(nv)
+            end)
+            r:Show()
+            y = y - 52
+        elseif it.t == "choice" then
             lastBtn = nil
             ci = ci + 1
             local r = ChoiceRow(pane, ci)
@@ -475,19 +788,23 @@ ShowPane = function()
             r:SetPoint("TOPLEFT", 18, y); r:SetPoint("TOPRIGHT", -18, y)
             r:SetHeight(it.hint and 42 or 34)
             r.name:SetText(it.label)
+            r.name:ClearAllPoints(); r.name:SetPoint("TOPLEFT", it.child and 20 or 0, -6)
+            r.tv:SetShown(it.child and true or false); r.th:SetShown(it.child and true or false)
             r.hint:SetText(it.hint or ""); r.hint:SetShown(it.hint ~= nil)
             r.sw:Set(it.get() and true or false)
+            local on = not (it.dep and not it.dep())
+            r:SetEnabled(on); r:SetAlpha(on and 1 or 0.4)
             r:SetScript("OnClick", function(self)
                 local new = not (it.get() and true or false)
                 if it.set then it.set(new) elseif it.cmd then Slash(m.slash, it.cmd) end
-                C_Timer.After(0, function() self.sw:Set(it.get() and true or false) end)
+                C_Timer.After(0, function() self.sw:Set(it.get() and true or false); ShowPane() end)
             end)
             r:Show()
             y = y - (it.hint and 42 or 34)
         else
             bi = bi + 1
             local b = PaneButton(pane, bi)
-            b:SetLabel(it.label)
+            b:SetLabel(type(it.label) == "function" and it.label() or it.label)
             b:SetScript("OnClick", function()
                 if it.run then it.run() elseif it.cmd then Slash(m.slash, it.cmd) end
                 C_Timer.After(0.05, function() if hub:IsShown() then ShowPane() end end)
@@ -540,7 +857,10 @@ local function PaintRail()
         row.disc.ic:SetVertexColor(ic[1], ic[2], ic[3], 1)
 
         local exists = MExists(m)
-        if m.always then
+        if m.onoff then
+            row.tag:Hide(); row.sw:Show()
+            row.sw:Set(m.onoff.get() and true or false, on)
+        elseif m.always then
             row.sw:Hide(); row.tag:SetText(on and "|cff3a1c24항상|r" or "항상"); row.tag:Show()
         elseif not exists then
             row.sw:Hide(); row.tag:SetText("없음"); row.tag:Show()
@@ -584,6 +904,9 @@ local function Build()
     local title = ns.Font(f, 17)
     title:SetText("|cfff2b3c2르엘|r 허브")
     title:SetPoint("LEFT", logo, "RIGHT", 9, 0)
+    local ver = ns.Num(f, 12, C.tx2, false)
+    ver:SetText(Version("LeelUI") ~= "" and ("v" .. Version("LeelUI")) or "")
+    ver:SetPoint("LEFT", title, "RIGHT", 8, -1)
     local slash = ns.Font(f, 11, { 0.62, 0.54, 0.52 })
     slash:SetText("/르엘")
     local close = CreateFrame("Button", nil, f)
@@ -660,6 +983,13 @@ local function Build()
         local hit = CreateFrame("Button", nil, row)
         hit:SetAllPoints(row.sw)
         hit:SetScript("OnClick", function()
+            if m.onoff then
+                m.onoff.set(not m.onoff.get())
+                sel = i
+                Refresh()
+                if m.onoff.reload then StaticPopup_Show("LEELUI_HUB_RELOAD") end
+                return
+            end
             if m.always or not Exists(m.key) then return end
             SetEnabled(m.key, not Enabled(m.key))
             sel = i
@@ -676,12 +1006,10 @@ local function Build()
 
     -- 아래 줄
     local hint = ns.Font(f, 11, { 0.62, 0.54, 0.52 })
-    hint:SetText("스위치 = 애드온 켜기/끄기 (다시 불러오기 필요)")
+    hint:SetText("스위치 = 켜기/끄기 (필요하면 다시 불러오기를 물어봐요)")
     hint:SetPoint("BOTTOMLEFT", 18, 19)
     f.moveBtn = ns.MakeButton(f, "이동 모드", true, function() ns:ToggleMoveMode(); Refresh() end, 96)
     f.moveBtn:SetPoint("BOTTOMRIGHT", -14, 11)
-    local cfg = ns.MakeButton(f, "르엘 UI 상세 설정", false, function() ns:ToggleConfig() end)
-    cfg:SetPoint("RIGHT", f.moveBtn, "LEFT", -8, 0)
 
     f:SetScript("OnShow", function(self)
         local p = ns.db.hub.pos

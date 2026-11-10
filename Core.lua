@@ -24,6 +24,7 @@ ns.defaults = {
     partyScale = 0.75,
     partyLayout = "row",
     partyPoint = { "TOP", "TOP", 0, -250 },
+    castStyle = "bunny",   -- bunny 깡충 토끼 / paw 발자국 / hud 예전 얇은 바
 }
 
 local function Print(msg)
@@ -194,7 +195,7 @@ loader:SetScript("OnEvent", function(_, event, arg1)
         end
         ns.moving = false
         ns:CreateMinimapButton()
-        Print("로드 완료. 미니맵 토끼 아이콘이나 |cffffffff/leel|r 로 설정을 열 수 있어요.")
+        Print("로드 완료. 미니맵 토끼 아이콘이나 |cffffffff/leel|r 로 르엘 허브를 열 수 있어요.")
     end
 end)
 
@@ -291,7 +292,7 @@ SlashCmdList.LEELUI = function(msg)
         ns:SetMinimapShown(ns.db.minimap.hide)
         Print("미니맵 아이콘 " .. (ns.db.minimap.hide and "숨김" or "표시"))
     else
-        Print("/leel 설정 창, move 이동 모드, scale 0.5~1.5, npscale 0.4~1.5, reset, icon")
+        Print("/leel 르엘 허브, move 이동 모드, scale 0.5~1.5, npscale 0.4~1.5, reset, icon")
     end
     if ns.RefreshConfig then ns:RefreshConfig() end
 end

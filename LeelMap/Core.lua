@@ -672,10 +672,14 @@ local function IsMax()
     return wm.IsMaximized and wm:IsMaximized()
 end
 
+local pendingPos = false
 local function RestorePos()
     local wm = WorldMapFrame
     local p = db and db.pos
     if not p or IsMax() or wm.leelMoving then return end
+    -- 전투 중엔 지도(보호된 창)를 애드온이 옮기면 막히고, 그 여파로 ESC 닫기까지 꼬임 → 전투 끝나고 옮김
+    if InCombatLockdown() then pendingPos = true return end
+    pendingPos = false
     wm:ClearAllPoints()
     wm:SetPoint("CENTER", UIParent, "BOTTOMLEFT", p[1], p[2])
 end
@@ -693,7 +697,7 @@ local function SetupMover()
     m:EnableMouse(true)
     m:RegisterForDrag("LeftButton")
     m:SetScript("OnDragStart", function()
-        if IsMax() then return end
+        if IsMax() or InCombatLockdown() then return end
         wm:SetMovable(true)
         wm:SetClampedToScreen(true)
         wm.leelMoving = true
@@ -717,6 +721,10 @@ local function SetupMover()
     end)
     m:SetScript("OnLeave", function() GameTooltip:Hide() end)
     if wm.SynchronizeDisplayState then hooksecurefunc(wm, "SynchronizeDisplayState", RestorePos) end
+    -- 전투가 끝나면 미뤄 둔 자리 맞추기
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ev:SetScript("OnEvent", function() if pendingPos and wm:IsShown() then RestorePos() end end)
 end
 
 local function Setup()

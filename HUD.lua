@@ -123,6 +123,58 @@ local function AddPlayerExtras(f)
     f.manaText:SetPoint("LEFT", f.manaLabel, "RIGHT", 4, 0)
 end
 
+-- 대상 자원(마나/기력/분노): 체력바 바로 아래 얇은 줄 + 숫자 (디버프 줄과 안 겹치게 붙여서)
+local function AddTargetPower(f)
+    local line = CreateFrame("StatusBar", nil, f)
+    line:SetSize(200, 4)
+    line:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -16, -8)   -- 체력바와 띄움 (디버프 줄은 그만큼 아래로)
+    line:SetStatusBarTexture(ns.WHITE)
+    line:SetReverseFill(true)
+    line:SetFrameLevel(f.hp:GetFrameLevel() + 5)
+    local bg = ns.Tex(line, "BACKGROUND", 0, ns.WHITE, { 0, 0, 0 }, 0.55)
+    bg:SetPoint("TOPLEFT", -1, 1); bg:SetPoint("BOTTOMRIGHT", 1, -1)
+    f.tpower = line
+    -- 내 쪽 마나 줄과 같은 모양: 숫자 + 이름 (대상은 거울처럼 왼쪽에)
+    -- 글씨는 체력바보다 위층에 (체력바 판에 가려지지 않게)
+    local tx = CreateFrame("Frame", nil, f)
+    tx:SetAllPoints(line)
+    tx:SetFrameLevel(f.hp:GetFrameLevel() + 6)
+    f.tpowerText = ns.Num(tx, 14, C.tx, false)
+    f.tpowerText:SetPoint("RIGHT", line, "LEFT", -8, -1)
+    f.tpowerLabel = ns.Font(tx, 11.5, { 0.56, 0.69, 1 })
+    f.tpowerLabel:SetPoint("RIGHT", f.tpowerText, "LEFT", -4, 0)
+    line:Hide(); f.tpowerText:Hide(); f.tpowerLabel:Hide()
+end
+
+local function UpdateTargetPower(f)
+    if not f.tpower then return end
+    local ok, pType, cur, max = pcall(function()
+        local t = UnitPowerType("target")
+        return t, UnitPower("target", t), UnitPowerMax("target", t)
+    end)
+    -- 자원이 없거나(0) 분노가 0인 몹은 숨김
+    -- 숨겨진 값(전투 중 일부 대상)이라 비교가 안 되면 일단 보여줌 (줄과 숫자는 그대로 그려짐)
+    local okc, res = pcall(function() return max > 0 and (pType == MANA or cur > 0) end)
+    local show = ok and ((not okc) or res) and true or false
+    f.tpower:SetShown(show); f.tpowerText:SetShown(show); f.tpowerLabel:SetShown(show)
+    if not show then return end
+    ns.SetBar(f.tpower, cur, max)
+    ns.SetText(f.tpowerText, cur)
+    pcall(function()
+        local c = C.mana
+        if pType == ENERGY then c = { 1.00, 0.84, 0.30 }
+        elseif pType ~= MANA then
+            local pc = PowerBarColor and PowerBarColor[pType]
+            if pc then c = { pc.r, pc.g, pc.b } end
+        end
+        f.tpower:SetStatusBarColor(c[1], c[2], c[3])
+        local tc = pType == MANA and { 0.56, 0.69, 1 } or c
+        f.tpowerText:SetTextColor(tc[1], tc[2], tc[3])
+        f.tpowerLabel:SetTextColor(tc[1], tc[2], tc[3])
+        f.tpowerLabel:SetText(pType == MANA and "마나" or pType == ENERGY and "기력" or (pType == (PT.Rage or 1)) and "분노" or "")
+    end)
+end
+
 -- 대상 전용: 루팅 안내
 local function AddTargetExtras(f)
     -- 줍기 알약 (A안): 쓰러진 몹에 전리품이 있으면 체력바 자리가 반짝이는 분홍 버튼으로
@@ -194,9 +246,10 @@ local function UpdateDead(f)
         canLoot = CanLootUnit and Try(function() return CanLootUnit(guid) end) or false
         if canLoot then f.lootGUID = guid end
     end
-    if f.loot then f.loot:SetShown(canLoot) end
-    if dead and not canLoot then
-        f.state:SetText(SameGUID(f.lootGUID, guid) and "다 주웠어요" or "쓰러짐")
+    -- 줍기 알림은 시체 위 반짝 상자(Leel Spot)가 맡음. 대상 창은 '쓰러짐' / '다 주웠어요'만
+    if f.loot then f.loot:Hide() end
+    if dead then
+        f.state:SetText((not canLoot and SameGUID(f.lootGUID, guid)) and "다 주웠어요" or "쓰러짐")
         f.state:Show()
     else
         f.state:Hide()
@@ -556,6 +609,7 @@ function ns:CreateHUD()
     AddPlayerExtras(player)
     local target = CreateSide(hud, "target", true)
     AddTargetExtras(target)
+    AddTargetPower(target)
     RegisterUnitWatch(target)
     local center = CreateCenter(hud)
     local pet = CreatePet(hud)
@@ -590,7 +644,7 @@ function ns:CreateHUD()
         if not UnitExists(f.unit) then return end
         UpdateInfo(f)
         UpdateHealth(f)
-        if f == player then UpdatePower(f) end
+        if f == player then UpdatePower(f) else UpdateTargetPower(f) end
     end
 
     ns.hudFrames = {
@@ -610,7 +664,7 @@ function ns:CreateHUD()
         ev:RegisterUnitEvent(e, "player", "target")
     end
     for _, e in ipairs({ "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" }) do
-        ev:RegisterUnitEvent(e, "player")
+        ev:RegisterUnitEvent(e, "player", "target")
     end
     -- 펫 이벤트는 따로 받음 (같은 이벤트를 다른 유닛으로 다시 등록하면 플레이어/대상 등록이 덮어써짐)
     local petEv = CreateFrame("Frame")
@@ -647,7 +701,7 @@ function ns:CreateHUD()
             if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_FLAGS" then
                 UpdateHealth(f)
             elseif event == "UNIT_POWER_FREQUENT" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
-                UpdatePower(f)
+                if f == player then UpdatePower(f) else UpdateTargetPower(f) end
             else
                 UpdateInfo(f)
             end

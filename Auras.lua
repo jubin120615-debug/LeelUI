@@ -104,7 +104,7 @@ function ns.CreateTargetDebuffs(f)
     end
 
     local ok2, err = pcall(function()
-        cont:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -28, -6)   -- 초상화 쪽(오른쪽)부터, 초상화와 띄워서
+        cont:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -28, -17)   -- 초상화 쪽(오른쪽)부터, 초상화와 띄워서
         if cont.SetFlowLayoutAnchorPoint then cont:SetFlowLayoutAnchorPoint("TOPRIGHT") end
         if cont.SetFlowLayoutGrowthDirection and AnchorUtil and AnchorUtil.FlowDirection then
             cont:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Left, AnchorUtil.FlowDirection.Down)
@@ -129,7 +129,7 @@ function ns.CreateTargetDebuffs(f)
     if ok3 and bc then
         local ok4 = pcall(function()
             -- 오라 컨테이너에는 다른 프레임을 붙일 수 없음(게임 제한) → 체력바 기준으로 디버프 한 줄 아래
-            bc:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -28, -6 - SIZE - 6)
+            bc:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -28, -17 - SIZE - 6)
             if bc.SetFlowLayoutAnchorPoint then bc:SetFlowLayoutAnchorPoint("TOPRIGHT") end
             if bc.SetFlowLayoutGrowthDirection and AnchorUtil and AnchorUtil.FlowDirection then
                 bc:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Left, AnchorUtil.FlowDirection.Down)

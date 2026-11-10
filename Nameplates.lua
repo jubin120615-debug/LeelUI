@@ -362,7 +362,16 @@ local function UpdateTap(f, unit)
     q:SetAlpha(tapped and 0.75 or 1)
 end
 
+-- 죽은 몹: 이름표는 숨김 (주울 게 있으면 Leel Spot이 반짝 상자를 대신 띄움)
+local function UpdateDead(f, unit)
+    local dead = (ns.db.npHideDead ~= false) and Try(UnitIsDead, unit) and true or false
+    if f.dead == dead then return end
+    f.dead = dead
+    f:SetAlpha(dead and 0 or 1)
+end
+
 local function UpdateHealth(f, unit)
+    UpdateDead(f, unit)
     local cur, max = UnitHealth(unit), UnitHealthMax(unit)
     ns.SetBar(f.hp.bar, cur, max)
     ns.HealthPercentText(f.pct, unit, cur, max)
@@ -441,6 +450,7 @@ local function UpdateBorder(f, unit)
     local alpha = 1
     if not isTarget and UnitExists("target") then alpha = 0.62 end
     if f.trivial then alpha = alpha * 0.8 end
+    if f.dead then alpha = 0 end
     f:SetAlpha(alpha)
 
     local base = 0
@@ -705,6 +715,13 @@ end
 ----------------------------------------------------------------------
 -- 이름표 붙이기 / 떼기
 ----------------------------------------------------------------------
+-- 상호작용 대상(시체 줍기 표시용)에 게임이 억지로 만든 우호 NPC 이름표는 안 보이게
+-- (우호 이름표를 켜 둔 경우는 그대로)
+local function FriendlyForced(unit)
+    if GetCVar("nameplateShowFriends") == "1" then return false end
+    return Try(UnitIsUnit, unit, "softinteract") and true or false
+end
+
 local function OnAdded(unit)
     local plate = C_NamePlate.GetNamePlateForUnit(unit)
     if not plate then return end
@@ -713,12 +730,13 @@ local function OnAdded(unit)
         if plate.leel then plate.leel:Hide() end
         DetachAuras(plate)
         DetachCast(plate)
-        SetBlizzAlpha(plate, 1)
+        SetBlizzAlpha(plate, FriendlyForced(unit) and 0 or 1)
         return
     end
 
     local f = plate.leel or Build(plate)
     f.unit = unit
+    f.dead = nil
     active[unit] = f
     SetBlizzAlpha(plate, 0)
     f:Show()
@@ -748,6 +766,14 @@ local function OnRemoved(unit)
     end
 end
 
+function ns:RefreshDeadPlates()
+    for u, f in pairs(active) do
+        f.dead = nil
+        UpdateDead(f, u)
+        if not f.dead then UpdateBorder(f, u) end
+    end
+end
+
 function ns:RefreshNameplates()
     for u, f in pairs(active) do
         UpdateQuest(f, u)
@@ -773,6 +799,7 @@ function ns:EnableNameplates()
         "UNIT_SPELLCAST_CHANNEL_UPDATE",
         "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
         "QUEST_LOG_UPDATE", "UNIT_FLAGS", "UNIT_POWER_FREQUENT", "RAID_TARGET_UPDATE",
+        "PLAYER_SOFT_INTERACT_CHANGED",
     }) do
         pcall(ev.RegisterEvent, ev, e)
     end
@@ -783,6 +810,11 @@ function ns:EnableNameplates()
             OnAdded(unit)
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
             OnRemoved(unit)
+        elseif event == "PLAYER_SOFT_INTERACT_CHANGED" then
+            for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
+                local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
+                if u and not Try(UnitCanAttack, "player", u) then SetBlizzAlpha(plate, FriendlyForced(u) and 0 or 1) end
+            end
         elseif event == "RAID_TARGET_UPDATE" then
             for u, f in pairs(active) do UpdateRaid(f, u) end
         elseif event == "PLAYER_TARGET_CHANGED" then

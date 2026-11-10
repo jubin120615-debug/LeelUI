@@ -20,7 +20,7 @@ local C = {
     cream = { 0.965, 0.925, 0.910 },
     dim   = { 0.80, 0.64, 0.62 },
 }
-local DEFAULTS = { on = true, all = false, size = 1.0, y = 0, key = true, stem = 34 }
+local DEFAULTS = { on = true, all = false, size = 1.0, y = 0, key = true, stem = 34, loot = true, lootY = -70, lootSize = 1.0, lootBob = true, lootMulti = true }
 local db
 
 local function P(msg) print("|cfff2b3c2[Leel Spot]|r " .. msg) end
@@ -38,6 +38,8 @@ local function ApplyCVars()
     -- 물건 고르는 범위 넓히기 (없는 설정이면 조용히 무시)
     pcall(SetCVar, "SoftTargetInteractArc", "2")
     pcall(SetCVar, "SoftTargetInteractRange", "15")
+    -- 상호작용 대상(시체·물건)에 이름표판을 만들어 달라고 (그래야 그 위에 붙일 수 있음)
+    pcall(SetCVar, "SoftTargetNameplateInteract", "1")
     local sz = tonumber(GetCVar("SoftTargetNameplateSize") or "0") or 0
     if sz <= 0 then pcall(SetCVar, "SoftTargetNameplateSize", "19") end
 end
@@ -113,6 +115,139 @@ kFS:SetPoint("CENTER")
 local ag = halo:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
 local a1 = ag:CreateAnimation("Alpha"); a1:SetFromAlpha(0.35); a1:SetToAlpha(0.9); a1:SetDuration(0.8)
 a1:SetSmoothing("IN_OUT")
+
+----------------------------------------------------------------------
+-- 시체 줍기 표시: 상호작용 키가 고른 시체(가장 가까운 하나)에 작은 반짝 상자
+----------------------------------------------------------------------
+local loot = CreateFrame("Frame", "LeelSpotLoot", UIParent)
+loot:SetFrameStrata("MEDIUM")
+loot:SetSize(28, 28)
+loot:Hide()
+local lglow = loot:CreateTexture(nil, "BACKGROUND")
+lglow:SetTexture(MEDIA .. "circle"); lglow:SetPoint("CENTER"); lglow:SetSize(36, 36)
+lglow:SetVertexColor(C.pink[1], C.pink[2], C.pink[3], 0.25)
+local ltex = loot:CreateTexture(nil, "ARTWORK")
+ltex:SetTexture(MEDIA .. "loot_box"); ltex:SetAllPoints()
+-- 살짝 통통 (위아래 2px)
+local lb = ltex:CreateAnimationGroup(); lb:SetLooping("BOUNCE")
+local lt = lb:CreateAnimation("Translation"); lt:SetOffset(0, 3); lt:SetDuration(0.7); lt:SetSmoothing("IN_OUT")
+local lg = lglow:CreateAnimationGroup(); lg:SetLooping("BOUNCE")
+local la = lg:CreateAnimation("Alpha"); la:SetFromAlpha(0.15); la:SetToAlpha(0.45); la:SetDuration(0.7); la:SetSmoothing("IN_OUT")
+
+local lootOpen = false
+local previewUntil = 0
+local function Previewing() return GetTime() < previewUntil end
+local function LootableCorpse()
+    local ok, res = pcall(function()
+        local g = UnitGUID("softinteract")
+        if type(g) ~= "string" then return false end
+        if not (g:find("^Creature") or g:find("^Vehicle")) then return false end
+        if not UnitIsDead("softinteract") then return false end
+        if not CanLootUnit then return true end
+        local has = CanLootUnit(g)
+        return has and true or false
+    end)
+    return ok and res
+end
+
+local function HideLoot()
+    lb:Stop(); lg:Stop()
+    loot:ClearAllPoints()
+    loot:Hide()
+end
+
+local function ShowLoot(plate)
+    loot:SetScale(db.lootSize or 1)
+    loot:ClearAllPoints()
+    local okA = plate and pcall(loot.SetPoint, loot, "CENTER", plate, "CENTER", 0, db.lootY or -70)
+    if not okA then
+        -- 시체에 이름표판이 없으면 위치를 모르니 띄우지 않음 (내 머리 위에 뜨는 것 방지)
+        HideLoot()
+        return
+    end
+    loot:Show()
+    if db.lootBob == false then
+        lb:Stop(); lg:Stop(); lglow:SetAlpha(0.3)
+    elseif not lb:IsPlaying() then lb:Play(); lg:Play() end
+end
+
+----------------------------------------------------------------------
+-- 다른 주울 시체들: 작고 흐린 상자 (이름표판이 있는 시체만)
+----------------------------------------------------------------------
+local minis, miniUsed = {}, 0
+local function Mini(i)
+    local m = minis[i]
+    if m then return m end
+    m = CreateFrame("Frame", nil, UIParent)
+    m:SetFrameStrata("LOW")
+    m:SetSize(16, 16)
+    local t = m:CreateTexture(nil, "ARTWORK")
+    t:SetTexture(MEDIA .. "loot_box"); t:SetAllPoints()
+    m:SetAlpha(0.6)
+    minis[i] = m
+    return m
+end
+
+local function CanLoot(u)
+    local ok, res = pcall(function()
+        if not UnitIsDead(u) then return false end
+        local g = UnitGUID(u)
+        if type(g) ~= "string" or not (g:find("^Creature") or g:find("^Vehicle")) then return false end
+        if not CanLootUnit then return false end
+        return CanLootUnit(g) and true or false
+    end)
+    return ok and res
+end
+
+local function SameAsSoft(u)
+    local ok, same = pcall(UnitIsUnit, u, "softinteract")
+    return ok and same
+end
+
+local function ScanMinis()
+    local n = 0
+    if db and db.on ~= false and db.loot ~= false and db.lootMulti ~= false and not lootOpen then
+        local okP, plates = pcall(C_NamePlate.GetNamePlates)
+        for _, plate in ipairs(okP and plates or {}) do
+            local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
+            if u and not SameAsSoft(u) and CanLoot(u) then
+                n = n + 1
+                local m = Mini(n)
+                m:SetScale(db.lootSize or 1)
+                m:ClearAllPoints()
+                if pcall(m.SetPoint, m, "CENTER", plate, "CENTER", 0, db.lootY or -70) then m:Show() else m:Hide() end
+            end
+        end
+    end
+    for i = n + 1, miniUsed do if minis[i] then minis[i]:Hide() end end
+    miniUsed = n
+end
+
+-- 0.4초마다 가볍게 훑기 (이름표 몇 개뿐이라 부담 없음)
+local scanT = 0
+CreateFrame("Frame"):SetScript("OnUpdate", function(_, el)
+    scanT = scanT + el
+    if scanT < 0.4 then return end
+    scanT = 0
+    if db then ScanMinis() end
+end)
+
+-- 미리보기: 시체가 없어도 지금 고른 대상/상호작용 대상 이름표 기준으로 몇 초 띄우기
+local function ShowPreview()
+    local plate
+    for _, u in ipairs({ "softinteract", "target" }) do
+        local ok, pl = pcall(C_NamePlate.GetNamePlateForUnit, u)
+        if ok and pl then plate = pl break end
+    end
+    loot:SetScale(db.lootSize or 1)
+    loot:ClearAllPoints()
+    if not (plate and pcall(loot.SetPoint, loot, "CENTER", plate, "CENTER", 0, db.lootY or -70)) then
+        loot:ClearAllPoints()
+        loot:SetPoint("CENTER", UIParent, "CENTER", 0, 140 + (db.lootY or -70))
+    end
+    loot:Show()
+    if db.lootBob ~= false and not lb:IsPlaying() then lb:Play(); lg:Play() end
+end
 
 local function KeyText()
     local k = GetBindingKey("INTERACTTARGET")
@@ -259,12 +394,21 @@ local function HasSoft()
 end
 
 local function Refresh()
-    if not db or not db.on then Mute(nil); Detach() return end
-    if not HasSoft() then Mute(nil); Detach() return end
+    if db and Previewing() and not LootableCorpse() then Mute(nil); Detach(); ShowPreview() return end
+    if not db or not db.on then Mute(nil); Detach(); HideLoot() return end
+    if not HasSoft() then Mute(nil); Detach(); HideLoot() return end
 
     -- 물건에 이름표판이 없으면(포에버) 화면 가운데 위에 띄운다
     local okP, plate = pcall(C_NamePlate.GetNamePlateForUnit, "softinteract")
     if not okP then plate = nil end
+
+    -- 주울 게 남은 시체면 반짝 상자만
+    if db.loot and not lootOpen and LootableCorpse() then
+        Detach(); Mute(plate)
+        ShowLoot(plate)
+        return
+    end
+    HideLoot()
 
     -- NPC는 빼고 물건(GameObject)에만
     local okG, isObj = pcall(function()
@@ -330,6 +474,8 @@ ev:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 ev:RegisterEvent("QUEST_LOG_UPDATE")
 ev:RegisterEvent("UPDATE_BINDINGS")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+ev:RegisterEvent("LOOT_OPENED")
+ev:RegisterEvent("LOOT_CLOSED")
 
 ev:SetScript("OnEvent", function(_, event, unit)
     if event == "PLAYER_LOGIN" then
@@ -343,6 +489,12 @@ ev:SetScript("OnEvent", function(_, event, unit)
     end
     if not db then return end
     if event == "PLAYER_REGEN_ENABLED" then ApplyCVars() return end
+    if event == "LOOT_OPENED" then lootOpen = true; HideLoot() return end
+    if event == "LOOT_CLOSED" then
+        lootOpen = false
+        C_Timer.After(0.2, Refresh); C_Timer.After(0.6, Refresh)
+        return
+    end
     if event == "NAME_PLATE_UNIT_REMOVED" then
         local ok, gone = pcall(C_NamePlate.GetNamePlateForUnit, unit)
         if ok and gone and gone == curPlate then Detach() end
@@ -365,6 +517,9 @@ local function Help()
     print("  크기 0.8~1.6  — 이름표 크기")
     print("  선 숫자  — 이름표에서 물건까지 선 길이 (기본 34, 0이면 끔)")
     print("  높이 숫자  — 선 끝 위치 위아래 미세 조정 (기본 0)")
+    print("  시체  — 주울 시체 위 반짝 상자 켜고 끄기")
+    print("  여러시체  — 다른 주울 시체에도 작은 상자 켜고 끄기")
+    print("  시체높이 숫자  — 상자 위아래 (기본 -70, 더 작게 = 더 아래로)")
     print("  점검  — 지금 고른 물건 정보")
 end
 
@@ -395,6 +550,13 @@ local function Slash(msg)
     elseif cmd == "선" or cmd == "stem" then
         local n = tonumber(arg)
         if n and n >= 0 and n <= 150 then db.stem = n; P("선 길이 " .. n .. (n == 0 and " (선 끔)" or "")); Refresh() else P("예: /lspot 선 40  (0이면 끔)") end
+    elseif cmd == "시체" or cmd == "loot" then
+        db.loot = not db.loot; P(db.loot and "주울 시체에 반짝 상자를 띄워요." or "시체 표시를 껐어요."); Refresh()
+    elseif cmd == "여러시체" or cmd == "multi" then
+        db.lootMulti = not db.lootMulti; P(db.lootMulti and "다른 주울 시체에도 작은 상자를 띄워요." or "가장 가까운 시체 하나만 띄워요."); ScanMinis()
+    elseif cmd == "시체높이" or cmd == "looty" then
+        local n = tonumber(arg)
+        if n and n >= -300 and n <= 100 then db.lootY = n; P("시체 상자 높이 " .. n); Refresh() else P("예: /물건 시체높이 -100  (더 작을수록 아래)") end
     elseif cmd == "키숨김" then db.key = not db.key; P(db.key and "키 칩 보여요." or "키 칩 숨겨요."); Refresh()
     elseif cmd == "점검" or cmd == "debug" then
         ApplyCVars()
@@ -410,6 +572,9 @@ local function Slash(msg)
         P("Questie: " .. tostring(LibQuestieDB ~= nil) .. "  물건ID: " .. tostring((function()
             local ok, ids = pcall(function() return LibQuestieDB.Object.IdsByName(nm) end)
             return ok and ids and ids[1] or "없음" end)()))
+        P("이름표판 설정: " .. tostring(GetCVar("SoftTargetNameplateInteract")))
+        P("시체: 죽음=" .. tostring(select(2, pcall(UnitIsDead, "softinteract"))) ..
+          "  주울수있음=" .. tostring(LootableCorpse()) .. "  표시=" .. tostring(db.loot))
         P("범위: " .. tostring(GetCVar("SoftTargetInteractRange")) .. "  각도: " .. tostring(GetCVar("SoftTargetInteractArc")))
         P("고른 물건: " .. ((okE and ex) and "있음" or "없음") ..
           "  이름표판: " .. tostring(curPlate ~= nil) ..
@@ -419,3 +584,16 @@ end
 SLASH_LEELSPOT1 = "/lspot"
 SLASH_LEELSPOT2 = "/물건"
 SlashCmdList.LEELSPOT = Slash
+
+----------------------------------------------------------------------
+-- 르엘 허브에서 쓰는 창구
+----------------------------------------------------------------------
+_G.LeelSpotAPI = {
+    Refresh = function() Refresh(); ScanMinis() end,
+    Preview = function(sec)
+        if not db then return end
+        previewUntil = GetTime() + (sec or 5)
+        Refresh()
+        C_Timer.After((sec or 5) + 0.05, Refresh)
+    end,
+}

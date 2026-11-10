@@ -1,0 +1,887 @@
+-- LeelUI / Bags.lua
+-- 르엘 가방: 가방 5개를 분홍 창 하나로 (분류 알약, 찾기, 정리, 돈) + 미니맵 아래 남은 칸 숫자, 거의 차면 알림
+
+local _, ns = ...
+local C = ns.C
+local GetItemInfo = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo  -- 새 클라이언트는 C_Item 쪽에만 있음
+
+local function DB()
+    ns.db.bags = ns.db.bags or {}
+    local d = ns.db.bags
+    local def = { on = true, chip = true, bar = true, warn = true, low = 3, skin = true }
+    for k, v in pairs(def) do if d[k] == nil then d[k] = v end end
+    d.skin = true -- 르엘 통합 가방은 항상 사용
+    return d
+end
+ns.BagsDB = DB
+
+local CC = C_Container or {}
+local NumSlots = CC.GetContainerNumSlots or GetContainerNumSlots
+local NumFree = CC.GetContainerNumFreeSlots or GetContainerNumFreeSlots
+
+local function SlotInfo(bag, slot)
+    if CC.GetContainerItemInfo then
+        local ok, t = pcall(CC.GetContainerItemInfo, bag, slot)
+        if ok and type(t) == "table" then return t.quality, t.stackCount, t.hyperlink, t.hasNoValue end
+        return
+    end
+    if GetContainerItemInfo then
+        local _, count, _, quality, _, _, link, _, noValue = GetContainerItemInfo(bag, slot)
+        return quality, count, link, noValue
+    end
+end
+
+-- 남은 칸 / 전체 칸 (일반 가방만: 화살통, 탄약 주머니 같은 특수 가방은 뺌)
+local function Count()
+    local free, total = 0, 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        local n = NumSlots(bag) or 0
+        local f, family = NumFree(bag)
+        if n > 0 and (family == nil or family == 0) then
+            total = total + n
+            free = free + (f or 0)
+        end
+    end
+    return free, total
+end
+
+local function GrayValue()
+    local sum = 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (NumSlots(bag) or 0) do
+            local q, count, link, noValue = SlotInfo(bag, slot)
+            if link and not noValue then
+                local _, _, iq, _, _, _, _, _, _, _, price = GetItemInfo(link)
+                q = q or iq
+                if q == 0 and price then sum = sum + price * (count or 1) end
+            end
+        end
+    end
+    return sum
+end
+
+local function Money(c)
+    if GetCoinTextureString then return GetCoinTextureString(c) end
+    return string.format("%d골 %d은", c / 10000, (c / 100) % 100)
+end
+
+-- 르엘 토끼 동전 (가방 아래 돈 표시)
+local function Coin(k, sz) sz = sz or 15; return "|T" .. ns.MEDIA .. "coin_" .. k .. ":" .. sz .. ":" .. sz .. ":0:0|t" end
+local function BunnyMoney(c, sz)
+    c = tonumber(c) or 0
+    local g, sv, cp = math.floor(c / 10000), math.floor(c / 100) % 100, c % 100
+    local t = {}
+    if g > 0 then t[#t + 1] = Coin("g", sz) .. " " .. (BreakUpLargeNumbers and BreakUpLargeNumbers(g) or g) end
+    if g > 0 or sv > 0 then t[#t + 1] = Coin("s", sz) .. " " .. sv end
+    if cp > 0 or #t == 0 then t[#t + 1] = Coin("c", sz) .. " " .. cp end
+    return table.concat(t, sz and " " or "   ")
+end
+
+----------------------------------------------------------------------
+-- 미니맵 아래 숫자
+----------------------------------------------------------------------
+local chip
+local function BuildChip()
+    chip = CreateFrame("Button", "LeelUI_BagChip", UIParent)
+    chip:SetSize(86, 26)
+    chip:SetFrameStrata("MEDIUM")
+    chip:SetMovable(true)
+    chip:SetClampedToScreen(true)
+    chip:RegisterForDrag("LeftButton")
+    chip:RegisterForClicks("LeftButtonUp")
+    chip.fill, chip.edge = ns.RoundPlate(chip, 13, { 0.125, 0.094, 0.086, 0.95 }, { 0.949, 0.702, 0.761, 0.6 })
+    chip.disc = chip:CreateTexture(nil, "ARTWORK")
+    chip.disc:SetTexture(ns.MEDIA .. "circle"); chip.disc:SetSize(22, 22); chip.disc:SetPoint("LEFT", 3, 0)
+    local ic = chip:CreateTexture(nil, "OVERLAY")
+    ic:SetTexture(ns.MEDIA .. "bag_bunny"); ic:SetSize(20, 20); ic:SetPoint("CENTER", chip.disc, "CENTER", 0, 1)
+    chip.num = ns.Num(chip, 16, C.tx)
+    chip.num:SetPoint("LEFT", chip.disc, "RIGHT", 6, 0)
+    chip.tot = ns.Font(chip, 10.5, C.tx2)
+    chip.tot:SetPoint("LEFT", chip.num, "RIGHT", 3, -1)
+
+    local function Place()
+        local p = DB().chipPos
+        chip:ClearAllPoints()
+        if p then
+            chip:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+        elseif ns.MinimapFoot then
+            chip:SetPoint("TOP", ns.MinimapFoot, "BOTTOM", 0, -6)   -- 르엘 미니맵 아래 줄 밑
+        elseif Minimap then
+            chip:SetPoint("TOP", Minimap, "BOTTOM", 0, -8)
+        else
+            chip:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -40, -200)
+        end
+    end
+    chip.Place = Place
+    Place()
+
+    chip:SetScript("OnClick", function() if ToggleAllBags then ToggleAllBags() end end)
+    chip:SetScript("OnDragStart", function(self) if IsShiftKeyDown() then self:StartMoving() end end)
+    chip:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local x, y = self:GetCenter()
+        DB().chipPos = { "CENTER", "BOTTOMLEFT", math.floor(x + 0.5), math.floor(y + 0.5) }
+        Place()
+    end)
+    chip:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        local free, total = Count()
+        GameTooltip:AddLine("|cfff2b3c2가방|r  남은 칸 " .. free .. " / " .. total)
+        local g = GrayValue()
+        if g > 0 then GameTooltip:AddLine("회색템 " .. Money(g), 0.84, 0.63, 0.61) end
+        GameTooltip:AddLine("클릭: 가방 열기   Shift+끌기: 옮기기", 0.62, 0.54, 0.52)
+        GameTooltip:Show()
+    end)
+    chip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- 거의 찼을 때 천천히 깜빡
+    chip:SetScript("OnUpdate", function(self, el)
+        if not self.warn then return end
+        self.ph = (self.ph or 0) + el * 3
+        local a = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(self.ph))
+        self.edge:SetColor({ 1, 0.56, 0.64 }, a)
+    end)
+end
+
+----------------------------------------------------------------------
+-- 르엘 가방: 가방 5개를 분홍 창 하나로 (게임 가방 창 대신)
+----------------------------------------------------------------------
+local COLS, SZ, GAP, PAD = 12, 36, 4, 12
+local HEAD, TABS, FOOT = 36, 30, 40
+local GetInfo = function(bag, slot)
+    if CC.GetContainerItemInfo then
+        local ok, t = pcall(CC.GetContainerItemInfo, bag, slot)
+        if ok then return t end
+        return
+    end
+    local tex, count, locked, quality, _, _, link, _, noValue, id = GetContainerItemInfo(bag, slot)
+    if not tex then return end
+    return { iconFileID = tex, stackCount = count, isLocked = locked, quality = quality, hyperlink = link,
+             hasNoValue = noValue, itemID = id }
+end
+local GetCooldown = CC.GetContainerItemCooldown or GetContainerItemCooldown
+
+local win, holders, buttons = nil, {}, {}
+local curTab, query = "all", ""
+local openedBy
+
+local TABS_DEF = {
+    { key = "all",   label = "전부" },
+    { key = "equip", label = "장비" },
+    { key = "use",   label = "소모품" },
+    { key = "mat",   label = "재료" },
+    { key = "quest", label = "퀘스트" },
+    { key = "gray",  label = "회색템" },
+}
+
+-- 아이템 분류 (classID: 0 소모품, 2 무기, 4 방어구, 5 시약, 7 직업용품(약초·가죽·천·광석), 12 퀘스트)
+local function Matches(info)
+    if not info then return curTab == "all" and query == "" end
+    local ok = true
+    if curTab ~= "all" then
+        local _, _, q, _, _, _, _, _, _, _, _, classID = GetItemInfo(info.hyperlink or info.itemID or "")
+        q = info.quality or q
+        if curTab == "equip" then ok = classID == 2 or classID == 4
+        elseif curTab == "use" then ok = classID == 0
+        elseif curTab == "mat" then ok = classID == 7 or classID == 5
+        elseif curTab == "quest" then ok = classID == 12 or (info.isQuestItem == true)
+        elseif curTab == "gray" then ok = q == 0 end
+    end
+    if ok and query ~= "" then
+        local name = info.itemName or (GetItemInfo(info.hyperlink or info.itemID or ""))
+        ok = name and name:lower():find(query, 1, true) and true or false
+    end
+    return ok
+end
+
+local function MakeButton(bag, slot)
+    local holder = holders[bag]
+    local name = "LeelUI_Bag" .. bag .. "Slot" .. slot
+    local ok, b = pcall(CreateFrame, "ItemButton", name, holder, "ContainerFrameItemButtonTemplate")
+    if not ok or not b then b = CreateFrame("Button", name, holder, "ContainerFrameItemButtonTemplate") end
+    b:SetID(slot)
+    if b.SetBagID then pcall(b.SetBagID, b, bag) end
+    b.bagID = bag
+    b:SetSize(SZ, SZ)
+    -- 게임 칸 테두리 숨기고 둥근 칸
+    local nt = b.GetNormalTexture and b:GetNormalTexture()
+    if nt then nt:SetAlpha(0) end
+    local slotBg = CreateFrame("Frame", nil, b)
+    slotBg:SetPoint("TOPLEFT", -2, 2); slotBg:SetPoint("BOTTOMRIGHT", 2, -2)
+    slotBg:SetFrameLevel(math.max(0, b:GetFrameLevel() - 1))
+    b.leelBg = ns.RoundRect(slotBg, 7, { 0.24, 0.19, 0.18 }, "BACKGROUND", 0, 0)
+    b.leelEdge = slotBg
+    buttons[bag] = buttons[bag] or {}
+    buttons[bag][slot] = b
+    return b
+end
+
+-- 퀘스트 표시: 시작 아이템 = 노란 테 + 오른쪽 위 노란 "!" / 이미 받은 퀘의 수집품 = 얇은 노란 테
+local QuestInfo = CC.GetContainerItemQuestInfo or GetContainerItemQuestInfo
+local function QuestMark(b)
+    if b.leelQ then return b.leelQ end
+    local q = CreateFrame("Frame", nil, b)
+    q:SetAllPoints()
+    q:SetFrameLevel(b:GetFrameLevel() + 4)
+    q.edges = {}
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local e = q:CreateTexture(nil, "OVERLAY")
+        e:SetColorTexture(1, 0.82, 0, 1)
+        if side == "TOP" or side == "BOTTOM" then
+            e:SetPoint(side .. "LEFT", -1, side == "TOP" and 1 or -1); e:SetPoint(side .. "RIGHT", 1, side == "TOP" and 1 or -1)
+        else
+            e:SetPoint("TOP" .. side, side == "LEFT" and -1 or 1, 1); e:SetPoint("BOTTOM" .. side, side == "LEFT" and -1 or 1, -1)
+        end
+        q.edges[#q.edges + 1] = e
+    end
+    q.bang = CreateFrame("Frame", nil, q)
+    q.bang:SetSize(17, 17)
+    q.bang:SetPoint("CENTER", b, "TOPRIGHT", -2, -2)
+    local ring = q.bang:CreateTexture(nil, "ARTWORK"); ring:SetTexture(ns.MEDIA .. "circle"); ring:SetAllPoints()
+    ring:SetVertexColor(0.11, 0.08, 0.07, 1)
+    local dot = q.bang:CreateTexture(nil, "ARTWORK", nil, 1); dot:SetTexture(ns.MEDIA .. "circle")
+    dot:SetPoint("TOPLEFT", 2, -2); dot:SetPoint("BOTTOMRIGHT", -2, 2)
+    dot:SetVertexColor(1, 0.82, 0, 1)
+    local fs = q.bang:CreateFontString(nil, "OVERLAY")
+    fs:SetFont(ns.NUM or ns.FONT, 12, ""); fs:SetText("!")
+    fs:SetTextColor(0.23, 0.11, 0.14); fs:SetPoint("CENTER", 0.5, 0)
+    b.leelQ = q
+    return q
+end
+
+-- 툴팁에 "퀘스트 시작 아이템" 줄이 있는지 (API가 questID를 안 줄 때 대비). 아이템 번호별로 기억
+local startsCache = {}
+local STARTS = _G.ITEM_STARTS_QUEST or "퀘스트 시작 아이템"
+local function TipStartsQuest(bag, slot, id)
+    if id and startsCache[id] ~= nil then return startsCache[id] end
+    local TI = C_TooltipInfo
+    if not (TI and TI.GetBagItem) then return false end
+    local ok, data = pcall(TI.GetBagItem, bag, slot)
+    if not (ok and type(data) == "table" and data.lines) then return false end
+    local found = false
+    for _, line in ipairs(data.lines) do
+        if line.leftText == nil and TooltipUtil and TooltipUtil.SurfaceArgs then pcall(TooltipUtil.SurfaceArgs, line) end
+        local t = line.leftText
+        if type(t) == "string" and (t == STARTS or t:find(STARTS, 1, true)) then found = true break end
+    end
+    if id then startsCache[id] = found end
+    return found
+end
+
+local function UpdateQuest(b, bag, slot, info)
+    local isQuest, starter = false, false
+    if info then
+        local qid, active
+        if QuestInfo then
+            local ok, a, q2, act = pcall(QuestInfo, bag, slot)
+            if ok then
+                if type(a) == "table" then a, q2, act = a.isQuestItem, a.questID, a.isActive end
+                isQuest = a and true or false
+                qid, active = q2, act
+            end
+        end
+        if qid then
+            -- 퀘스트 목록에 진짜 있는지는 퀘스트 로그에 직접 물어봄 (가방 API 값보다 정확)
+            local QL = C_QuestLog
+            if QL and QL.IsOnQuest then
+                local ok, on = pcall(QL.IsOnQuest, qid)
+                if ok and on ~= nil then active = on end
+            end
+            starter = not active
+            if active then isQuest = true end  -- 이미 받은 퀘의 시작 아이템 = 얇은 테
+        else
+            starter = TipStartsQuest(bag, slot, info.itemID)
+        end
+    end
+    if not (isQuest or starter) then
+        if b.leelQ then b.leelQ:Hide() end
+        return
+    end
+    local q = QuestMark(b)
+    local w = starter and 2 or 1
+    for i, e in ipairs(q.edges) do
+        if i <= 2 then e:SetHeight(w) else e:SetWidth(w) end
+        e:SetAlpha(starter and 1 or 0.7)
+    end
+    q.bang:SetShown(starter)
+    q:Show()
+end
+
+local function UpdateButton(b, bag, slot)
+    local info = GetInfo(bag, slot)
+    SetItemButtonTexture(b, info and info.iconFileID)
+    SetItemButtonCount(b, info and info.stackCount or 0)
+    if SetItemButtonDesaturated then SetItemButtonDesaturated(b, info and info.isLocked) end
+    if SetItemButtonQuality then
+        pcall(SetItemButtonQuality, b, info and info.quality, info and info.hyperlink)
+    end
+    local cd = b.Cooldown or _G[b:GetName() .. "Cooldown"]
+    if cd and GetCooldown then
+        local s, d, e = GetCooldown(bag, slot)
+        if CooldownFrame_Set then CooldownFrame_Set(cd, s or 0, d or 0, e) end
+    end
+    b.hasItem = info and true or nil
+    UpdateQuest(b, bag, slot, info)
+    -- 게임 가방이 평소에 꺼 주는 표시들: 우리가 안 끄면 처음부터 파랗게 빛남 (새 아이템 빛, 상점 빛 등)
+    for _, k in ipairs({ "NewItemTexture", "BattlepayItemTexture", "ExtendedSlot", "JunkIcon", "UpgradeIcon", "BagIndicator" }) do
+        local t = b[k]
+        if t and t.Hide then t:Hide() end
+    end
+    for _, k in ipairs({ "flashAnim", "newitemglowAnim" }) do
+        local a = b[k]
+        if a and a.Stop then a:Stop() end
+    end
+    if not info and b.IconBorder then b.IconBorder:Hide() end
+    if not info and b.IconOverlay then b.IconOverlay:Hide() end
+    -- 빈 칸은 조금 더 어둡게, 회색템은 회색 테
+    local q = info and info.quality
+    if not info then
+        b.leelBg:SetColor({ 0.20, 0.16, 0.15 }, 1)
+    elseif q == 0 then
+        b.leelBg:SetColor({ 0.42, 0.40, 0.39 }, 1)
+    else
+        b.leelBg:SetColor({ 0.24, 0.19, 0.18 }, 1)
+    end
+    b:SetAlpha(Matches(info) and 1 or 0.22)
+end
+
+local function Layout()
+    if not win then return end
+    if InCombatLockdown() then win.needLayout = true return end
+    local i = 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        local n = NumSlots(bag) or 0
+        for slot = 1, n do
+            local b = (buttons[bag] and buttons[bag][slot]) or MakeButton(bag, slot)
+            local col, row = i % COLS, math.floor(i / COLS)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + 2 + col * (SZ + GAP), -(HEAD + TABS + 6 + row * (SZ + GAP)))
+            b:Show()
+            i = i + 1
+        end
+        for slot = n + 1, #(buttons[bag] or {}) do buttons[bag][slot]:Hide() end
+    end
+    local rows = math.max(1, math.ceil(i / COLS))
+    win:SetSize(PAD * 2 + 4 + COLS * (SZ + GAP) - GAP, HEAD + TABS + 6 + rows * (SZ + GAP) - GAP + 10 + FOOT)
+    win.needLayout = false
+end
+
+local function Refresh()
+    if not win or not win:IsShown() then return end
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (NumSlots(bag) or 0) do
+            local b = buttons[bag] and buttons[bag][slot]
+            if b then UpdateButton(b, bag, slot) end
+        end
+    end
+    local free, total = Count()
+    local low = free <= (DB().low or 3)
+    win.free:SetText("남은 칸 " .. (low and "|cffff8fa3" or "|cfff6ece8") .. free .. "|r / " .. total)
+    win.money:SetText(BunnyMoney(GetMoney()))
+    -- 회색템 개수
+    local gray = 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (NumSlots(bag) or 0) do
+            local info = GetInfo(bag, slot)
+            if info and info.quality == 0 then gray = gray + 1 end
+        end
+    end
+    for _, p in ipairs(win.tabs) do
+        local on = p.key == curTab
+        p.fill:SetColor(on and C.acc or { 1, 1, 1 }, on and 1 or 0.08)
+        local tc = on and C.ink or C.tx
+        p.fs:SetTextColor(tc[1], tc[2], tc[3]); p.fs:SetShadowColor(0, 0, 0, on and 0 or 0.85)
+        p.fs:SetText(p.key == "gray" and gray > 0 and (p.label .. " " .. gray) or p.label)
+        p:SetWidth(p.fs:GetStringWidth() + 22)
+    end
+    local x = PAD
+    for _, p in ipairs(win.tabs) do p:ClearAllPoints(); p:SetPoint("TOPLEFT", win, "TOPLEFT", x, -HEAD - 2); x = x + p:GetWidth() + 5 end
+end
+
+local function Pill(parent, text, primary, w)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(w or 60, 24)
+    b.fill = ns.RoundRect(b, 12, primary and C.acc or { 1, 1, 1 }, "BACKGROUND", 0, 0)
+    if not primary then b.fill:SetColor({ 1, 1, 1 }, 0.08) end
+    b.fs = ns.Font(b, 12, primary and C.ink or C.tx)
+    if primary then b.fs:SetShadowColor(0, 0, 0, 0) end
+    b.fs:SetPoint("CENTER", 0, 0); b.fs:SetText(text)
+    b:SetScript("OnEnter", function(self) if primary then self.fill:SetColor(C.accHi, 1) else self.fill:SetColor({ 1, 1, 1 }, 0.16) end end)
+    b:SetScript("OnLeave", function(self) if primary then self.fill:SetColor(C.acc, 1) else self.fill:SetColor({ 1, 1, 1 }, 0.08) end end)
+    return b
+end
+
+local function BuildWindow()
+    win = CreateFrame("Frame", "LeelUI_Bag", UIParent)
+    win:SetFrameStrata("MEDIUM")
+    win:SetToplevel(true)
+    win:EnableMouse(true)
+    win:SetMovable(true)
+    win:SetClampedToScreen(true)
+    win:RegisterForDrag("LeftButton")
+    win:SetScript("OnDragStart", win.StartMoving)
+    win:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local p, _, rp, x, y = self:GetPoint()
+        DB().winPos = { p, rp, x, y }
+    end)
+    tinsert(UISpecialFrames, "LeelUI_Bag")
+    ns.RoundPlate(win, 18, { 0.125, 0.094, 0.086, 0.97 }, { 0.949, 0.702, 0.761, 0.6 })
+
+    -- 머리: 가방 동그라미 + 르엘 가방 + 남은 칸 + 닫기
+    local disc = win:CreateTexture(nil, "ARTWORK")
+    disc:SetTexture(ns.MEDIA .. "circle"); disc:SetSize(26, 26); disc:SetPoint("TOPLEFT", PAD, -7)
+    disc:SetVertexColor(0.23, 0.18, 0.17, 1)
+    local ic = win:CreateTexture(nil, "OVERLAY")
+    ic:SetTexture(ns.MEDIA .. "bag_bunny"); ic:SetSize(26, 26); ic:SetPoint("CENTER", disc, "CENTER", 0, 2)
+    local title = ns.Font(win, 15)
+    title:SetText("|cfff2b3c2르엘|r 가방"); title:SetPoint("LEFT", disc, "RIGHT", 8, 0)
+    local close = CreateFrame("Button", nil, win)
+    close:SetSize(24, 24); close:SetPoint("TOPRIGHT", -10, -8)
+    local cbg = close:CreateTexture(nil, "ARTWORK"); cbg:SetTexture(ns.MEDIA .. "circle"); cbg:SetAllPoints()
+    cbg:SetVertexColor(0.23, 0.18, 0.17, 1)
+    local cx = close:CreateTexture(nil, "OVERLAY"); cx:SetTexture(ns.MEDIA .. "hb_x"); cx:SetSize(14, 14); cx:SetPoint("CENTER")
+    close:SetScript("OnClick", function() win:Hide() end)
+    close:SetScript("OnEnter", function() cbg:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1); cx:SetVertexColor(C.ink[1], C.ink[2], C.ink[3]) end)
+    close:SetScript("OnLeave", function() cbg:SetVertexColor(0.23, 0.18, 0.17, 1); cx:SetVertexColor(1, 1, 1) end)
+    win.free = ns.Font(win, 12)
+    win.free:SetPoint("RIGHT", close, "LEFT", -10, 0)
+
+    -- 분류 알약
+    win.tabs = {}
+    for _, t in ipairs(TABS_DEF) do
+        local p = Pill(win, t.label, false)
+        p.key, p.label = t.key, t.label
+        p:SetScript("OnClick", function() curTab = t.key; Refresh() end)
+        p:SetScript("OnLeave", function() Refresh() end)
+        win.tabs[#win.tabs + 1] = p
+    end
+
+    -- 아래: 정리, 찾기, 돈
+    local Sort = CC.SortBags or SortBags
+    local sort = Pill(win, "정리", true, 58)
+    sort:SetPoint("BOTTOMLEFT", PAD, 10)
+    sort:SetScript("OnClick", function()
+        if InCombatLockdown() then ns.Print("전투 중에는 정리할 수 없어요.") return end
+        if Sort then Sort() end
+    end)
+    sort:SetShown(Sort ~= nil)
+
+    local box = CreateFrame("EditBox", "LeelUI_BagSearch", win)
+    box:SetSize(150, 24)
+    box:SetPoint("LEFT", sort, "RIGHT", 6, 0)
+    if not Sort then box:SetPoint("BOTTOMLEFT", PAD, 10) end
+    box:SetAutoFocus(false)
+    box:SetFont(ns.FONT, 12, "")
+    box:SetTextInsets(28, 10, 0, 0)
+    box:SetMaxLetters(40)
+    box.bg = ns.RoundRect(box, 12, { 1, 1, 1 }, "BACKGROUND", 0, 0)
+    box.bg:SetColor({ 1, 1, 1 }, 0.08)
+    local mag = box:CreateTexture(nil, "ARTWORK")
+    mag:SetTexture(ns.MEDIA .. "hb_search"); mag:SetSize(13, 13); mag:SetPoint("LEFT", 10, 0)
+    mag:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+    box.ph = box:CreateFontString(nil, "ARTWORK"); box.ph:SetFont(ns.FONT, 12, "")
+    box.ph:SetTextColor(0.62, 0.54, 0.52); box.ph:SetPoint("LEFT", 28, 0); box.ph:SetText("찾기")
+    box:SetScript("OnTextChanged", function(self)
+        local t = self:GetText() or ""
+        self.ph:SetShown(t == "")
+        query = t:lower()
+        Refresh()
+    end)
+    box:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEditFocusGained", function(self) self.bg:SetColor({ 1, 1, 1 }, 0.16) end)
+    box:SetScript("OnEditFocusLost", function(self) self.bg:SetColor({ 1, 1, 1 }, 0.08) end)
+    win.box = box
+
+    win.money = ns.Font(win, 12)
+    if ns.NUM then win.money:SetFont(ns.NUM, 15, "") end
+    win.money:SetPoint("BOTTOMRIGHT", -PAD - 2, 15)
+
+    -- 가방마다 보이지 않는 자리 (아이템 칸이 어느 가방인지 알게)
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        local h = CreateFrame("Frame", "LeelUI_BagHolder" .. bag, win)
+        h:SetID(bag)
+        h:SetAllPoints()
+        -- 게임 아이템 칸 코드가 부모에게 묻는 것들
+        h.GetBagID = function(self) return self:GetID() end
+        h.IsCombinedBagContainer = function() return false end
+        h.IsBankBag = function() return false end
+        holders[bag] = h
+    end
+
+    local function Place()
+        local p = DB().winPos
+        win:ClearAllPoints()
+        if p then win:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+        else win:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -60, 110) end
+    end
+    win.Place = Place
+    Place()
+    win:SetScript("OnShow", function() if win.needLayout then Layout() end; Refresh(); PlaySound(SOUNDKIT and SOUNDKIT.IG_BACKPACK_OPEN or 862) end)
+    win:SetScript("OnHide", function()
+        openedBy = nil
+        win.box:SetText(""); win.box:ClearFocus()
+        PlaySound(SOUNDKIT and SOUNDKIT.IG_BACKPACK_CLOSE or 863)
+    end)
+    Layout()
+    win:Hide()
+end
+
+----------------------------------------------------------------------
+-- 게임 가방 대신 열기
+----------------------------------------------------------------------
+local function UseLeelBag() return ns.db and true or false end -- 통합 가방은 항상
+
+local function OpenBag(frame) if not win then return end; if frame and not win:IsShown() then openedBy = frame end; win:Show() end
+local function CloseBag(frame) if win and (not frame or frame == openedBy or not openedBy) then win:Hide() end end
+local function ToggleBag() if win then win:SetShown(not win:IsShown()) end end
+ns.ToggleLeelBag = ToggleBag
+
+local function TakeOver()
+    -- 게임 가방 창은 열려도 바로 닫고, 여닫는 함수는 르엘 가방으로
+    local function Silence(f)
+        if f and not f.leelSilenced then
+            f.leelSilenced = true
+            f:HookScript("OnShow", function(self) if UseLeelBag() then self:Hide() end end)
+        end
+    end
+    Silence(_G.ContainerFrameCombinedBags)
+    for i = 1, (NUM_CONTAINER_FRAMES or 13) do Silence(_G["ContainerFrame" .. i]) end
+
+    -- 게임 함수를 바꿔치기하면 ESC(전투 중 지도/창 닫기) 같은 게임 보호 동작이 막힘
+    -- → 게임 함수는 그대로 두고, 불린 "뒤에" 르엘 가방만 따라 열고 닫음 (같은 순간 여러 번 불려도 한 번만)
+    local want = {}
+    local function Settle()
+        local w = want; want = {}
+        if not UseLeelBag() or not win then return end
+        -- 토글(B 키, 가방 버튼)이 먼저: 게임 함수가 안에서 여는 함수들을 또 불러도 무시
+        if w.toggle then ToggleBag()
+        elseif w.close and not w.open then CloseBag(w.closeFrame)
+        elseif w.open then OpenBag(w.openFrame) end
+    end
+    local function Ask(kind, frame)
+        if not next(want) then C_Timer.After(0, Settle) end
+        want[kind] = true
+        if kind == "open" and frame then want.openFrame = frame end
+        if kind == "close" and frame then want.closeFrame = frame end
+    end
+    local function Hook(name, fn) if _G[name] then hooksecurefunc(name, fn) end end
+    Hook("ToggleAllBags", function() Ask("toggle") end)
+    Hook("ToggleBackpack", function() Ask("toggle") end)
+    Hook("OpenAllBags", function(frame) Ask("open", frame) end)
+    Hook("OpenBackpack", function() Ask("open") end)
+    Hook("CloseAllBags", function(frame) Ask("close", frame) end)
+    Hook("CloseBackpack", function() Ask("close") end)
+    Hook("ToggleBag", function(id) if not id or id <= (NUM_BAG_SLOTS or 4) then Ask("toggle") end end)
+    Hook("OpenBag", function(id) if not id or id <= (NUM_BAG_SLOTS or 4) then Ask("open") end end)
+end
+
+----------------------------------------------------------------------
+local wasLow, ready = false, false
+local function Update()
+    if not ns.db then return end
+    local d = DB()
+    local free, total = Count()
+    local low = free <= (d.low or 3)
+
+    if chip then
+        local show = d.on and d.chip and total > 0
+        chip:SetShown(show)
+        chip.num:SetText(free)
+        chip.tot:SetText(low and "칸 남음" or ("/ " .. total))
+        chip.warn = show and low
+        local c = low and { 1, 0.56, 0.64 } or { 0.23, 0.18, 0.17 }
+        chip.disc:SetVertexColor(c[1], c[2], c[3], 1)
+        if not low then chip.edge:SetColor({ 0.949, 0.702, 0.761 }, 0.6) end
+        local nc = low and { 1, 0.56, 0.64 } or C.tx
+        chip.num:SetTextColor(nc[1], nc[2], nc[3])
+        chip:SetWidth(math.max(70, 40 + chip.num:GetStringWidth() + chip.tot:GetStringWidth()))
+    end
+
+    -- 넘어가는 순간에 한 번만 알림
+    if ready and d.on and low and not wasLow and total > 0 then
+        if free == 0 and d.full ~= false and ns.ShowBagFull and ns.ShowBagFull() then
+            -- 꽉 참 알림 창이 떴음
+        elseif d.warn and ns.PillToast then
+            ns.PillToast(free == 0 and "가방이 꽉 찼어요" or ("가방이 거의 찼어요. 남은 칸 " .. free), "hb_bag", true)
+        end
+    end
+    if free > 0 and ns.HideBagFull then ns.HideBagFull() end
+    wasLow = low
+    ready = true
+
+    Refresh()
+end
+ns.UpdateBags = Update
+
+local pending
+local function Soon()
+    if pending then return end
+    pending = true
+    C_Timer.After(0.05, function() pending = false; Update() end)
+end
+
+local ev = CreateFrame("Frame")
+ev:RegisterEvent("PLAYER_LOGIN")
+ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+ev:RegisterEvent("PLAYER_MONEY")
+ev:RegisterEvent("BAG_UPDATE")
+for _, e in ipairs({ "BAG_UPDATE_DELAYED", "ITEM_LOCK_CHANGED", "BAG_UPDATE_COOLDOWN", "BAG_CONTAINER_UPDATE",
+                     "GET_ITEM_INFO_RECEIVED" }) do
+    pcall(ev.RegisterEvent, ev, e)
+end
+ev:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_LOGIN" then
+        DB()
+        BuildChip()
+        if DB().skin then
+            BuildWindow()
+            TakeOver()
+        end
+        C_Timer.After(1, Update)
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        if win and win.needLayout then Layout(); Refresh() end
+    elseif event == "BAG_CONTAINER_UPDATE" then
+        if win then Layout() end
+        Soon()
+    else
+        if event == "BAG_UPDATE" and win then
+            -- 가방을 새로 끼우면 칸 수가 바뀜
+            local need = false
+            for bag = 0, (NUM_BAG_SLOTS or 4) do
+                local n = NumSlots(bag) or 0
+                local have = 0
+                for slot = 1, n do if buttons[bag] and buttons[bag][slot] and buttons[bag][slot]:IsShown() then have = have + 1 end end
+                if have ~= n then need = true end
+            end
+            if need then Layout() end
+        end
+        Soon()
+    end
+end)
+
+
+-- 진단: /르엘퀘  가방의 퀘스트 관련 템을 채팅창에 찍기
+SLASH_LEELQDUMP1 = "/르엘퀘"
+SLASH_LEELQDUMP2 = "/leelq"
+SlashCmdList.LEELQDUMP = function()
+    print("|cfff2b3c2[르엘 가방]|r 퀘스트 템 점검")
+    local n = 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (NumSlots(bag) or 0) do
+            local info = CC.GetContainerItemInfo and CC.GetContainerItemInfo(bag, slot)
+            if info then
+                local a, qid, act
+                if QuestInfo then
+                    local ok, x, y, z = pcall(QuestInfo, bag, slot)
+                    if ok then
+                        if type(x) == "table" then a, qid, act = x.isQuestItem, x.questID, x.isActive else a, qid, act = x, y, z end
+                    end
+                end
+                local onq = qid and C_QuestLog and C_QuestLog.IsOnQuest and C_QuestLog.IsOnQuest(qid)
+                local done = qid and C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted and C_QuestLog.IsQuestFlaggedCompleted(qid)
+                startsCache[info.itemID or 0] = nil
+                local tip = TipStartsQuest(bag, slot, nil)
+                if a or qid or tip then
+                    n = n + 1
+                    print(string.format("%s  퀘템=%s 퀘번호=%s 받음=%s 툴팁시작=%s",
+                        info.hyperlink or "?", tostring(a), tostring(qid), tostring(act), tostring(tip)))
+                    if qid then print(string.format("   └ 퀘스트로그에있음=%s 완료한적=%s", tostring(onq), tostring(done))) end
+                end
+            end
+        end
+    end
+    print("총 " .. n .. "개")
+end
+
+
+----------------------------------------------------------------------
+-- 가방이 꽉 찼을 때: 제일 싼 템 3개 + 각각 버리기 버튼
+-- (팔 값 = 개당 값 × 개수. 퀘스트 템, 값 0, 안 팔기 목록, 희귀 이상은 빼요)
+----------------------------------------------------------------------
+local full, fullPending, lastFullAt = nil, false, 0
+
+local function Candidates()
+    local list = {}
+    local keep = (ns.ShopDB and ns.ShopDB().keep) or {}
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (NumSlots(bag) or 0) do
+            local info = GetInfo(bag, slot)
+            if info and info.hyperlink and not info.hasNoValue and (info.quality or 9) <= 2 and not keep[info.itemID or 0] then
+                local quest = false
+                if QuestInfo then
+                    local ok, a, qid = pcall(QuestInfo, bag, slot)
+                    if ok then
+                        if type(a) == "table" then a, qid = a.isQuestItem, a.questID end
+                        quest = (a or qid) and true or false
+                    end
+                end
+                if not quest then
+                    local ok, name, _, _, _, _, _, _, _, _, _, price = pcall(GetItemInfo, info.hyperlink)
+                    if ok and price and price > 0 then
+                        list[#list + 1] = { bag = bag, slot = slot, link = info.hyperlink, name = name or "",
+                            icon = info.iconFileID, count = info.stackCount or 1, quality = info.quality or 1,
+                            value = price * (info.stackCount or 1) }
+                    end
+                end
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.value < b.value end)
+    return list
+end
+
+local CARD_W, CARD_GAP, FPAD = 104, 8, 12
+local function BuildFull()
+    local f = CreateFrame("Frame", "LeelUI_BagFull", UIParent)
+    f:SetFrameStrata("DIALOG")
+    f:SetPoint("TOP", UIParent, "TOP", 0, -130)
+    f:SetSize(3 * CARD_W + 2 * CARD_GAP + FPAD * 2, 196)
+    f:EnableMouse(true)
+    f:SetMovable(true); f:RegisterForDrag("LeftButton"); f:SetClampedToScreen(true)
+    f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    ns.RoundPlate(f, 16, { 0.125, 0.094, 0.086, 0.98 }, { 1, 0.56, 0.64, 0.9 })
+
+    local disc = f:CreateTexture(nil, "ARTWORK")
+    disc:SetTexture(ns.MEDIA .. "circle"); disc:SetSize(22, 22); disc:SetPoint("TOPLEFT", 12, -10)
+    disc:SetVertexColor(1, 0.56, 0.64, 1)
+    local ic = f:CreateTexture(nil, "OVERLAY")
+    ic:SetTexture(ns.MEDIA .. "hb_bag"); ic:SetSize(13, 13); ic:SetPoint("CENTER", disc)
+    ic:SetVertexColor(C.ink[1], C.ink[2], C.ink[3], 1)
+    local title = ns.Font(f, 13, C.accHi)
+    title:SetPoint("LEFT", disc, "RIGHT", 8, 0)
+    title:SetText("가방이 꽉 찼어요 · 버릴 걸 골라요")
+
+    local x = CreateFrame("Button", nil, f)
+    x:SetSize(20, 20); x:SetPoint("TOPRIGHT", -10, -11)
+    local xt = x:CreateTexture(nil, "ARTWORK"); xt:SetTexture(ns.MEDIA .. "hb_x"); xt:SetAllPoints()
+    xt:SetVertexColor(C.tx[1], C.tx[2], C.tx[3], 0.7)
+    x:SetScript("OnEnter", function() xt:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) end)
+    x:SetScript("OnLeave", function() xt:SetVertexColor(C.tx[1], C.tx[2], C.tx[3], 0.7) end)
+    x:SetScript("OnClick", function() f:Hide() end)
+
+    f.cards = {}
+    for i = 1, 3 do
+        local c = CreateFrame("Frame", nil, f)
+        c:SetSize(CARD_W, 148)
+        c:SetPoint("TOPLEFT", FPAD + (i - 1) * (CARD_W + CARD_GAP), -40)
+        c.bg = ns.RoundRect(c, 12, { 1, 1, 1 }, "BACKGROUND", 2, 0); c.bg:SetColor({ 0.949, 0.702, 0.761 }, 0.06)
+
+        local btn = CreateFrame("Button", nil, c)
+        btn:SetSize(42, 42); btn:SetPoint("TOP", 0, -10)
+        c.edge = btn:CreateTexture(nil, "BACKGROUND"); c.edge:SetPoint("TOPLEFT", -1, 1); c.edge:SetPoint("BOTTOMRIGHT", 1, -1)
+        c.icon = btn:CreateTexture(nil, "ARTWORK"); c.icon:SetAllPoints(); c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        c.count = btn:CreateFontString(nil, "OVERLAY")
+        c.count:SetFont(ns.NUM or ns.FONT, 14, "OUTLINE"); c.count:SetPoint("BOTTOMRIGHT", -1, 1)
+        btn:SetScript("OnEnter", function(self)
+            if not c.data then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            pcall(GameTooltip.SetBagItem, GameTooltip, c.data.bag, c.data.slot)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        c.val = c:CreateFontString(nil, "OVERLAY")
+        c.val:SetFont(ns.NUM or ns.FONT, 13, ""); c.val:SetPoint("TOP", btn, "BOTTOM", 0, -6)
+        c.val:SetTextColor(0.97, 0.76, 0.6)
+        c.name = ns.Font(c, 11)
+        c.name:SetPoint("TOP", c.val, "BOTTOM", 0, -4); c.name:SetWidth(CARD_W - 10); c.name:SetWordWrap(false)
+
+        c.del = ns.MakeButton(c, "버리기", true, nil, 76)
+        c.del:SetHeight(24)
+        c.del:SetPoint("BOTTOM", 0, 10)
+        f.cards[i] = c
+    end
+    f:Hide()
+    full = f
+end
+
+local function Destroy(d)
+    local info = GetInfo(d.bag, d.slot)
+    if not (info and info.hyperlink == d.link) then
+        if ns.ShowBagFull then ns.ShowBagFull(true) end
+        return
+    end
+    ClearCursor()
+    local pick = CC.PickupContainerItem or PickupContainerItem
+    pick(d.bag, d.slot)
+    if CursorHasItem() then
+        DeleteCursorItem()
+        if ns.PillToast then ns.PillToast("버렸어요  " .. d.link, "hb_bag") end
+    end
+    ClearCursor()
+end
+
+local function Fill(list)
+    local n = math.min(3, #list)
+    for i, c in ipairs(full.cards) do
+        local d = list[i]
+        c.data = d
+        if d then
+            c.icon:SetTexture(d.icon)
+            c.count:SetText(d.count > 1 and d.count or "")
+            local r, g, b = 0.62, 0.62, 0.62
+            if GetItemQualityColor then
+                local ok, qr, qg, qb = pcall(GetItemQualityColor, d.quality)
+                if ok and qr then r, g, b = qr, qg, qb end
+            end
+            c.edge:SetColorTexture(r, g, b, 1)
+            c.val:SetText(BunnyMoney(d.value, 12))
+            c.name:SetText(d.name)
+            c.name:SetTextColor(r, g, b)
+            c.del:SetScript("OnClick", function() Destroy(d) end)
+            c:Show()
+        else
+            c:Hide()
+        end
+    end
+    full:SetWidth(n * CARD_W + (n - 1) * CARD_GAP + FPAD * 2)
+    full:SetWidth(math.max(full:GetWidth(), 250))
+    return n
+end
+
+-- force = 다시 그리기만 (이미 떠 있을 때)
+function ns.ShowBagFull(force)
+    if InCombatLockdown() then fullPending = true return true end
+    if not force and GetTime() - lastFullAt < 3 then return full and full:IsShown() end
+    local list = Candidates()
+    if #list == 0 then return false end
+    if not full then BuildFull() end
+    Fill(list)
+    lastFullAt = GetTime()
+    full:Show()
+    return true
+end
+
+function ns.HideBagFull()
+    fullPending = false
+    if full and full:IsShown() then full:Hide() end
+end
+
+local fev = CreateFrame("Frame")
+fev:RegisterEvent("PLAYER_REGEN_ENABLED")
+fev:RegisterEvent("UI_ERROR_MESSAGE")
+fev:SetScript("OnEvent", function(_, event, a1, a2)
+    if not ns.db or not DB().on or DB().full == false then return end
+    if event == "PLAYER_REGEN_ENABLED" then
+        if fullPending then
+            fullPending = false
+            local free = 0
+            for bag = 0, (NUM_BAG_SLOTS or 4) do free = free + ((NumFree and NumFree(bag)) or 0) end
+            if free == 0 then C_Timer.After(0.3, function() ns.ShowBagFull(true) end) end
+        end
+    else
+        -- 꽉 찬 채로 줍다가 '가방이 가득 찼습니다'가 뜨면 다시 보여주기
+        local msg = type(a2) == "string" and a2 or a1
+        if msg == _G.ERR_INV_FULL or msg == _G.ERR_LOOT_INV_FULL then
+            if GetTime() - lastFullAt > 8 then ns.ShowBagFull() end
+        end
+    end
+end)
+
+-- 미리 보기: /르엘버리기  (가방이 안 차 있어도 후보 3개 창 띄우기)
+SLASH_LEELBAGFULL1 = "/르엘버리기"
+SlashCmdList.LEELBAGFULL = function()
+    if not ns.ShowBagFull(true) then print("|cfff2b3c2[르엘 가방]|r 버릴 후보가 없어요.") end
+end
