@@ -30,6 +30,44 @@ local CORAL = { 1.00, 0.48, 0.40 }
 -- 숫자를 계산할 수 있으면 12시부터 시계 방향으로 비어 가는 호(반원 두 장 회전)
 -- 전투 중 숨겨진 값이면 계산을 못 하니 아래에서 위로 차는 링으로 대신
 ----------------------------------------------------------------------
+-- 조각마다 '퍼센트 → 막대 채움' 곡선 (게임 곡선 기능). 직선으로 채우면 원호와 어긋나서
+-- 링 중심선(반지름 약 0.455) 위의 점까지 정확히 채워지도록 sin/cos로 보정
+local QR = 0.455
+local function QFill(i, p)
+    local lo, hi = (i - 1) * 0.25, i * 0.25
+    if p <= lo then return 0 end
+    if p >= hi then return 1 end
+    local t = p * 2 * math.pi
+    if i == 1 then return 0.5 + QR * math.sin(t)          -- 12 → 9시 (가로, 오른쪽에서)
+    elseif i == 2 then return 0.5 - QR * math.cos(t)      -- 9 → 6시 (세로, 위에서)
+    elseif i == 3 then return 0.5 - QR * math.sin(t)      -- 6 → 3시 (가로, 왼쪽에서)
+    else return 0.5 + QR * math.cos(t) end                -- 3 → 12시 (세로, 아래에서)
+end
+local QCURVE
+local function QCurves()
+    if QCURVE ~= nil then return QCURVE or nil end
+    QCURVE = false
+    if not (C_CurveUtil and C_CurveUtil.CreateCurve) then return nil end
+    local ok, list = pcall(function()
+        local L = {}
+        for i = 1, 4 do
+            local c = C_CurveUtil.CreateCurve()
+            if c.SetType and Enum and Enum.LuaCurveType and Enum.LuaCurveType.Linear then
+                c:SetType(Enum.LuaCurveType.Linear)
+            end
+            for k = 0, 48 do
+                local p = k / 48
+                c:AddPoint(p, QFill(i, p))
+            end
+            L[i] = c
+        end
+        return L
+    end)
+    if ok and list then QCURVE = list end
+    return QCURVE or nil
+end
+ns.PartyQCurves = QCurves
+
 local function CreateRing(parent, size, full, half, layer)
     local r = CreateFrame("Frame", nil, parent)
     r:SetSize(size, size)
@@ -105,7 +143,8 @@ local function CreateRing(parent, size, full, half, layer)
 
     -- 반환: 0~1 비율 (숨겨진 값이면 nil)
     -- pct, scale: 숨겨진 값일 때 쓸 퍼센트(게임 함수 값)와 그 단위(1 또는 100)
-    function r:SetValue(cur, max, pct, scale)
+    -- getq(i, curve): 조각 i용 곡선을 거친 숨겨진 값 (없으면 nil)
+    function r:SetValue(cur, max, pct, scale, getq)
         local ok, p = pcall(function()
             if not max or max <= 0 then return 0 end
             local v = cur / max
@@ -114,6 +153,21 @@ local function CreateRing(parent, size, full, half, layer)
         end)
         if not ok or type(p) ~= "number" then
             self.right:Hide(); self.left:Hide()
+            local curves = getq and QCurves()
+            if curves then
+                local okc = pcall(function()
+                    for i, q in ipairs(self.q) do
+                        local v = getq(i, curves[i])
+                        if v == nil then error("no value") end
+                        q.bar:SetMinMaxValues(0, 1)
+                        q.bar:SetValue(v)
+                    end
+                end)
+                if okc then
+                    self.sb:Hide(); ShowQuads(self, true)
+                    return nil
+                end
+            end
             if pct ~= nil and scale then
                 local k = scale / 100
                 local okq = pcall(function()
@@ -205,7 +259,7 @@ local function PctText(fs, unit, cur, max)
     if UnitHealthPercent then
         ok = pcall(function()
             local scale = CurveConstants and CurveConstants.ScaleTo100
-            fs:SetFormattedText("%.0f", UnitHealthPercent(unit, true, scale))
+            fs:SetFormattedText("%.0f", UnitHealthPercent(unit, false, scale))
         end)
         if ok then return end
     end
@@ -487,7 +541,8 @@ local function UpdateHealth(f)
     local cur, max = UnitHealth(u), UnitHealthMax(u)
     EnsureScales()
     local pct, k = HP(u)
-    local p = f.hp:SetValue(cur, max, pct, k or hpScale)
+    local p = f.hp:SetValue(cur, max, pct, k or hpScale,
+        function(_, curve) return RawPct(UnitHealthPercent, u, false, curve) end)
     PctText(f.val, u, cur, max)
     local low = p and p < LOW_HP
     f.hp:SetColor(low and CORAL or C.acc)
@@ -505,7 +560,8 @@ local function UpdatePower(f)
     f.pw:SetColor(c)
     local cur, max = UnitPower(u, pt), UnitPowerMax(u, pt)
     local pct, k = PW(u, pt)
-    local p = f.pw:SetValue(cur, max, pct, k or pwScale)
+    local p = f.pw:SetValue(cur, max, pct, k or pwScale,
+        function(_, curve) return RawPct(UnitPowerPercent, u, pt, false, curve) end)
     if pt == 0 and p and p < LOW_MANA and HEALERS[f.classFile or ""] then
         f.mana:SetFormattedText("마나 %d%%", math.floor(p * 100 + 0.5))
         f.mana:Show()
@@ -838,5 +894,5 @@ SlashCmdList.LEELPARTYDBG = function()
     local pw = PW("player", UnitPowerType("player"))
     print("|cfff2b3c2[르엘 파티]|r 체력%함수=" .. tostring(UnitHealthPercent ~= nil) .. " 값=" .. (ns.IsSecret(hp) and "<숨김>" or tostring(hp)) ..
         "  자원%함수=" .. tostring(UnitPowerPercent ~= nil) .. " 값=" .. (ns.IsSecret(pw) and "<숨김>" or tostring(pw)) ..
-        "  단위=" .. tostring(hpScale) .. "/" .. tostring(pwScale) .. "  곡선=" .. tostring(SCALE100 ~= nil))
+        "  단위=" .. tostring(hpScale) .. "/" .. tostring(pwScale) .. "  곡선=" .. tostring(SCALE100 ~= nil) .. "  보정곡선=" .. tostring(QCurves() ~= nil))
 end

@@ -130,17 +130,52 @@ local function Orb(btn, size)
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(Minimap:GetFrameLevel() + 8)
     -- 해/달 달력처럼 큰 버튼은 동그라미 크기에 맞게 줄임
+    -- 실제로 보이는 크기 기준 (부모 비율이 달라도 같은 크기로)
     local w = btn:GetWidth() or 0
-    if w > size + 6 then btn:SetScale((size + 4) / w) end
+    local ratio = 1
+    pcall(function() ratio = (btn:GetParent():GetEffectiveScale()) / Minimap:GetEffectiveScale() end)
+    if w * ratio > size + 6 then btn:SetScale((size + 4) / (w * ratio)) end
     return btn
 end
 
 -- 줄인 버튼은 좌표도 줄인 비율만큼 나눠야 제자리 (버튼 크기 비율이 위치에도 곱해짐)
+-- 게임이 나중에 버튼 위치나 크기를 다시 바꿔도(편집 모드 배치, 달력 알림 등) 르엘 자리로 되돌림
+-- 좌표 단위: SetPoint 숫자는 '버튼 자신의 크기 비율'로 읽힘.
+-- 편집 모드에서 미니맵 크기를 바꾼 컴퓨터는 버튼 부모 비율이 달라서, 기준 틀과 버튼의 실제 비율로 맞춤
+local pendingApply = {}
+local function Apply(btn)
+    local a = btn.leelAnchor
+    if not a then return end
+    if InCombatLockdown() and btn:IsProtected() then pendingApply[btn] = true return end
+    btn.leelBusy = true
+    local k = 1
+    pcall(function()
+        local r, me = a[2]:GetEffectiveScale(), btn:GetEffectiveScale()
+        if r and me and me > 0 then k = r / me end
+    end)
+    btn:ClearAllPoints()
+    btn:SetPoint(a[1], a[2], a[3], (a[4] or 0) * k, (a[5] or 0) * k)
+    btn.leelBusy = false
+end
+local applyEv = CreateFrame("Frame")
+applyEv:RegisterEvent("PLAYER_REGEN_ENABLED")
+applyEv:SetScript("OnEvent", function()
+    for btn in pairs(pendingApply) do pendingApply[btn] = nil; Apply(btn) end
+end)
+
 local function Put(btn, p, rel, rp, x, y)
     if not btn then return end
-    local sc = btn:GetScale() or 1
-    btn:ClearAllPoints()
-    btn:SetPoint(p, rel, rp, (x or 0) / sc, (y or 0) / sc)
+    btn.leelAnchor = { p, rel, rp, x, y }
+    if not btn.leelPutHooked then
+        btn.leelPutHooked = true
+        local function again(self)
+            if self.leelBusy or not self.leelAnchor then return end
+            C_Timer.After(0, function() Apply(self) end)
+        end
+        pcall(hooksecurefunc, btn, "SetPoint", again)
+        pcall(hooksecurefunc, btn, "SetScale", again)
+    end
+    Apply(btn)
 end
 
 -- 지도 테 둘레 각도에 붙이기 (0 = 오른쪽, 90 = 위)

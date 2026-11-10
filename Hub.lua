@@ -891,6 +891,210 @@ Refresh = function()
     hub.moveBtn:SetLabel(ns.moving and "이동 모드 끄기" or "이동 모드")
 end
 
+
+----------------------------------------------------------------------
+-- 르엘 소통방: 질문 · 제보 · 새 소식은 채채TV에서
+----------------------------------------------------------------------
+local CHANNEL  = "https://www.youtube.com/@채채TV_2"
+local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
+local NEWS = {
+    { "1.3.5", "줍기 창이 분홍 카드로", "파티 링이 전투 중에도 시계 방향으로" },
+    { "1.3.4", "르엘 가방 · 상점 토끼 · 시체 반짝 상자", "퀘스트 자동, 토끼 미니맵" },
+    { "1.3.3", "르엘 허브 · 르엘 글씨체", "몹 등급 토끼 이름표" },
+}
+local PROBLEMS = { "오류 창이 떠요", "모양이 이상해요", "위치가 틀어져요", "기타" }
+
+-- 르엘 애드온에서 난 마지막 오류 기억 (문제 알리기 한 줄에 넣음)
+do
+    local okH, orig = pcall(geterrorhandler)
+    if okH and orig and seterrorhandler then
+        pcall(seterrorhandler, function(msg, ...)
+            if type(msg) == "string" and (msg:find("AddOns[\\/]Leel") or msg:find("AddOns[\\/]ForgLeveling")) then
+                local f, l = msg:match("([%w_]+%.lua)[^%d]*(%d+)")
+                ns.lastErr = f and (f .. ":" .. l) or msg:sub(1, 40)
+            end
+            return orig(msg, ...)
+        end)
+    end
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("ADDON_ACTION_BLOCKED"); ev:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+    ev:SetScript("OnEvent", function(_, _, who, what)
+        if type(who) == "string" and (who:find("^Leel") or who == "ForgLeveling") then
+            ns.lastErr = "차단:" .. tostring(what or "?")
+        end
+    end)
+end
+
+-- 읽기 전용 복사 칸: '복사'를 누르면 글자가 선택되고 Ctrl+C
+local function CopyBox(parent, w)
+    local b = CreateFrame("Frame", nil, parent)
+    b:SetSize(w, 28)
+    ns.RoundRect(b, 9, { 0.08, 0.06, 0.06 }, "BACKGROUND", 0, 0)
+    local e = CreateFrame("EditBox", nil, b)
+    e:SetPoint("LEFT", 9, 0); e:SetPoint("RIGHT", -58, 0); e:SetHeight(20)
+    e:SetAutoFocus(false)
+    e:SetFontObject(ChatFontNormal)
+    pcall(e.SetFont, e, ns.FONT, 11.5, "")
+    e:SetTextColor(C.accHi[1], C.accHi[2], C.accHi[3])
+    e:SetScript("OnTextChanged", function(self, user) if user and b.value then self:SetText(b.value); self:HighlightText() end end)
+    e:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    e:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    e:SetScript("OnEditFocusLost", function(self) self:HighlightText(0, 0); b.tip:SetText("복사") end)
+    local btn = CreateFrame("Button", nil, b)
+    btn:SetSize(50, 20); btn:SetPoint("RIGHT", -4, 0)
+    ns.RoundRect(btn, 10, C.acc, "ARTWORK", 0, 0)
+    b.tip = ns.Font(btn, 10.5, C.ink); b.tip:SetShadowColor(0, 0, 0, 0); b.tip:SetPoint("CENTER"); b.tip:SetText("복사")
+    btn:SetScript("OnClick", function() e:SetFocus(); e:HighlightText(); b.tip:SetText("Ctrl+C") end)
+    function b:Set(t) self.value = t; e:SetText(t); e:SetCursorPosition(0) end
+    b.edit = e
+    return b
+end
+
+local talk
+local function BuildTalk(f)
+    local W2 = 360
+    local t = CreateFrame("Frame", "LeelUI_Talk", f)
+    t:SetSize(W2, 300)
+    t:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, FOOT + 6)
+    t:SetFrameLevel(f:GetFrameLevel() + 20)
+    t:EnableMouse(true)
+    ns.RoundPlate(t, 16, { 0.125, 0.094, 0.086, 0.99 }, { 0.949, 0.702, 0.761, 0.9 })
+
+    local bun = t:CreateTexture(nil, "ARTWORK")
+    bun:SetTexture(ns.MEDIA .. "bag_bunny"); bun:SetSize(24, 24); bun:SetPoint("TOPLEFT", 12, -10)
+    local title = ns.Font(t, 14, C.accHi); title:SetPoint("LEFT", bun, "RIGHT", 7, 0); title:SetText("르엘 소통방")
+    local x = CreateFrame("Button", nil, t)
+    x:SetSize(18, 18); x:SetPoint("TOPRIGHT", -10, -12)
+    local xt = x:CreateTexture(nil, "ARTWORK"); xt:SetTexture(ns.MEDIA .. "hb_x"); xt:SetAllPoints()
+    xt:SetVertexColor(C.tx[1], C.tx[2], C.tx[3], 0.7)
+    x:SetScript("OnClick", function() t:Hide() end)
+
+    -- 탭
+    local pages, tabs = {}, {}
+    local function Show(i)
+        for k, pg in ipairs(pages) do pg:SetShown(k == i) end
+        for k, tb in ipairs(tabs) do
+            local on = k == i
+            tb.bg:SetColor(on and C.acc or { 0.949, 0.702, 0.761 }, on and 1 or 0.12)
+            tb.fs:SetTextColor(on and C.ink[1] or C.accHi[1], on and C.ink[2] or C.accHi[2], on and C.ink[3] or C.accHi[3])
+            tb.fs:SetShadowColor(0, 0, 0, on and 0 or 0.8)
+        end
+        if pages[i].OnShow2 then pages[i].OnShow2() end
+    end
+    local tx = 12
+    for i, label in ipairs({ "채채TV", "문제 알리기", "새 소식" }) do
+        local b = CreateFrame("Button", nil, t)
+        b:SetHeight(22)
+        b.bg = ns.RoundRect(b, 11, C.acc, "BACKGROUND", 0, 0)
+        b.fs = ns.Font(b, 11.5); b.fs:SetPoint("CENTER"); b.fs:SetText(label)
+        b:SetWidth(b.fs:GetStringWidth() + 22)
+        b:SetPoint("TOPLEFT", tx, -42)
+        tx = tx + b:GetWidth() + 6
+        b:SetScript("OnClick", function() Show(i) end)
+        tabs[i] = b
+        local pg = CreateFrame("Frame", nil, t)
+        pg:SetPoint("TOPLEFT", 12, -74); pg:SetPoint("BOTTOMRIGHT", -12, 12)
+        pages[i] = pg
+    end
+
+    -- 1. 채채TV
+    do
+        local pg = pages[1]
+        local card = CreateFrame("Frame", nil, pg)
+        card:SetPoint("TOPLEFT"); card:SetPoint("TOPRIGHT"); card:SetHeight(54)
+        ns.RoundRect(card, 12, { 0.949, 0.702, 0.761 }, "BACKGROUND", 0, 0):SetColor({ 0.949, 0.702, 0.761 }, 0.12)
+        local ic = card:CreateTexture(nil, "ARTWORK"); ic:SetTexture(ns.MEDIA .. "bag_bunny"); ic:SetSize(34, 34); ic:SetPoint("LEFT", 10, 0)
+        local nm = ns.Font(card, 15, C.tx); nm:SetPoint("TOPLEFT", ic, "TOPRIGHT", 10, -2); nm:SetText("채채TV")
+        local sub = ns.Font(card, 10.5, { 0.81, 0.64, 0.62 }); sub:SetPoint("TOPLEFT", nm, "BOTTOMLEFT", 0, -3)
+        sub:SetText("르엘 UI 질문 · 제보 · 업데이트 소식은 여기서")
+        local l1 = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); l1:SetPoint("TOPLEFT", card, "BOTTOMLEFT", 0, -10); l1:SetText("방송 (유튜브)")
+        local b1 = CopyBox(pg, W2 - 24); b1:SetPoint("TOPLEFT", l1, "BOTTOMLEFT", 0, -4); b1:Set(CHANNEL)
+        local l2 = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); l2:SetPoint("TOPLEFT", b1, "BOTTOMLEFT", 0, -8); l2:SetText("최신 파일 받기")
+        local b2 = CopyBox(pg, W2 - 24); b2:SetPoint("TOPLEFT", l2, "BOTTOMLEFT", 0, -4); b2:Set(DOWNLOAD)
+        local note = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); note:SetPoint("TOPLEFT", b2, "BOTTOMLEFT", 0, -8)
+        note:SetWidth(W2 - 24); note:SetJustifyH("LEFT")
+        note:SetText("게임 안에선 링크가 안 열려요. 복사(Ctrl+C) 후 브라우저 주소창에 붙여 넣어요.")
+    end
+
+    -- 2. 문제 알리기
+    do
+        local pg = pages[2]
+        local pick = 1
+        local function Step(n, text, anchor, dy)
+            local d = pg:CreateTexture(nil, "ARTWORK"); d:SetTexture(ns.MEDIA .. "circle"); d:SetSize(18, 18)
+            d:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+            if anchor then d:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, dy) else d:SetPoint("TOPLEFT") end
+            local num = pg:CreateFontString(nil, "OVERLAY"); num:SetFont(ns.NUM or ns.FONT, 12, ""); num:SetTextColor(C.ink[1], C.ink[2], C.ink[3])
+            num:SetPoint("CENTER", d); num:SetText(n)
+            local fs = ns.Font(pg, 12); fs:SetPoint("LEFT", d, "RIGHT", 7, 0); fs:SetText(text)
+            return d
+        end
+        local s1 = Step(1, "어떤 문제였나요?")
+        local chips, row = {}, CreateFrame("Frame", nil, pg)
+        row:SetPoint("TOPLEFT", s1, "BOTTOMLEFT", 24, -6); row:SetSize(W2 - 48, 48)
+        local box
+        local function Line()
+            local ver = Version("LeelUI")
+            local n = (GetNumGroupMembers and GetNumGroupMembers()) or 0
+            local t = "#르엘 " .. ver .. " · " .. PROBLEMS[pick]
+            if ns.lastErr then t = t .. " · " .. ns.lastErr end
+            if n > 0 then t = t .. " · 파티 " .. n .. "명" end
+            return t
+        end
+        local function Paint()
+            for i, c in ipairs(chips) do
+                local on = i == pick
+                c.bg:SetColor(on and { 1, 0.56, 0.64 } or { 1, 1, 1 }, on and 1 or 0.07)
+                c.fs:SetTextColor(on and C.ink[1] or 0.81, on and C.ink[2] or 0.64, on and C.ink[3] or 0.62)
+                c.fs:SetShadowColor(0, 0, 0, on and 0 or 0.8)
+            end
+            if box then box:Set(Line()) end
+        end
+        local cx, cy = 0, 0
+        for i, label in ipairs(PROBLEMS) do
+            local c = CreateFrame("Button", nil, row)
+            c:SetHeight(20)
+            c.bg = ns.RoundRect(c, 10, C.acc, "BACKGROUND", 0, 0)
+            c.fs = ns.Font(c, 10.5); c.fs:SetPoint("CENTER"); c.fs:SetText(label)
+            c:SetWidth(c.fs:GetStringWidth() + 18)
+            if cx + c:GetWidth() > W2 - 48 then cx, cy = 0, cy - 24 end
+            c:SetPoint("TOPLEFT", cx, cy)
+            cx = cx + c:GetWidth() + 5
+            c:SetScript("OnClick", function() pick = i; Paint() end)
+            chips[i] = c
+        end
+        row:SetHeight(-cy + 22)
+        local s2 = Step(2, "아래 줄을 복사해서 |cffffd6e0채채TV 방송 채팅|r에", row, -4)
+        box = CopyBox(pg, W2 - 24); box:SetPoint("TOPLEFT", s2, "BOTTOMLEFT", 0, -6)
+        Step(3, "화면을 찍어 두면 더 빨리 고쳐요 (|cffffd6e0PrtSc|r)", box, -10)
+        pg.OnShow2 = Paint
+        Paint()
+    end
+
+    -- 3. 새 소식
+    do
+        local pg = pages[3]
+        local y = 0
+        for i, n in ipairs(NEWS) do
+            local v = pg:CreateFontString(nil, "OVERLAY"); v:SetFont(ns.NUM or ns.FONT, 15, ""); v:SetTextColor(C.accHi[1], C.accHi[2], C.accHi[3])
+            v:SetPoint("TOPLEFT", 0, y); v:SetText(n[1])
+            local a = ns.Font(pg, 12); a:SetPoint("TOPLEFT", 46, y); a:SetText(n[2])
+            local b = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); b:SetPoint("TOPLEFT", a, "BOTTOMLEFT", 0, -3); b:SetText(n[3])
+            if i > 1 then
+                local ln = pg:CreateTexture(nil, "BORDER"); ln:SetColorTexture(0.949, 0.702, 0.761, 0.12); ln:SetHeight(1)
+                ln:SetPoint("TOPLEFT", 0, y + 7); ln:SetPoint("TOPRIGHT", 0, y + 7)
+            end
+            y = y - 46
+        end
+        local note = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); note:SetPoint("TOPLEFT", 0, y - 2)
+        note:SetText("새 버전 소식은 채채TV 방송 공지에서 먼저 알려요.")
+    end
+
+    t:SetScript("OnShow", function() Show(1) end)
+    t:Hide()
+    return t
+end
+
 local function Build()
     local f = CreateFrame("Frame", "LeelUI_Hub", UIParent)
     f:SetSize(W, H)
@@ -1017,9 +1221,15 @@ local function Build()
     f.pane = BuildPane(f)
 
     -- 아래 줄
-    local hint = ns.Font(f, 11, { 0.62, 0.54, 0.52 })
-    hint:SetText("스위치 = 켜기/끄기 (필요하면 다시 불러오기를 물어봐요)")
+    local hint = ns.Font(f, 11.5, { 0.81, 0.64, 0.62 })
+    hint:SetText("질문 · 제보 · 새 소식은 |cffffd6e0채채TV|r에서")
     hint:SetPoint("BOTTOMLEFT", 18, 19)
+    f.talkBtn = ns.MakeButton(f, "소통하러 가기", true, function()
+        talk = talk or BuildTalk(f)
+        talk:SetShown(not talk:IsShown())
+    end, 104)
+    f.talkBtn:SetHeight(26)
+    f.talkBtn:SetPoint("LEFT", hint, "RIGHT", 10, 0)
     f.moveBtn = ns.MakeButton(f, "이동 모드", true, function() ns:ToggleMoveMode(); Refresh() end, 96)
     f.moveBtn:SetPoint("BOTTOMRIGHT", -14, 11)
 
