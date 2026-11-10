@@ -201,8 +201,9 @@ local function MakeButton(bag, slot)
     local ok, b = pcall(CreateFrame, "ItemButton", name, holder, "ContainerFrameItemButtonTemplate")
     if not ok or not b then b = CreateFrame("Button", name, holder, "ContainerFrameItemButtonTemplate") end
     b:SetID(slot)
-    if b.SetBagID then pcall(b.SetBagID, b, bag) end
-    b.bagID = bag
+    -- 가방 번호는 부모(holder)의 SetID로만 알려줌.
+    -- b.bagID 같은 값을 애드온이 직접 넣으면 '오염'돼서, 펫 먹이 주기처럼 주문으로 아이템을 고를 때
+    -- 게임이 사용을 막아요 (LeelUI가 지원하는 기능이 차단되었습니다).
     b:SetSize(SZ, SZ)
     -- 게임 칸 테두리 숨기고 둥근 칸
     local nt = b.GetNormalTexture and b:GetNormalTexture()
