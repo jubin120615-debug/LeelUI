@@ -27,7 +27,7 @@ local CORAL = { 1.00, 0.48, 0.40 }
 
 ----------------------------------------------------------------------
 -- 동그란 진행 링
--- 숫자를 계산할 수 있으면 12시부터 시계 방향으로 줄어드는 호(반원 두 장 회전)
+-- 숫자를 계산할 수 있으면 12시부터 시계 방향으로 비어 가는 호(반원 두 장 회전)
 -- 전투 중 숨겨진 값이면 계산을 못 하니 아래에서 위로 차는 링으로 대신
 ----------------------------------------------------------------------
 local function CreateRing(parent, size, full, half, layer)
@@ -55,7 +55,35 @@ local function CreateRing(parent, size, full, half, layer)
     end
     r.right, r.left = Half("RIGHT"), Half("LEFT")
 
-    -- 숨겨진 값용: 세로로 차는 링
+    -- 숨겨진 값용 (퍼센트를 받을 수 있을 때): 네 조각으로 12시부터 시계 방향
+    -- 조각마다 링 전체 그림을 쓰는 상태바 + 그 사분면만 보이게 자르는 틀.
+    -- 상태바 최소/최대를 상수로 어긋나게 줘서 퍼센트(숨겨진 값)를 그대로 넣어도 됨.
+    local Q = {
+        -- 사분면 자리(틀),  방향,          거꾸로,  최소, 최대  (0~100 기준)
+        -- 남은 양 = 12시에서 거꾸로 재는 호 → 줄어들 땐 빈 곳이 12시부터 시계 방향으로 커짐
+        { "TOPLEFT",     "HORIZONTAL", true,  -25, 25 },   -- 12 → 9시 쪽 (마지막까지 남음)
+        { "BOTTOMLEFT",  "VERTICAL",   true,    0, 50 },   -- 9 → 6시
+        { "BOTTOMRIGHT", "HORIZONTAL", false,  25, 75 },   -- 6 → 3시
+        { "TOPRIGHT",    "VERTICAL",   false,  50, 100 },  -- 3 → 12시 (가장 먼저 빔)
+    }
+    r.q = {}
+    for i, d in ipairs(Q) do
+        local clip = CreateFrame("Frame", nil, r)
+        clip:SetSize(size / 2, size / 2)
+        clip:SetPoint(d[1], r, d[1], 0, 0)
+        clip:SetClipsChildren(true)
+        local b = CreateFrame("StatusBar", nil, clip)
+        b:SetSize(size, size)
+        b:SetPoint(d[1], clip, d[1], 0, 0)
+        b:SetOrientation(d[2])
+        if b.SetReverseFill then b:SetReverseFill(d[3]) end
+        b:SetStatusBarTexture(ns.MEDIA .. full)
+        b.lo, b.hi = d[4], d[5]
+        clip:Hide()
+        r.q[i] = { clip = clip, bar = b }
+    end
+
+    -- 퍼센트도 못 받을 때만: 세로로 차는 링
     local sb = CreateFrame("StatusBar", nil, r)
     sb:SetAllPoints()
     sb:SetOrientation("VERTICAL")
@@ -68,10 +96,16 @@ local function CreateRing(parent, size, full, half, layer)
         self.right:SetVertexColor(c[1], c[2], c[3], 1)
         self.left:SetVertexColor(c[1], c[2], c[3], 1)
         self.sb:SetStatusBarColor(c[1], c[2], c[3], 1)
+        for _, q in ipairs(self.q) do q.bar:SetStatusBarColor(c[1], c[2], c[3], 1) end
+    end
+
+    local function ShowQuads(self, on)
+        for _, q in ipairs(self.q) do q.clip:SetShown(on) end
     end
 
     -- 반환: 0~1 비율 (숨겨진 값이면 nil)
-    function r:SetValue(cur, max)
+    -- pct, scale: 숨겨진 값일 때 쓸 퍼센트(게임 함수 값)와 그 단위(1 또는 100)
+    function r:SetValue(cur, max, pct, scale)
         local ok, p = pcall(function()
             if not max or max <= 0 then return 0 end
             local v = cur / max
@@ -80,26 +114,41 @@ local function CreateRing(parent, size, full, half, layer)
         end)
         if not ok or type(p) ~= "number" then
             self.right:Hide(); self.left:Hide()
+            if pct ~= nil and scale then
+                local k = scale / 100
+                local okq = pcall(function()
+                    for _, q in ipairs(self.q) do
+                        q.bar:SetMinMaxValues(q.bar.lo * k, q.bar.hi * k)
+                        q.bar:SetValue(pct)
+                    end
+                end)
+                if okq then
+                    self.sb:Hide(); ShowQuads(self, true)
+                    return nil
+                end
+            end
+            ShowQuads(self, false)
             self.sb:Show()
             ns.SetBar(self.sb, cur, max)
             return nil
         end
-        self.sb:Hide()
-        -- 시계 방향 회전 = 음수 각도
+        self.sb:Hide(); ShowQuads(self, false)
+        -- 남은 양은 12시에서 반시계로 재는 호 → 줄어들 땐 12시부터 시계 방향으로 비어 감
+        -- (반쪽 그림은 왼쪽 반원. SetRotation 음수 = 시계 방향)
         if p <= 0 then
             self.right:Hide(); self.left:Hide()
         elseif p <= 0.5 then
-            self.right:Show(); self.right:SetRotation(-p * 2 * math.pi)
-            self.left:Hide()
+            self.left:Show(); self.left:SetRotation(-(math.pi - p * 2 * math.pi))
+            self.right:Hide()
         else
-            self.right:Show(); self.right:SetRotation(-math.pi)
-            self.left:Show(); self.left:SetRotation(-math.pi - (p - 0.5) * 2 * math.pi)
+            self.left:Show(); self.left:SetRotation(0)
+            self.right:Show(); self.right:SetRotation(p * 2 * math.pi - math.pi)
         end
         return p
     end
 
     function r:Clear()
-        self.right:Hide(); self.left:Hide(); self.sb:Hide()
+        self.right:Hide(); self.left:Hide(); self.sb:Hide(); ShowQuads(self, false)
     end
     return r
 end
@@ -334,6 +383,68 @@ end
 ----------------------------------------------------------------------
 -- 갱신
 ----------------------------------------------------------------------
+-- 게임 퍼센트 함수 (전투 중 숨겨진 값도 그대로 상태바에 넣을 수 있음)
+-- 단위(0~1인지 0~100인지)는 값이 보일 때 재 둠
+local hpScale, pwScale
+local function Measure(raw, p, old)
+    if not p or type(raw) ~= "number" or ns.IsSecret(raw) then return old end
+    if raw > 1.5 then return 100 end
+    if p > 0.02 and raw <= 1.0001 then return 1 end
+    return old
+end
+local function RawPct(fn, ...)
+    if not fn then return nil end
+    local ok, v = pcall(fn, ...)
+    if ok then return v end
+end
+-- 퍼센트 값은 늘 숨겨져 있어서 직접 못 읽음.
+-- 1) 게임이 0~100으로 바꿔 주는 곡선(CurveConstants.ScaleTo100)이 있으면 그걸로 단위를 못 박음
+-- 2) 없으면 숨겨진 값을 0~100 상태바에 넣고 채워진 길이로 단위를 잼
+local SCALE100 = CurveConstants and CurveConstants.ScaleTo100
+local function HP(u)
+    if SCALE100 then
+        local v = RawPct(UnitHealthPercent, u, false, SCALE100)
+        if v ~= nil then return v, 100 end
+    end
+    return RawPct(UnitHealthPercent, u), nil
+end
+local function PW(u, pt)
+    if SCALE100 then
+        local v = RawPct(UnitPowerPercent, u, pt, false, SCALE100)
+        if v ~= nil then return v, 100 end
+    end
+    return RawPct(UnitPowerPercent, u, pt), nil
+end
+
+local probe
+local function ProbeScale(raw)
+    if raw == nil then return nil end
+    if not probe then
+        probe = CreateFrame("StatusBar", nil, UIParent)
+        probe:SetSize(200, 4); probe:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", 0, -50)
+        probe:SetStatusBarTexture(ns.WHITE or "Interface\\Buttons\\WHITE8X8")
+        probe:SetMinMaxValues(0, 100)
+    end
+    probe:SetValue(raw)
+    local ok, w = pcall(function() return probe:GetStatusBarTexture():GetWidth() + 0 end)
+    if not ok or type(w) ~= "number" then return nil end
+    -- 0~1 단위면 0~100 막대에서 1% 이하로만 참
+    if w > 4 then return 100 end
+    if w > 0.05 then return 1 end
+    return nil -- 아직 그려지기 전이거나 0: 다음에 다시
+end
+
+local function EnsureScales()
+    if not hpScale then
+        local v, k = HP("player")
+        hpScale = k or ProbeScale(v)
+    end
+    if not pwScale then
+        local v, k = PW("player", UnitPowerType("player"))
+        pwScale = k or ProbeScale(v)
+    end
+end
+
 local function UpdateHealth(f)
     local u = f.unit
     if not UnitExists(u) then return end
@@ -374,7 +485,9 @@ local function UpdateHealth(f)
     f.name:SetTextColor(col[1], col[2], col[3])
 
     local cur, max = UnitHealth(u), UnitHealthMax(u)
-    local p = f.hp:SetValue(cur, max)
+    EnsureScales()
+    local pct, k = HP(u)
+    local p = f.hp:SetValue(cur, max, pct, k or hpScale)
     PctText(f.val, u, cur, max)
     local low = p and p < LOW_HP
     f.hp:SetColor(low and CORAL or C.acc)
@@ -391,7 +504,8 @@ local function UpdatePower(f)
     local c = PCOL[pt] or PCOL[0]
     f.pw:SetColor(c)
     local cur, max = UnitPower(u, pt), UnitPowerMax(u, pt)
-    local p = f.pw:SetValue(cur, max)
+    local pct, k = PW(u, pt)
+    local p = f.pw:SetValue(cur, max, pct, k or pwScale)
     if pt == 0 and p and p < LOW_MANA and HEALERS[f.classFile or ""] then
         f.mana:SetFormattedText("마나 %d%%", math.floor(p * 100 + 0.5))
         f.mana:Show()
@@ -713,4 +827,16 @@ function ns:CreateParty()
             if f:IsShown() then UpdateRange(f) end
         end
     end)
+end
+
+
+-- 점검: /르엘파티  (전투 중 링 방식 확인)
+SLASH_LEELPARTYDBG1 = "/르엘파티"
+SlashCmdList.LEELPARTYDBG = function()
+    EnsureScales()
+    local hp = HP("player")
+    local pw = PW("player", UnitPowerType("player"))
+    print("|cfff2b3c2[르엘 파티]|r 체력%함수=" .. tostring(UnitHealthPercent ~= nil) .. " 값=" .. (ns.IsSecret(hp) and "<숨김>" or tostring(hp)) ..
+        "  자원%함수=" .. tostring(UnitPowerPercent ~= nil) .. " 값=" .. (ns.IsSecret(pw) and "<숨김>" or tostring(pw)) ..
+        "  단위=" .. tostring(hpScale) .. "/" .. tostring(pwScale) .. "  곡선=" .. tostring(SCALE100 ~= nil))
 end

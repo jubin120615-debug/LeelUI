@@ -38,8 +38,7 @@ local function ApplyCVars()
     -- 물건 고르는 범위 넓히기 (없는 설정이면 조용히 무시)
     pcall(SetCVar, "SoftTargetInteractArc", "2")
     pcall(SetCVar, "SoftTargetInteractRange", "15")
-    -- 상호작용 대상(시체·물건)에 이름표판을 만들어 달라고 (그래야 그 위에 붙일 수 있음)
-    pcall(SetCVar, "SoftTargetNameplateInteract", "1")
+    -- 시체 이름표판은 '주울 시체를 바라볼 때만' 켬 (SetCorpsePlate). 평소엔 꺼서 NPC 이름이 원래대로 보이게
     local sz = tonumber(GetCVar("SoftTargetNameplateSize") or "0") or 0
     if sz <= 0 then pcall(SetCVar, "SoftTargetNameplateSize", "19") end
 end
@@ -393,7 +392,16 @@ local function HasSoft()
     return okG and guid ~= nil
 end
 
+-- 주울 시체를 바라볼 때만 상호작용 이름표판 켜기 (NPC에겐 게임 기본 이름 그대로)
+local corpsePlate
+local function SetCorpsePlate(on)
+    on = on and true or false
+    if corpsePlate == on or InCombatLockdown() then return end
+    if pcall(SetCVar, "SoftTargetNameplateInteract", on and "1" or "0") then corpsePlate = on end
+end
+
 local function Refresh()
+    SetCorpsePlate(db and db.on ~= false and db.loot ~= false and not lootOpen and HasSoft() and LootableCorpse())
     if db and Previewing() and not LootableCorpse() then Mute(nil); Detach(); ShowPreview() return end
     if not db or not db.on then Mute(nil); Detach(); HideLoot() return end
     if not HasSoft() then Mute(nil); Detach(); HideLoot() return end
@@ -485,10 +493,11 @@ ev:SetScript("OnEvent", function(_, event, unit)
         if not db.v2 then db.all = false; db.v2 = true end -- 기본: 퀘스트 물건만
         for k, v in pairs(DEFAULTS) do if db[k] == nil then db[k] = v end end
         ApplyCVars()
+        C_Timer.After(1, Refresh)
         return
     end
     if not db then return end
-    if event == "PLAYER_REGEN_ENABLED" then ApplyCVars() return end
+    if event == "PLAYER_REGEN_ENABLED" then ApplyCVars(); Refresh() return end
     if event == "LOOT_OPENED" then lootOpen = true; HideLoot() return end
     if event == "LOOT_CLOSED" then
         lootOpen = false

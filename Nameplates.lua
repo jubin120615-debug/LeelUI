@@ -717,6 +717,22 @@ end
 ----------------------------------------------------------------------
 -- 상호작용 대상(시체 줍기 표시용)에 게임이 억지로 만든 우호 NPC 이름표는 안 보이게
 -- (우호 이름표를 켜 둔 경우는 그대로)
+-- 우호 NPC: 이름만 남기고 나머지(체력바, 레벨, 시전바, 점 아이콘)는 숨기기
+local function SetFriendlyBars(plate, hide)
+    SetBlizzAlpha(plate, 1)
+    local uf = plate.UnitFrame
+    if not uf then return end
+    local name = uf.name or uf.Name
+    local holder = name and name.GetParent and name:GetParent()
+    for _, f in ipairs({ uf:GetChildren() }) do
+        if f.SetAlpha and f ~= holder then HideFrame(f, hide) end
+    end
+    for _, r in ipairs({ uf:GetRegions() }) do
+        if r ~= name and r.SetAlpha then HideFrame(r, hide) end
+    end
+    if name and name.SetAlpha then HideFrame(name, false) end
+end
+
 local function FriendlyForced(unit)
     if GetCVar("nameplateShowFriends") == "1" then return false end
     return Try(UnitIsUnit, unit, "softinteract") and true or false
@@ -730,7 +746,7 @@ local function OnAdded(unit)
         if plate.leel then plate.leel:Hide() end
         DetachAuras(plate)
         DetachCast(plate)
-        SetBlizzAlpha(plate, FriendlyForced(unit) and 0 or 1)
+        SetFriendlyBars(plate, FriendlyForced(unit))
         return
     end
 
@@ -813,7 +829,7 @@ function ns:EnableNameplates()
         elseif event == "PLAYER_SOFT_INTERACT_CHANGED" then
             for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
                 local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
-                if u and not Try(UnitCanAttack, "player", u) then SetBlizzAlpha(plate, FriendlyForced(u) and 0 or 1) end
+                if u and not Try(UnitCanAttack, "player", u) then SetFriendlyBars(plate, FriendlyForced(u)) end
             end
         elseif event == "RAID_TARGET_UPDATE" then
             for u, f in pairs(active) do UpdateRaid(f, u) end

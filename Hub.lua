@@ -306,6 +306,18 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_LootWin", builtin = true, cat = "util",
+        title = "줍기 창", sub = "분홍 줍기 창", icon = "hb_bag",
+        desc = "루팅 창을 르엘 모양으로. 마우스 근처에 떠요.\n왼쪽 스위치를 끄면 게임 기본 창 (다시 불러오기 후 적용).",
+        onoff = { reload = true, get = function() return ns.LootDB().win end,
+                  set = function(v) ns.LootDB().win = v end },
+        items = {
+            { t = "toggle", label = "자동 줍기", hint = "게임 설정. 켜면 창 없이 바로 주워요",
+              get = function() return GetCVar("autoLootDefault") == "1" end,
+              set = function(v) SetCVar("autoLootDefault", v and "1" or "0") end },
+        },
+    },
+    {
         key = "LeelUI_Loot", builtin = true, cat = "util",
         title = "르엘 줍기", sub = "시체 반짝 상자", icon = "hb_loot",
         needs = "LeelSpot", needsText = "상자는 Leel Spot이 그려요.\n애드온 목록에서 Leel Spot을 켜고 다시 불러오면 설정할 수 있어요.",

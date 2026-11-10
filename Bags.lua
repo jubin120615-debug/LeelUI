@@ -76,6 +76,7 @@ local function BunnyMoney(c, sz)
     if cp > 0 or #t == 0 then t[#t + 1] = Coin("c", sz) .. " " .. cp end
     return table.concat(t, sz and " " or "   ")
 end
+ns.BunnyMoney = BunnyMoney
 
 ----------------------------------------------------------------------
 -- 미니맵 아래 숫자
