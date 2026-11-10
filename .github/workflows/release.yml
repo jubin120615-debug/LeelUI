@@ -44,5 +44,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      # CurseForge + GitHub 다운로드 페이지(Releases)에 같이 올림. GitHub 쪽은 검토 없이 바로 받을 수 있음
       - uses: BigWigsMods/packager@v2
         if: github.ref_type == 'tag'
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
