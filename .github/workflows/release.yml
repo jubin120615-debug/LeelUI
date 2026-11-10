@@ -1,9 +1,17 @@
 name: Release to CurseForge
 
+# main에 올라올 때 LeelUI.toc의 버전을 읽어서, 그 버전 태그가 아직 없으면
+# 태그를 만들고 CurseForge에 올려요. (직접 태그를 올려도 동작)
 on:
   push:
+    branches:
+      - main
     tags:
       - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   release:
@@ -14,4 +22,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Tag from toc version
+        id: tag
+        if: github.ref_type == 'branch'
+        run: |
+          v=$(grep -m1 '^## Version:' LeelUI.toc | sed 's/## Version:[[:space:]]*//' | tr -d '\r[:space:]')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$v" >/dev/null; then
+            echo "tag $v already exists, skip"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git tag "$v"
+            git push origin "$v"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: BigWigsMods/packager@v2
+        if: github.ref_type == 'tag' || steps.tag.outputs.skip == 'false'
