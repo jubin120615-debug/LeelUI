@@ -1009,11 +1009,11 @@ local function BuildTalk(f)
         sub:SetText("르엘 UI 질문 · 제보 · 업데이트 소식은 여기서")
         local l1 = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); l1:SetPoint("TOPLEFT", card, "BOTTOMLEFT", 0, -10); l1:SetText("방송 (유튜브)")
         local b1 = CopyBox(pg, W2 - 24); b1:SetPoint("TOPLEFT", l1, "BOTTOMLEFT", 0, -4); b1:Set(CHANNEL)
-        local l2 = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); l2:SetPoint("TOPLEFT", b1, "BOTTOMLEFT", 0, -8); l2:SetText("최신 파일 받기")
+        local l2 = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); l2:SetPoint("TOPLEFT", b1, "BOTTOMLEFT", 0, -8); l2:SetText("최신 파일 받기 · GitHub (올리자마자 바로)")
         local b2 = CopyBox(pg, W2 - 24); b2:SetPoint("TOPLEFT", l2, "BOTTOMLEFT", 0, -4); b2:Set(DOWNLOAD)
         local note = ns.Font(pg, 10.5, { 0.62, 0.54, 0.52 }); note:SetPoint("TOPLEFT", b2, "BOTTOMLEFT", 0, -8)
         note:SetWidth(W2 - 24); note:SetJustifyH("LEFT")
-        note:SetText("게임 안에선 링크가 안 열려요. 복사(Ctrl+C) 후 브라우저 주소창에 붙여 넣어요.")
+        note:SetText("급한 수정은 GitHub에서 바로, 평소엔 CurseForge 앱 업데이트(검토 후).\n링크는 복사(Ctrl+C)해서 브라우저 주소창에 붙여 넣어요.")
     end
 
     -- 2. 문제 알리기
