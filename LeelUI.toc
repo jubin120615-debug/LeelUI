@@ -2,7 +2,7 @@
 ## Title: |cfff2b3c2르엘|r UI
 ## Notes: 르엘을 위한 연분홍 통합 UI
 ## Author: Leel
-## Version: 1.3.10
+## Version: 1.3.11
 ## X-Curse-Project-ID: 1794148
 ## Category: 르엘 UI
 ## SavedVariables: LeelUIDB

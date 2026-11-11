@@ -116,7 +116,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_Plates", builtin = true, cat = "view",
-        title = "적 이름표", sub = "토끼 레벨, 몹 등급", icon = "hb_plate",
+        title = "적 이름표", sub = "토끼 레벨, 몹 등급, 선공", icon = "hb_plate",
         desc = "적 머리 위 분홍 이름표. 왼쪽 스위치는 다시 불러오기 후 적용.",
         onoff = { reload = true, get = function() return ns.db.nameplates end,
                   set = function(v) ns.db.nameplates = v end },
@@ -124,6 +124,9 @@ local MODULES = {
             { t = "slider", label = "이름표 크기", min = 40, max = 150,
               get = function() return math.floor((ns.db.npScale or 1) * 100 + 0.5) end,
               set = function(v) ns.db.npScale = v / 100; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
+            { t = "toggle", label = "선공 / 비선공 구별", hint = "선공은 분홍 바, 비선공은 크림색 바",
+              get = function() return ns.db.npAggro ~= false end,
+              set = function(v) ns.db.npAggro = v; if ns.RefreshPlateInfo then ns:RefreshPlateInfo() end end },
             { t = "toggle", label = "퀘스트 몹 표시", hint = "Questie 퀘스트 원",
               get = function() return ns.db.questCircle ~= false end,
               set = function(v) ns.db.questCircle = v; if ns.RefreshNameplates then ns:RefreshNameplates() end end },

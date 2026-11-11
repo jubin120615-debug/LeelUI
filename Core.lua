@@ -11,9 +11,10 @@ ns.NUM   = ns.MEDIA .. "BarlowCondensed-ExtraBoldItalic.ttf"
 ns.NUM_B = ns.MEDIA .. "BarlowCondensed-BoldItalic.ttf"
 
 ns.defaults = {
-    point = { "TOP", "TOP", 0, -40 },
-    scale = 0.7,
-    npScale = 1.0,
+    -- 처음 설치 기본값 = 슈엘 화면 (캐릭터 바로 아래 가운데, HUD 61%, 이름표 75%)
+    point = { "CENTER", "CENTER", 0, -302 },
+    scale = 0.61,
+    npScale = 0.75,
     questCircle = true,
     hideBlizzard = true,
     nameplates = true,
@@ -152,7 +153,8 @@ loader:RegisterEvent("ADDON_LOADED")
 loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON then
-        LeelUIDB = LeelUIDB or {}
+        -- 처음 설치면 예전 버전 옮기기(v2~v5 크기 조정)를 건너뛰고 기본값 그대로
+        if not LeelUIDB or next(LeelUIDB) == nil then LeelUIDB = { v = 5 } end
         for k, v in pairs(ns.defaults) do
             if LeelUIDB[k] == nil then
                 LeelUIDB[k] = type(v) == "table" and CopyTable(v) or v

@@ -818,6 +818,8 @@ local function BuildFull()
     end)
     f:Hide()
     full = f
+    -- ESC로 닫기
+    if UISpecialFrames then tinsert(UISpecialFrames, "LeelUI_BagFull") end
 end
 
 local function Destroy(d)

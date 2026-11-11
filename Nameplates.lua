@@ -55,16 +55,46 @@ local function Outline(fs, size, file)
 end
 
 -- 몹 등급 → 토끼 머리
-local HEAD = 40
+local BADGE = 18
+-- 몹 등급 = 레벨 앞 동그란 토끼 배지 (분홍 일반 / 금빛+왕관 정예 / 은빛+반짝 희귀 / 빨강+뿔 보스 / 회색 하찮음)
 local RANK = {
-    normal    = { tex = "rk_normal" },
-    elite     = { tex = "rk_elite",     ink = true },
-    rare      = { tex = "rk_rare",      ink = true },
-    rareelite = { tex = "rk_rareelite", ink = true },
-    boss      = { tex = "rk_boss",      ink = true },
-    minus     = { tex = "rk_minus",     small = true },
-    trivial   = { tex = "rk_trivial" },
+    normal    = { tex = "rb_normal" },
+    elite     = { tex = "rb_elite" },
+    rare      = { tex = "rb_rare" },
+    rareelite = { tex = "rb_rareelite" },
+    boss      = { tex = "rb_boss" },
+    minus     = { tex = "rb_trivial", small = true },
+    trivial   = { tex = "rb_trivial" },
 }
+
+-- 비선공(중립) 몹: 크림색 바 + 크림색 이름
+local CREAM_TOP, CREAM_BOT = { 1.00, 0.93, 0.76 }, { 0.95, 0.76, 0.48 }
+local CREAM_NAME = { 1.00, 0.89, 0.63 }
+local function PaintCream(holder)
+    local fill = holder.fill
+    if fill.SetGradient and CreateColor then
+        fill:SetVertexColor(1, 1, 1, 1)
+        fill:SetGradient("VERTICAL",
+            CreateColor(CREAM_BOT[1], CREAM_BOT[2], CREAM_BOT[3], 1),
+            CreateColor(CREAM_TOP[1], CREAM_TOP[2], CREAM_TOP[3], 1))
+    else
+        fill:SetVertexColor(CREAM_BOT[1], CREAM_BOT[2], CREAM_BOT[3], 1)
+    end
+end
+
+-- 바·이름 색: 하찮음 회색 / 비선공 크림 / 선공 분홍
+local function PaintPlate(f)
+    if f.trivial then
+        ns.PaintFlat(f.hp, C.grey)
+        f.name:SetTextColor(0.78, 0.80, 0.83)
+    elseif f.calm then
+        PaintCream(f.hp)
+        f.name:SetTextColor(CREAM_NAME[1], CREAM_NAME[2], CREAM_NAME[3])
+    else
+        ns.PaintHealth(f.hp)
+        f.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+    end
+end
 
 local function Circle(parent, layer, sub, size, c, a)
     local t = parent:CreateTexture(nil, layer, nil, sub)
@@ -101,25 +131,20 @@ local function Build(plate)
     f.pct = Outline(f.hp.over:CreateFontString(nil, "OVERLAY"), 13, ns.NUM)
     f.pct:SetTextColor(1, 1, 1)
 
-    -- 이름 (가운데)
+    -- 이름 줄 (가운데): [등급 토끼 배지] 레벨 이름
     f.title = CreateFrame("Frame", nil, f)
-    f.title:SetSize(1, 16)
-    f.title:SetPoint("BOTTOM", f.hp, "TOP", 8, 4)
-    f.name = Outline(f.title:CreateFontString(nil, "OVERLAY"), 13)
-    f.name:SetPoint("LEFT", f.title, "LEFT", 0, 0)
-
-    -- 토끼 머리 레벨: 체력바 왼쪽 끝을 잡은 토끼, 색/장식 = 몹 등급
-    f.head = CreateFrame("Frame", nil, f)
-    f.head:SetSize(HEAD, HEAD)
-    f.head:SetPoint("CENTER", f.hp, "LEFT", 2, 7)
-    f.head:SetFrameLevel(f.hp.over:GetFrameLevel() + 3)
+    f.title:SetSize(1, 18)
+    f.title:SetPoint("BOTTOM", f.hp, "TOP", 0, 3)
+    f.head = CreateFrame("Frame", nil, f.title)
+    f.head:SetSize(BADGE, BADGE)
+    f.head:SetPoint("LEFT", f.title, "LEFT", 0, 1)
     f.headTex = f.head:CreateTexture(nil, "ARTWORK")
     f.headTex:SetAllPoints()
-    f.headTex:SetTexture(ns.MEDIA .. "rk_normal")
-    -- 얼굴 원(가로 25px, 세로 21px) 안에 딱 맞게: 중심은 그림 가운데보다 8px 아래
-    f.lv = Outline(f.head:CreateFontString(nil, "OVERLAY"), 12, ns.NUM)
-    f.lv:SetPoint("CENTER", f.head, "CENTER", 0.5, -8.5)
-    f.lv:SetJustifyH("CENTER")
+    f.headTex:SetTexture(ns.MEDIA .. "rb_normal")
+    f.lv = Outline(f.title:CreateFontString(nil, "OVERLAY"), 13, ns.NUM)
+    f.lv:SetPoint("LEFT", f.head, "RIGHT", 3, 0)
+    f.name = Outline(f.title:CreateFontString(nil, "OVERLAY"), 13)
+    f.name:SetPoint("LEFT", f.lv, "RIGHT", 4, 0)
 
     -- 시전바 6px
     f.cast = ns.CreateSkewBar(f, W, 6, { inset = 1, noShadow = true, shape = "pill32" })
@@ -176,7 +201,7 @@ local function Build(plate)
     f.raid = f:CreateTexture(nil, "OVERLAY", nil, 7)
     f.raid:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
     f.raid:SetSize(24, 24)
-    f.raid:SetPoint("RIGHT", f.head, "LEFT", 4, -7)
+    f.raid:SetPoint("RIGHT", f.hp, "LEFT", -4, 0)
     f.raid:Hide()
 
     plate.leel = f
@@ -197,11 +222,11 @@ end
 -- 레벨+이름 묶음 가운데 정렬
 -- (전투 중 이름이 숨겨진 값이면 글자 폭도 숨겨져서 계산 불가 → 바 폭으로 대신)
 local function FitTitle(f)
-    local ok, w = pcall(function()
-        local v = (f.name:GetStringWidth() or 0)
-        return math.max(v, 1)
-    end)
-    f.title:SetWidth(ok and w or W)
+    local function Wd(fs, fb)
+        local ok, v = pcall(function() return math.max(fs:GetStringWidth() or 0, 0) end)
+        return ok and v or fb
+    end
+    f.title:SetWidth(BADGE + 3 + Wd(f.lv, 16) + 4 + Wd(f.name, W - 40))
 end
 
 -- 블리자드 디버프 아이콘 줄을 우리 체력바 아래(debRow)에 고정
@@ -352,8 +377,7 @@ local function UpdateTap(f, unit)
     f.tapped = tapped
     ns.SetTapped(f.hp, tapped)
     if not tapped then
-        if f.trivial then ns.PaintFlat(f.hp, C.grey) else ns.PaintHealth(f.hp) end
-        f.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+        PaintPlate(f)
     else
         f.name:SetTextColor(0.73, 0.70, 0.71)
     end
@@ -411,18 +435,20 @@ local function UpdateInfo(f, unit)
     local R = RANK[rank] or RANK.normal
     f.rank = rank
     f.headTex:SetTexture(ns.MEDIA .. R.tex)
-    if R.ink then f.lv:SetTextColor(0.227, 0.11, 0.141) end
-    f.lv:SetShadowColor(0, 0, 0, R.ink and 0 or 0.9)
-    f.lv:SetFont(ns.NUM, (rank == "boss") and 11 or 12, R.ink and "" or "OUTLINE")
-    f:SetScale(R.small and 0.82 or 1)
-    if f.trivial then
-        ns.PaintFlat(f.hp, C.grey)
-        f.name:SetTextColor(0.78, 0.80, 0.83)
-        f.lv:SetTextColor(0.60, 0.63, 0.67)
-    else
-        ns.PaintHealth(f.hp)
-        f.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+    -- 선공/비선공: 중립(노랑) 몹은 먼저 안 때려요 → 크림색 바
+    local calm = false
+    if ns.db.npAggro ~= false then
+        -- ns.Try는 참/거짓만 돌려줘서 반응 숫자는 직접 읽어요 (숨겨진 값이면 선공으로)
+        local ok, r = pcall(UnitReaction, unit, "player")
+        if ok then
+            local ok2, isCalm = pcall(function() return r == 4 end)
+            calm = (ok2 and isCalm) and true or false
+        end
     end
+    f.calm = calm
+    f:SetScale(R.small and 0.82 or 1)
+    PaintPlate(f)
+    if f.trivial then f.lv:SetTextColor(0.60, 0.63, 0.67) end
     FitTitle(f)
     f.tapped = nil
 end
@@ -445,7 +471,12 @@ local function UpdateBorder(f, unit)
         f.glow:SetVertexColor(1, 0.84, 0.88, 0.4); f.glow:Show()
     end
     f.hp.border:SetVertexColor(c[1], c[2], c[3], a)
-    if isTarget then f.name:SetTextColor(1, 1, 1) end
+    if isTarget then f.name:SetTextColor(1, 1, 1)
+    elseif not f.tapped then
+        if f.trivial then f.name:SetTextColor(0.78, 0.80, 0.83)
+        elseif f.calm then f.name:SetTextColor(CREAM_NAME[1], CREAM_NAME[2], CREAM_NAME[3])
+        else f.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3]) end
+    end
 
     local alpha = 1
     if not isTarget and UnitExists("target") then alpha = 0.62 end
@@ -782,6 +813,11 @@ local function OnRemoved(unit)
     end
 end
 
+-- 허브 스위치: 선공/비선공 구별 다시 그리기
+function ns:RefreshPlateInfo()
+    for u, f in pairs(active) do UpdateInfo(f, u); UpdateBorder(f, u) end
+end
+
 function ns:RefreshDeadPlates()
     for u, f in pairs(active) do
         f.dead = nil
@@ -815,7 +851,7 @@ function ns:EnableNameplates()
         "UNIT_SPELLCAST_CHANNEL_UPDATE",
         "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
         "QUEST_LOG_UPDATE", "UNIT_FLAGS", "UNIT_POWER_FREQUENT", "RAID_TARGET_UPDATE",
-        "PLAYER_SOFT_INTERACT_CHANGED",
+        "PLAYER_SOFT_INTERACT_CHANGED", "UNIT_FACTION",
     }) do
         pcall(ev.RegisterEvent, ev, e)
     end
@@ -852,7 +888,7 @@ function ns:EnableNameplates()
             if not f then return end
             if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_FLAGS" then
                 UpdateHealth(f, unit)
-            elseif event == "UNIT_NAME_UPDATE" or event == "UNIT_LEVEL" then
+            elseif event == "UNIT_NAME_UPDATE" or event == "UNIT_LEVEL" or event == "UNIT_FACTION" then
                 UpdateInfo(f, unit)
             elseif event:find("THREAT") then
                 UpdateBorder(f, unit)

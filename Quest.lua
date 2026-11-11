@@ -21,6 +21,13 @@ ns.QuestDB = DB
 local pills = {}
 function ns.PillToast(text, icon, warn)
     local t
+    -- 같은 알림이 이미 떠 있으면 새로 쌓지 않고 그 알림 시간만 다시 시작
+    for _, p in ipairs(pills) do
+        if p:IsShown() and p.text == text then
+            p.t = 0; p:SetAlpha(1)
+            return
+        end
+    end
     for _, p in ipairs(pills) do if not p:IsShown() then t = p break end end
     if not t then
         t = CreateFrame("Frame", nil, UIParent)
@@ -49,6 +56,7 @@ function ns.PillToast(text, icon, warn)
     t.edge:SetColor(c, 0.75)
     t.ic:SetTexture(ns.MEDIA .. (icon or "hb_quest"))
     t.fs:SetText(text)
+    t.text = text
     t:SetWidth(t.fs:GetStringWidth() + 48)
     t.t, t.order = 0, GetTime()
     t:SetAlpha(1)
@@ -124,16 +132,32 @@ local function OnGreeting()
     end
 end
 
-local pendingTitle
+-- 받기는 여기서, '퀘스트 받음' 알림은 진짜로 받아졌을 때(QUEST_ACCEPTED) 한 번만
+local lastDetail, lastDetailAt = nil, 0
 local function OnDetail()
     if Paused() or not DB().accept then return end
-    pendingTitle = GetTitleText and GetTitleText()
+    local title = GetTitleText and GetTitleText()
+    -- 같은 퀘 창이 연달아 다시 열리면 (다른 자동 수락 애드온, 대화창 되돌아옴) 한 번만 받기
+    if title and title == lastDetail and GetTime() - lastDetailAt < 3 then return end
+    lastDetail, lastDetailAt = title, GetTime()
     if QuestGetAutoAccept and QuestGetAutoAccept() then
         if AcknowledgeAutoAcceptQuest then AcknowledgeAutoAcceptQuest() end
     else
         AcceptQuest()
     end
-    if pendingTitle then ns.PillToast("퀘스트 받음  |cff9fe3a8" .. pendingTitle .. "|r", "hb_quest") end
+end
+
+local toasted = {}
+local function OnAccepted(a1, a2)
+    if not DB().on then return end
+    -- 버전에 따라 (questID) 또는 (퀘스트 번호, questID)
+    local qid = a2 or a1
+    if type(qid) ~= "number" then return end
+    if toasted[qid] and GetTime() - toasted[qid] < 10 then return end
+    toasted[qid] = GetTime()
+    local title = C_QuestLog and C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(qid)
+    if not title or title == "" then title = lastDetail end
+    if title then ns.PillToast("퀘스트 받음  |cff9fe3a8" .. title .. "|r", "hb_quest") end
 end
 
 local function OnProgress()
@@ -167,36 +191,52 @@ local function MarkBest()
     local btn = best and ChoiceButton(best)
     if not btn then return end
     if not mark then
+        -- A안: 둥근 분홍 테 (모서리는 원 테두리 그림 4조각 + 2px 선) + 위에 값 알약
         mark = CreateFrame("Frame", nil, UIParent)
         mark:SetFrameStrata("DIALOG")
+        local R, T = 10, 2
+        local PK = C.acc
+        local function corner(point, l, r, t, b)
+            local c = mark:CreateTexture(nil, "OVERLAY")
+            c:SetTexture(ns.MEDIA .. "ring")
+            c:SetTexCoord(l, r, t, b)
+            c:SetSize(R, R)
+            c:SetPoint(point)
+            c:SetVertexColor(PK[1], PK[2], PK[3], 1)
+        end
+        corner("TOPLEFT", 0, 0.5, 0, 0.5); corner("TOPRIGHT", 0.5, 1, 0, 0.5)
+        corner("BOTTOMLEFT", 0, 0.5, 0.5, 1); corner("BOTTOMRIGHT", 0.5, 1, 0.5, 1)
+        local function line(p1, p2, horiz)
+            local e = mark:CreateTexture(nil, "OVERLAY")
+            e:SetColorTexture(PK[1], PK[2], PK[3], 1)
+            if horiz then
+                e:SetPoint(p1 .. "LEFT", R, 0); e:SetPoint(p1 .. "RIGHT", -R, 0); e:SetHeight(T)
+            else
+                e:SetPoint("TOP" .. p1, 0, -R); e:SetPoint("BOTTOM" .. p1, 0, R); e:SetWidth(T)
+            end
+        end
+        line("TOP", nil, true); line("BOTTOM", nil, true); line("LEFT"); line("RIGHT")
+
+        -- 값 알약: 토끼 금화 + 가장 비싸요 · 값
         local tag = CreateFrame("Frame", nil, mark)
-        tag:SetSize(58, 16)
-        tag:SetPoint("BOTTOMRIGHT", mark, "TOPRIGHT", 2, -6)
-        ns.RoundRect(tag, 8, C.acc, "ARTWORK", 0, 0)
-        local fs = ns.Font(tag, 10, C.ink)
-        fs:SetShadowColor(0, 0, 0, 0)
-        fs:SetPoint("CENTER", 0, 0); fs:SetText("가장 비쌈")
-        mark.tag = tag
+        tag:SetHeight(20)
+        tag:SetPoint("BOTTOM", mark, "TOP", 0, -4)
+        tag:SetFrameLevel(mark:GetFrameLevel() + 2)
+        ns.RoundPlate(tag, 10, { 0.125, 0.094, 0.086, 0.97 }, { PK[1], PK[2], PK[3], 1 })
+        local coin = tag:CreateTexture(nil, "ARTWORK")
+        coin:SetTexture(ns.MEDIA .. "coin_g"); coin:SetSize(16, 16); coin:SetPoint("LEFT", 3, 0)
+        local fs = ns.Font(tag, 11, { 1, 0.84, 0.87 })
+        fs:SetPoint("LEFT", coin, "RIGHT", 4, 0)
+        mark.tag, mark.fs = tag, fs
     end
-    -- 테두리만 보이게: 버튼 뒤가 아니라 둘레에 얇게
     mark:SetParent(btn)
     mark:SetFrameLevel(btn:GetFrameLevel() + 5)
     mark:ClearAllPoints()
-    mark:SetPoint("TOPLEFT", btn, "TOPLEFT", -3, 3)
-    mark:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 3, -3)
-    if not mark.lines then
-        mark.lines = {}
-        for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-            local e = mark:CreateTexture(nil, "OVERLAY")
-            e:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 1)
-            if side == "TOP" or side == "BOTTOM" then
-                e:SetPoint(side .. "LEFT"); e:SetPoint(side .. "RIGHT"); e:SetHeight(2)
-            else
-                e:SetPoint("TOP" .. side); e:SetPoint("BOTTOM" .. side); e:SetWidth(2)
-            end
-            mark.lines[#mark.lines + 1] = e
-        end
-    end
+    mark:SetPoint("TOPLEFT", btn, "TOPLEFT", -4, 4)
+    mark:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 4, -4)
+    local money = ns.BunnyMoney and ns.BunnyMoney(bestPrice, 11) or GetCoinTextureString(bestPrice)
+    mark.fs:SetText("가장 비싸요  |cff9a8a86·|r  |cffffffff" .. money .. "|r")
+    mark.tag:SetWidth(mark.fs:GetStringWidth() + 32)
     mark:Show()
 end
 
@@ -221,7 +261,7 @@ end
 ----------------------------------------------------------------------
 local ev = CreateFrame("Frame")
 for _, e in ipairs({ "GOSSIP_SHOW", "QUEST_GREETING", "QUEST_DETAIL", "QUEST_PROGRESS",
-                     "QUEST_COMPLETE", "QUEST_TURNED_IN", "QUEST_FINISHED" }) do
+                     "QUEST_COMPLETE", "QUEST_TURNED_IN", "QUEST_FINISHED", "QUEST_ACCEPTED" }) do
     pcall(ev.RegisterEvent, ev, e)
 end
 ev:SetScript("OnEvent", function(_, event, a1, a2)
@@ -232,6 +272,7 @@ ev:SetScript("OnEvent", function(_, event, a1, a2)
     elseif event == "QUEST_PROGRESS" then OnProgress()
     elseif event == "QUEST_COMPLETE" then OnComplete()
     elseif event == "QUEST_TURNED_IN" then OnTurnedIn(a1, a2)
+    elseif event == "QUEST_ACCEPTED" then OnAccepted(a1, a2)
     elseif event == "QUEST_FINISHED" then if mark then mark:Hide() end
     end
 end)
