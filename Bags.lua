@@ -580,7 +580,7 @@ local function TakeOver()
 end
 
 ----------------------------------------------------------------------
-local wasLow, ready = false, false
+local wasLow, wasFull, ready = false, false, false
 local function Update()
     if not ns.db then return end
     local d = DB()
@@ -602,13 +602,16 @@ local function Update()
     end
 
     -- 넘어가는 순간에 한 번만 알림
-    if ready and d.on and low and not wasLow and total > 0 then
-        if free == 0 and d.full ~= false and ns.ShowBagFull and ns.ShowBagFull() then
-            -- 꽉 참 알림 창이 떴음
-        elseif d.warn and ns.PillToast then
-            ns.PillToast(free == 0 and "가방이 꽉 찼어요" or ("가방이 거의 찼어요. 남은 칸 " .. free), "hb_bag", true)
+    local full = total > 0 and free == 0
+    -- 꽉 차는 순간 (거의 참 알림이 이미 지나간 뒤라도) 버릴 템 고르기 창
+    if ready and d.on and full and not wasFull then
+        if not (d.full ~= false and ns.ShowBagFull and ns.ShowBagFull()) and d.warn and ns.PillToast then
+            ns.PillToast("가방이 꽉 찼어요", "hb_bag", true)
         end
+    elseif ready and d.on and low and not wasLow and not full and total > 0 and d.warn and ns.PillToast then
+        ns.PillToast("가방이 거의 찼어요. 남은 칸 " .. free, "hb_bag", true)
     end
+    if ready then wasFull = full end  -- 접속/다시 불러오기 때 이미 꽉 차 있어도 한 번은 뜨게
     if free > 0 and ns.HideBagFull then ns.HideBagFull() end
     wasLow = low
     ready = true
@@ -703,6 +706,8 @@ end
 -- (팔 값 = 개당 값 × 개수. 퀘스트 템, 값 0, 안 팔기 목록, 희귀 이상은 빼요)
 ----------------------------------------------------------------------
 local full, fullPending, lastFullAt = nil, false, 0
+local fullOfs, fullList = 0, nil  -- 다른 템 보기: 3개씩 넘기기
+local keepOpen = false  -- 한 번 버리기 시작하면 닫기 전까지 창 유지 (다음 후보로 채움)
 
 local function Candidates()
     local list = {}
@@ -739,7 +744,7 @@ local function BuildFull()
     local f = CreateFrame("Frame", "LeelUI_BagFull", UIParent)
     f:SetFrameStrata("DIALOG")
     f:SetPoint("TOP", UIParent, "TOP", 0, -130)
-    f:SetSize(3 * CARD_W + 2 * CARD_GAP + FPAD * 2, 196)
+    f:SetSize(3 * CARD_W + 2 * CARD_GAP + FPAD * 2, 226)
     f:EnableMouse(true)
     f:SetMovable(true); f:RegisterForDrag("LeftButton"); f:SetClampedToScreen(true)
     f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
@@ -754,6 +759,7 @@ local function BuildFull()
     local title = ns.Font(f, 13, C.accHi)
     title:SetPoint("LEFT", disc, "RIGHT", 8, 0)
     title:SetText("가방이 꽉 찼어요 · 버릴 걸 골라요")
+    f.title = title
 
     local x = CreateFrame("Button", nil, f)
     x:SetSize(20, 20); x:SetPoint("TOPRIGHT", -10, -11)
@@ -762,6 +768,7 @@ local function BuildFull()
     x:SetScript("OnEnter", function() xt:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) end)
     x:SetScript("OnLeave", function() xt:SetVertexColor(C.tx[1], C.tx[2], C.tx[3], 0.7) end)
     x:SetScript("OnClick", function() f:Hide() end)
+    f:SetScript("OnHide", function() keepOpen = false end)
 
     f.cards = {}
     for i = 1, 3 do
@@ -795,6 +802,20 @@ local function BuildFull()
         c.del:SetPoint("BOTTOM", 0, 10)
         f.cards[i] = c
     end
+
+    -- 아래 줄: 남은 칸 + 다른 템 보기
+    f.slotsL = ns.Font(f, 12)  -- 한글은 한글 글꼴로 (숫자 글꼴엔 한글이 없어요)
+    f.slotsL:SetPoint("BOTTOMLEFT", FPAD + 4, 15)
+    f.slotsL:SetText("남은 칸"); f.slotsL:SetTextColor(0.85, 0.78, 0.76)
+    f.slots = f:CreateFontString(nil, "OVERLAY")
+    f.slots:SetFont(ns.NUM or ns.FONT, 13, ""); f.slots:SetPoint("LEFT", f.slotsL, "RIGHT", 6, 0)
+    f.more = ns.MakeButton(f, "다른 템 보기", false, nil, 110)
+    f.more:SetHeight(22); f.more:SetPoint("BOTTOMRIGHT", -FPAD, 10)
+    f.more:SetScript("OnClick", function()
+        fullOfs = fullOfs + 3
+        if not fullList or fullOfs >= #fullList then fullOfs = 0 end
+        ns.ShowBagFull(true)
+    end)
     f:Hide()
     full = f
 end
@@ -811,14 +832,29 @@ local function Destroy(d)
     if CursorHasItem() then
         DeleteCursorItem()
         if ns.PillToast then ns.PillToast("버렸어요  " .. d.link, "hb_bag") end
+        keepOpen = true
     end
     ClearCursor()
+    -- 버린 자리에 다음으로 싼 템 채우기
+    C_Timer.After(0.25, function()
+        if full and full:IsShown() and not ns.ShowBagFull(true) then full:Hide() end
+    end)
+end
+
+local function SlotCount()
+    local free, total = 0, 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        total = total + (NumSlots(bag) or 0)
+        free = free + ((NumFree and NumFree(bag)) or 0)
+    end
+    return free, total
 end
 
 local function Fill(list)
-    local n = math.min(3, #list)
+    if fullOfs >= #list then fullOfs = 0 end
+    local n = math.min(3, #list - fullOfs)
     for i, c in ipairs(full.cards) do
-        local d = list[i]
+        local d = list[fullOfs + i]
         c.data = d
         if d then
             c.icon:SetTexture(d.icon)
@@ -839,7 +875,18 @@ local function Fill(list)
         end
     end
     full:SetWidth(n * CARD_W + (n - 1) * CARD_GAP + FPAD * 2)
-    full:SetWidth(math.max(full:GetWidth(), 250))
+    full:SetWidth(math.max(full:GetWidth(), 290))
+    local free, total = SlotCount()
+    local fc = free == 0 and "|cffff8fa3" or "|cfff8c39a"
+    full.slots:SetText(fc .. free .. "|r|cff9a8a86 / " .. total .. "|r")
+    full.title:SetText(free == 0 and "가방이 꽉 찼어요 · 버릴 걸 골라요" or "가방 정리 · 버릴 걸 골라요")
+    local pages = math.ceil(#list / 3)
+    if pages > 1 then
+        full.more:SetLabel("다른 템 보기  " .. (math.floor(fullOfs / 3) + 1) .. "/" .. pages)
+        full.more:Show()
+    else
+        full.more:Hide()
+    end
     return n
 end
 
@@ -849,6 +896,8 @@ function ns.ShowBagFull(force)
     if not force and GetTime() - lastFullAt < 3 then return full and full:IsShown() end
     local list = Candidates()
     if #list == 0 then return false end
+    if not force and not (full and full:IsShown()) then fullOfs = 0 end
+    fullList = list
     if not full then BuildFull() end
     Fill(list)
     lastFullAt = GetTime()
@@ -858,6 +907,7 @@ end
 
 function ns.HideBagFull()
     fullPending = false
+    if keepOpen then return end
     if full and full:IsShown() then full:Hide() end
 end
 

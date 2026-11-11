@@ -94,6 +94,13 @@ local MODULES = {
             { t = "toggle", label = "기본 플레이어/대상 창 숨기기", hint = "다시 불러오기 후 적용",
               get = function() return ns.db.hideBlizzard end,
               set = function(v) ns.db.hideBlizzard = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+            { t = "toggle", label = "가운데에 대상과 거리", hint = "끄면 예전처럼 전투 시간",
+              get = function() return not ns.db.centerTime end,
+              set = function(v)
+                  ns.db.centerTime = not v
+                  local fr = ns.hudFrames
+                  if fr and fr.center then fr.center:Apply() end
+              end },
             { t = "toggle", label = "미니맵 아이콘",
               get = function() return not ns.db.minimap.hide end,
               set = function(v)
@@ -151,6 +158,15 @@ local MODULES = {
             { t = "toggle", label = "예전 얇은 바", hint = "위쪽 HUD 아래에 붙은 얇은 바",
               get = function() return ns.db.castStyle == "hud" end,
               set = function() SetCastStyle("hud") end },
+            { t = "toggle", label = "내 시전바만 보기", hint = "대상(적)의 시전바는 숨겨요",
+              get = function() return ns.db.castMineOnly end,
+              set = function(v)
+                  ns.db.castMineOnly = v and true or false
+                  local tc = ns.casts and ns.casts.target
+                  if tc then
+                      if v then tc.casting, tc.finishing = false, false; tc:SetScript("OnUpdate", nil); tc:Hide(); if tc.OnLayout then tc:OnLayout() end end
+                  end
+              end },
             { t = "button", label = "시전바 위치 초기화",
               run = function() if ns.ResetCastPosition then ns:ResetCastPosition() end; Print("시전바 위치를 처음대로 돌렸어요.") end },
         },

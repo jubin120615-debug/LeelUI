@@ -385,8 +385,143 @@ local function UpdatePower(f)
 end
 
 ----------------------------------------------------------------------
--- 가운데: 전투 시간 (전투 중에만 표시, 숫자 + 분홍 줄)
+-- 가운데: 대상과 거리 (기본) 또는 전투 시간 (허브에서 고름)
+-- 와우는 정확한 거리를 안 알려줘서, 내 기술 사거리로 '~몇 m' 구간을 재요
 ----------------------------------------------------------------------
+local rangeSpells, rangeDirty = {}, true
+local RANGE_ITEMS   -- { {r=사거리, ids={...}}, ... } 가까운 순
+
+local function SpellRangeOf(id)
+    if C_Spell and C_Spell.GetSpellInfo then
+        local ok, i = pcall(C_Spell.GetSpellInfo, id)
+        if ok and type(i) == "table" then return i.maxRange end
+    end
+    if GetSpellInfo then
+        local ok, _, _, _, _, _, maxR = pcall(GetSpellInfo, id)
+        if ok then return maxR end
+    end
+end
+
+-- { 사거리, 아이템 번호 }: 부두 부적 5, 리넨 붕대 15, 겨우살이 20, 체력의 두루마리 30
+RANGE_ITEMS = { { 5, 8149 }, { 15, 1251 }, { 20, 21519 }, { 30, 1180 } }
+local function ItemInRange(id, unit)
+    local f = (C_Item and C_Item.IsItemInRange) or IsItemInRange
+    if not f then return nil end
+    local ok, v = pcall(function()
+        local x = f(id, unit)
+        if issecretvalue and issecretvalue(x) then return nil end
+        if x == true or x == 1 then return true end
+        if x == false or x == 0 then return false end
+    end)
+    if ok then return v end
+end
+do  -- 아이템 정보 미리 받아두기 (처음엔 비어 있으면 거리 확인이 안 돼요)
+    for _, it in ipairs(RANGE_ITEMS) do
+        if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, it[2])
+        elseif GetItemInfo then pcall(GetItemInfo, it[2]) end
+    end
+end
+
+local function ScanSpells()
+    rangeDirty = false
+    local by = {}
+    local function add(id)
+        if not id then return end
+        local r = SpellRangeOf(id)
+        if type(r) ~= "number" then return end
+        if r < 5 then r = 5 end            -- 근접 기술 (사거리 0)
+        r = math.floor(r + 0.5)
+        if r > 45 then return end
+        by[r] = by[r] or {}
+        if #by[r] < 4 then table.insert(by[r], id) end
+    end
+    if C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines and C_SpellBook.GetSpellBookItemInfo then
+        local bank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
+        for t = 1, (C_SpellBook.GetNumSpellBookSkillLines() or 0) do
+            local ok, line = pcall(C_SpellBook.GetSpellBookSkillLineInfo, t)
+            if ok and line and not line.offSpecID then
+                for i = line.itemIndexOffset + 1, line.itemIndexOffset + line.numSpellBookItems do
+                    local ok2, it = pcall(C_SpellBook.GetSpellBookItemInfo, i, bank)
+                    if ok2 and it and not it.isPassive and it.spellID
+                       and (not Enum.SpellBookItemType or it.itemType == Enum.SpellBookItemType.Spell) then
+                        add(it.spellID)
+                    end
+                end
+            end
+        end
+    elseif GetNumSpellTabs and GetSpellTabInfo and GetSpellBookItemInfo then
+        for t = 1, GetNumSpellTabs() do
+            local _, _, off, num = GetSpellTabInfo(t)
+            for i = off + 1, off + num do
+                local ok, kind, id = pcall(GetSpellBookItemInfo, i, "spell")
+                if ok and kind == "SPELL" and id then add(id) end
+            end
+        end
+    end
+    wipe(rangeSpells)
+    for r, ids in pairs(by) do rangeSpells[#rangeSpells + 1] = { r = r, ids = ids } end
+    -- 아군·NPC도 잴 수 있게 사거리가 정해진 물건 (갖고 있지 않아도 돼요)
+    for _, it in ipairs(RANGE_ITEMS) do
+        rangeSpells[#rangeSpells + 1] = { r = it[1], ids = { it[2] }, item = true }
+    end
+    table.sort(rangeSpells, function(x, y) return x.r < y.r end)
+end
+
+local function InRangeRaw(id, unit)
+    local v
+    if C_Spell and C_Spell.IsSpellInRange then
+        v = C_Spell.IsSpellInRange(id, unit)
+    elseif IsSpellInRange then
+        local name = GetSpellInfo and GetSpellInfo(id)
+        if name then v = IsSpellInRange(name, unit) end
+    end
+    if issecretvalue and issecretvalue(v) then return nil end
+    if v == true or v == 1 then return true end
+    if v == false or v == 0 then return false end
+    return nil   -- 이 대상에겐 못 쓰는 기술
+end
+local function InRange(id, unit)
+    local ok, v = pcall(InRangeRaw, id, unit)
+    if ok then return v end
+end
+
+-- 전투 밖에서만: 상호작용 거리 (3 = 약 10m, 4 = 약 28m)
+local function Interact(unit, i)
+    if InCombatLockdown() or not CheckInteractDistance then return nil end
+    local ok, v = pcall(CheckInteractDistance, unit, i)
+    if ok then return v and true or false end
+end
+
+-- 돌려주는 값: 숫자(이 거리 안), "far"(가장 먼 기술보다 멀리), nil(모름)
+local function TargetRange(unit)
+    if rangeDirty then pcall(ScanSpells) end
+    local any, maxR, hit = false, 0, nil
+    for _, b in ipairs(rangeSpells) do
+        for _, id in ipairs(b.ids) do
+            local v
+            if b.item then v = ItemInRange(id, unit) else v = InRange(id, unit) end
+            if v == true then hit = b.r break end
+            if v == false then any = true; maxR = b.r end
+        end
+        if hit then break end
+    end
+    -- 전투 밖이면 상호작용 거리로 구간을 더 잘게
+    if not (hit and hit <= 5) then
+        if (not hit or hit > 10) and Interact(unit, 3) then return 10 end
+        if (not hit or hit > 28) and Interact(unit, 4) then return 28 end
+    end
+    if hit then return hit end
+    if any then return "far", maxR end
+    if Interact(unit, 4) == false then return "far", 28 end
+end
+
+local DIST_COL = {
+    near = { 0.62, 0.88, 0.66 },   -- 근접
+    mid  = C.acc,                  -- ~20
+    long = { 0.97, 0.76, 0.6 },    -- ~40
+    far  = { 0.55, 0.48, 0.46 },   -- 너무 멂
+}
+
 local function CreateCenter(hud)
     local c = CreateFrame("Frame", nil, hud)
     c:SetSize(GAP, 100)
@@ -397,24 +532,113 @@ local function CreateCenter(hud)
     c.text:SetShadowColor(0, 0, 0, 0.7)
     c.text:SetShadowOffset(0, -3)
 
+    c.unitm = ns.Num(c, 22, C.tx)        -- 작은 m
+    c.unitm:SetPoint("BOTTOMLEFT", c.text, "BOTTOMRIGHT", 1, 4)
+    c.unitm:SetShadowColor(0, 0, 0, 0.7)
+    c.unitm:SetShadowOffset(0, -2)
+
     c.rule = ns.Tex(c, "ARTWORK", 0, ns.MEDIA .. "pill32", C.acc)
     c.rule:SetSize(56, 3)
     c.rule:SetPoint("TOP", c.text, "BOTTOM", 0, -6)
 
     c.sub = ns.Font(c, 11, C.tx2)
-    c.sub:SetPoint("TOP", c.rule, "BOTTOM", 0, -6)
+    c.sub:SetPoint("TOP", c.rule, "BOTTOM", 0, -9)
 
-    -- 전투 중에만 보임 (전투 시간 타이머)
+    -- 거리 점 4개 (분홍 줄 자리, 멀수록 하나씩 차요)
+    c.dots = {}
+    for i = 1, 4 do
+        local d = ns.Tex(c, "ARTWORK", 1, ns.MEDIA .. "circle", C.acc)
+        d:SetSize(9, 9)
+        d:SetPoint("CENTER", c.rule, "CENTER", (i - 2.5) * 14, 0)
+        d:Hide()
+        c.dots[i] = d
+    end
+    local DOT_OFF = { 0.36, 0.27, 0.25 }
+    local function Dots(n, col)
+        c.rule:Hide()
+        for i, d in ipairs(c.dots) do
+            local k = (n and i <= n) and col or DOT_OFF
+            d:SetVertexColor(k[1], k[2], k[3], 1)
+            d:Show()
+        end
+    end
+    local function Rule()
+        c.rule:Show()
+        for _, d in ipairs(c.dots) do d:Hide() end
+    end
+    c.Rule = Rule
+    c.Dots = Dots
+
+    local function Color(col)
+        c.text:SetTextColor(col[1], col[2], col[3])
+        c.unitm:SetTextColor(col[1], col[2], col[3])
+    end
+
+    local function UseDist() return not ns.db.centerTime end
+
+    function c:ShowDist()
+        local unit = "target"
+        if not UnitExists(unit) then
+            if UnitAffectingCombat("player") then
+                self.text:SetText("-"); self.unitm:SetText(""); Color(DIST_COL.far)
+                Dots(0)
+                self.sub:SetText("대상 없음"); self:Show()
+            else
+                self:Hide()
+            end
+            return
+        end
+        if UnitIsUnit(unit, "player") then self:Hide() return end
+        local r, maxR = TargetRange(unit)
+        if r == "far" then
+            self.text:SetText(maxR or 40); Color(DIST_COL.far)
+            self.unitm:SetText("m+"); Dots(4, DIST_COL.far)
+            self.sub:SetText("너무 멀어요"); self:Show()
+            return
+        elseif type(r) == "number" then
+            self.text:SetText(r)
+            local col = r <= 5 and DIST_COL.near or r <= 20 and DIST_COL.mid or DIST_COL.long
+            Color(col)
+            Dots(r <= 5 and 1 or r <= 20 and 2 or r <= 30 and 3 or 4, col)
+            self.sub:SetText(r <= 5 and "근접 거리" or "대상과 거리")
+        else
+            self.text:SetText("?"); self.unitm:SetText(""); Color(DIST_COL.far)
+            Dots(0)
+            self.sub:SetText("대상과 거리"); self:Show()
+            return
+        end
+        self.unitm:SetText("m")
+        self:Show()
+    end
+
+    -- 거리 모드: 대상이 있으면 늘 / 전투 시간 모드: 전투 중에만
     function c:Idle()
+        if UseDist() then return self:Dist() end
         self:SetScript("OnUpdate", nil)
         self:Hide()
+        Rule()
+        self.unitm:SetText("")
         self.text:SetText("VS")
         self.text:SetTextColor(C.acc[1], C.acc[2], C.acc[3])
         self.sub:SetText("전투 전")
     end
 
+    function c:Dist()
+        local acc = 1
+        self:ShowDist()
+        self:SetScript("OnUpdate", function(s, el)
+            acc = acc + el
+            if acc < 0.2 then return end
+            acc = 0
+            s:ShowDist()
+        end)
+    end
+
     function c:Fight()
+        if UseDist() then return self:Dist() end
         local start, acc = GetTime(), 0
+        Rule()
+        self.unitm:SetText("")
         self.text:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
         self.sub:SetText("전투 시간")
         self.text:SetText("0")
@@ -431,6 +655,27 @@ local function CreateCenter(hud)
             end
         end)
     end
+
+    -- 허브에서 모드를 바꿨을 때
+    function c:Apply()
+        if UseDist() then self:Dist()
+        elseif UnitAffectingCombat("player") then self:Fight()
+        else self:Idle() end
+    end
+
+    -- 거리 모드는 숨겨져 있어도 대상이 생기면 다시 보여야 해서, 바깥 틀에서 돌려요
+    local tick = CreateFrame("Frame", nil, hud)
+    local tacc = 0
+    tick:SetScript("OnUpdate", function(_, el)
+        tacc = tacc + el
+        if tacc < 0.2 then return end
+        tacc = 0
+        if UseDist() and not ns.moving and not c:IsShown() then c:ShowDist() end
+    end)
+    local sev = CreateFrame("Frame")
+    sev:RegisterEvent("SPELLS_CHANGED")
+    pcall(sev.RegisterEvent, sev, "LEARNED_SPELL_IN_TAB")
+    sev:SetScript("OnEvent", function() rangeDirty = true end)
 
     c:Idle()
     return c
@@ -577,8 +822,12 @@ function ns:SetPreview(on)
         Fake(fr.pet, "펫 예시", 25, 860, 1000)
         fr.pet.focus:SetMinMaxValues(0, 100); fr.pet.focus:SetValue(70)
         fr.pet.chip:Hide()
-        fr.center.text:SetText("42")
+        fr.center:SetScript("OnUpdate", nil)
+        fr.center.text:SetText(ns.db.centerTime and "42" or "20")
+        if ns.db.centerTime then fr.center.Rule() else fr.center.Dots(2, C.acc) end
+        fr.center.unitm:SetText(ns.db.centerTime and "" or "m")
         fr.center.text:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+        fr.center.unitm:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
         fr.center.sub:SetText("예시 화면")
         fr.center:Show()
         if ns.SetCastPreview then ns:SetCastPreview(true) end
@@ -588,7 +837,7 @@ function ns:SetPreview(on)
             RegisterUnitWatch(fr.target)
             RegisterUnitWatch(fr.pet)
         end)
-        if not UnitAffectingCombat("player") then fr.center:Idle() end
+        fr.center:Apply()
         fr.refresh()
     end
 end
@@ -685,6 +934,7 @@ function ns:CreateHUD()
         elseif event == "PLAYER_TARGET_CHANGED" then
             target.tapped = nil
             All(target)
+            if not ns.db.centerTime then center:ShowDist() end
         elseif event == "LOOT_CLOSED" or event == "LOOT_OPENED" then
             -- 창이 닫힌 직후엔 아직 줍기 상태가 안 바뀌어 있을 수 있어 한 번 더 확인
             if UnitExists("target") then UpdateDead(target) end

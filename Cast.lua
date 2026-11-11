@@ -221,6 +221,11 @@ end
 
 local function Start(b)
     local u = b.unit
+    -- 허브 '내 시전바만': 대상 시전바는 안 띄움
+    if u ~= "player" and ns.db.castMineOnly then
+        if b:IsShown() then Hide(b) end
+        return
+    end
     local info, raw
     local ok = pcall(function()
         -- 두 번째 값(text)이 화면용 이름. 첫 값은 "Opening - No Text" 같은 내부 이름일 때가 있음
@@ -465,7 +470,9 @@ function ns:SetCastPreview(on)
     local cs = ns.casts
     if not cs then return end
     for unit, b in pairs(cs) do
-        if on then
+        if on and unit ~= "player" and ns.db.castMineOnly then
+            b:Hide()
+        elseif on then
             b.finishToken = nil
             b:SetScript("OnUpdate", nil)
             b.bar:Show()
