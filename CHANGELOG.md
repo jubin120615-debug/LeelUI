@@ -1,4 +1,4 @@
-> 🎀 질문 · 제보 · 새 소식은 [채채TV](https://www.youtube.com/@채채TV_2)에서
+> 🎀 질문 · 제보 · 새 소식은 [채채TV](https://www.youtube.com/channel/UCgIMsz7rfmveQr2jCmH2hWg)에서
 
 # 1.3.10
 
