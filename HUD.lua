@@ -555,6 +555,8 @@ local function TargetRange(unit)
     if Interact(unit, 4) == false then return "far", 28 end
 end
 
+ns.UnitRange = TargetRange   -- Leel Mark가 무리 고를 때 씀 (숫자 = 그 안, "far" = 그보다 멂)
+
 local DIST_COL = {
     near = { 0.62, 0.88, 0.66 },   -- 근접
     mid  = C.acc,                  -- ~20

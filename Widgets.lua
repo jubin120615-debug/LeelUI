@@ -371,7 +371,7 @@ do
             i:SetTexture(ns.MEDIA .. "bunny"); i:SetPoint("CENTER"); i:SetSize(20, 20)
         end
         SetStripe(tt, C.acc)
-        tt:HookScript("OnHide", function(self) SetStripe(self, C.acc) end)
+        tt:HookScript("OnHide", function(self) self.leelUnitCol = nil; SetStripe(self, C.acc) end)
         -- 다른 곳에서 테두리를 다시 그리면 또 숨김
         if tt.NineSlice then
             hooksecurefunc(tt.NineSlice, "Show", function(ns9) ns9:SetAlpha(0) end)
@@ -383,6 +383,15 @@ do
         local sb = _G.GameTooltipStatusBar
         if not sb or sb.leelSkinned then return end
         sb.leelSkinned = true
+        -- 블리자드가 체력에 따라 초록/노랑으로 다시 칠해도 우리 색으로
+        local painting = false
+        hooksecurefunc(sb, "SetStatusBarColor", function(self)
+            if painting then return end
+            local c = GameTooltip.leelUnitCol or C.acc
+            painting = true
+            self:SetStatusBarColor(c[1], c[2], c[3], 1)
+            painting = false
+        end)
         sb:SetStatusBarTexture(ns.WHITE)
         sb:ClearAllPoints()
         sb:SetPoint("TOPLEFT", GameTooltip, "BOTTOMLEFT", 14, -3)
@@ -462,9 +471,29 @@ do
         end
         local mo = CreateFrame("Frame")
         mo:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+        -- 마우스 올린 몹 색으로 왼쪽 줄 + 체력바 (툴팁 자료가 숨겨져 있어도 mouseover로 직접)
+        mo:SetScript("OnEvent", function()
+            if not UnitExists("mouseover") then return end
+            local col = UnitColor("mouseover")
+            if col then
+                GameTooltip.leelUnitCol = col
+                SetStripe(GameTooltip, col)
+            end
+        end)
         mo:SetScript("OnUpdate", function()
             local tt = GameTooltip
-            if not tt:IsShown() or tt:GetOwner() ~= UIParent then return end
+            if not tt:IsShown() then return end
+            local owner = tt:GetOwner()
+            if owner and owner ~= UIParent and owner ~= WorldFrame then
+                -- 버튼이 꺼지거나(잡동사니 다 팔림 등) 숨겨지면 마우스를 떼도 안 닫히는 블리자드 문제 보완
+                pcall(function()
+                    if not owner:IsVisible() then tt:Hide() return end
+                    if owner.IsEnabled and not owner:IsEnabled() and owner.IsMouseOver and not owner:IsMouseOver() then
+                        tt:Hide()
+                    end
+                end)
+                return
+            end
             if UnitExists("mouseover") then return end
             local ok, isUnit = pcall(function() local _, u = tt:GetUnit(); return u ~= nil end)
             if ok and isUnit then tt:Hide() end
@@ -476,7 +505,7 @@ do
                 local ok, _, unit = pcall(tt.GetUnit, tt)
                 if not ok or not unit then return end
                 local col = UnitColor(unit)
-                if col then SetStripe(tt, col) end
+                if col then tt.leelUnitCol = col; SetStripe(tt, col) end
             end)
         end
     end)

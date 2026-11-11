@@ -4,7 +4,7 @@
 local _, ns = ...
 local C = ns.C
 
-local W, H = 580, 492
+local W, H = 580, 552   -- 화면 탭 8줄이 다 들어가게
 local RAIL = 214
 local HEAD = 54
 local TOP = 96   -- 머리 + 분류 알약 줄
@@ -206,6 +206,18 @@ local MODULES = {
             { t = "toggle", label = "마우스 따라다니기", hint = "끄면 블리자드 기본 자리(오른쪽 아래)",
               get = function() return ns.db.tipCursor ~= false end,
               set = function(v) ns.db.tipCursor = v and true or false end },
+        },
+    },
+    {
+        key = "LeelUI_Chat", builtin = true, cat = "view",
+        title = "채팅창", sub = "채널 기둥 · 새 글 숫자", icon = "hb_apps",
+        desc = "왼쪽 채널 기둥 + 분홍 테 카드. 다른 탭에 새 글이 오면 숫자, 귓말은 분홍 점.\n기둥 오른쪽 클릭 = 탭 메뉴, Shift + 끌기 = 채팅창 옮기기. 스위치는 다시 불러오기 후 적용.",
+        onoff = { reload = true, get = function() return ns.ChatDB and ns.ChatDB().on end,
+                  set = function(v) ns.ChatDB().on = v and true or false end },
+        items = {
+            { t = "slider", label = "배경 진하기", min = 0, max = 100,
+              get = function() return (ns.ChatDB and ns.ChatDB().alpha) or 0 end,
+              set = function(v) if ns.SetChatAlpha then ns:SetChatAlpha(v) end end },
         },
     },
     {
@@ -908,13 +920,17 @@ end
 
 local function PaintRail()
     PaintPills()
-    local n = 0
+    local n, cnt = 0, 0
+    for _, m in ipairs(MODULES) do if m.cat == curCat then cnt = cnt + 1 end end
+    -- 줄이 많으면 간격을 좁혀서 아래 칸과 안 겹치게
+    local step = math.min(50, math.floor((H - TOP - 12 - FOOT) / math.max(1, cnt)))
     for i, row in ipairs(hub.rail) do
         local m = MODULES[i]
         if m.cat == curCat then
             n = n + 1
+            row:SetHeight(math.min(46, step - 3))
             row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", 10, -TOP - 8 - (n - 1) * 50)
+            row:SetPoint("TOPLEFT", 10, -TOP - 8 - (n - 1) * step)
             row:Show()
         else
             row:Hide()
@@ -963,6 +979,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.13", "르엘 채팅창 · 새 글 숫자", "남의 몹 자물쇠 · 자동 징 무리만" },
     { "1.3.12", "파티 힐러 타일 · 들어올 치유", "르엘 툴팁 · 남의 몹 자물쇠" },
     { "1.3.5", "줍기 창이 분홍 카드로", "파티 링이 전투 중에도 시계 방향으로" },
     { "1.3.4", "르엘 가방 · 상점 토끼 · 시체 반짝 상자", "퀘스트 자동, 토끼 미니맵" },

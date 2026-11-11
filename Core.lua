@@ -154,7 +154,7 @@ loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON then
         -- 처음 설치면 예전 버전 옮기기(v2~v5 크기 조정)를 건너뛰고 기본값 그대로
-        if not LeelUIDB or next(LeelUIDB) == nil then LeelUIDB = { v = 5 } end
+        if not LeelUIDB or next(LeelUIDB) == nil then LeelUIDB = { v = 5 }; ns.freshInstall = true end
         for k, v in pairs(ns.defaults) do
             if LeelUIDB[k] == nil then
                 LeelUIDB[k] = type(v) == "table" and CopyTable(v) or v

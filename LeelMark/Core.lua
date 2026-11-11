@@ -112,6 +112,87 @@ local function Score(u)
     return s
 end
 
+local function issecretvalue_safe(v)
+    if issecretvalue then local ok, r = pcall(issecretvalue, v); return ok and r end
+    return false
+end
+
+-- 거리 구간 (르엘 UI 거리 재기 사용, 없으면 상호작용 거리만)
+local function Range(u)
+    local L = _G.LeelUI
+    if L and L.UnitRange then
+        local ok, r, maxR = pcall(L.UnitRange, u)
+        if ok then
+            if type(r) == "number" then return r end
+            if r == "far" then return (maxR or 40) + 10 end
+        end
+    end
+    if Try(CheckInteractDistance, u, 3) then return 10 end
+    if Try(CheckInteractDistance, u, 4) then return 28 end
+    return 45
+end
+
+-- 화면 위 이름표 가운데 (실제 픽셀)
+-- 블리자드 이름표는 위치를 못 재게 막혀 있어서(재면 오류) 르엘 UI 이름표 판으로 재고, 그것도 막히면 포기
+local function PlatePos(plate)
+    for _, fr in ipairs({ plate.leel, plate.UnitFrame and plate.UnitFrame.leel }) do
+        if fr and fr.GetCenter then
+            local ok, x, y, s = pcall(function()
+                local cx, cy = fr:GetCenter()
+                return cx, cy, fr:GetEffectiveScale()
+            end)
+            if ok and type(x) == "number" and type(y) == "number" and not issecretvalue_safe(x) then
+                return x * s, y * s
+            end
+        end
+    end
+end
+
+-- 징 찍을 무리: 기준 몹(대상, 없으면 가장 가까운 몹) 둘레의 몹만
+--   나와 30m 안 + 화면에서 가까이 붙어 있고(화면 높이의 22% 안) 나와의 거리도 비슷한 몹
+local NEAR = 30   -- 나와 이 거리(미터)보다 먼 몹은 대상이어도 안 찍어요
+local function KeepPack(list)
+    -- 1) 멀리 있는 몹은 먼저 빼기
+    local near, cut = {}, 0
+    for _, c in ipairs(list) do
+        c.range = Range(c.unit)
+        if c.range <= NEAR then near[#near + 1] = c else cut = cut + 1 end
+    end
+    list = near
+    if #list <= 1 then return list, cut end
+    local anchor
+    for _, c in ipairs(list) do
+        if Try(UnitIsUnit, c.unit, "target") then anchor = c break end
+    end
+    if not anchor then
+        local us = UIParent:GetEffectiveScale()
+        local cx, cy = UIParent:GetWidth() * us / 2, UIParent:GetHeight() * us / 2
+        for _, c in ipairs(list) do
+            local d = c.x and ((c.x - cx) ^ 2 + (c.y - cy) ^ 2) or 1e9
+            c.key = c.range * 100000 + d
+            if not anchor or c.key < anchor.key then anchor = c end
+        end
+    end
+    anchor.range = anchor.range or Range(anchor.unit)
+    local sh = UIParent:GetHeight() * UIParent:GetEffectiveScale()   -- 이름표 좌표와 같은 단위
+    local lim = sh * 0.22
+    local keep = {}
+    for _, c in ipairs(list) do
+        local ok = c == anchor
+        if not ok then
+            local dr = math.abs((c.range or 45) - (anchor.range or 45))
+            if c.x and anchor.x then
+                local d = math.sqrt((c.x - anchor.x) ^ 2 + (c.y - anchor.y) ^ 2)
+                ok = d <= lim and dr <= 10
+            else
+                ok = dr <= 5   -- 화면 위치를 못 재면 나와의 거리 구간이 같은 몹만
+            end
+        end
+        if ok then keep[#keep + 1] = c else cut = cut + 1 end
+    end
+    return keep, cut
+end
+
 local function Candidates()
     local list, used = {}, {}
     for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
@@ -121,14 +202,17 @@ local function Candidates()
             if m then
                 used[m] = true
             elseif not Try(UnitIsTapDenied, u) then
-                list[#list + 1] = { unit = u, score = Score(u) }
+                local x, y = PlatePos(plate)
+                list[#list + 1] = { unit = u, score = Score(u), x = x, y = y }
             end
         end
     end
+    local cut
+    if db.packOnly ~= false then list, cut = KeepPack(list) end
     local tm = GetMark("target")
     if tm then used[tm] = true end
     table.sort(list, function(a, b) return a.score > b.score end)
-    return list, used
+    return list, used, cut or 0
 end
 
 local function Announce(text)
@@ -139,8 +223,11 @@ end
 
 -- 자동: 전투 밖에서 누르는 순간(PreClick) 우선순위를 계산해 "/tm [@nameplateN] ~징" 매크로를 만들어 둠
 local function BuildAutoMacro()
-    local list, used = Candidates()
-    if #list == 0 then return nil, "징을 찍을 적이 안 보여요. (적 이름표가 켜져 있어야 해요)" end
+    local list, used, cut = Candidates()
+    if #list == 0 then
+        if cut > 0 then return nil, "30m 안에 징을 찍을 적이 없어요. 조금 더 다가가서 눌러 주세요." end
+        return nil, "징을 찍을 적이 안 보여요. (적 이름표가 켜져 있어야 해요)"
+    end
     local order, roles = AutoOrder()
     local lines, oi, got = {}, 1, {}
     for _, c in ipairs(list) do
@@ -155,6 +242,7 @@ local function BuildAutoMacro()
     if got[8] then parts[#parts + 1] = "해골 먼저" end
     if got[7] then parts[#parts + 1] = "X 다음" end
     for m, r in pairs(roles) do if got[m] then parts[#parts + 1] = MARK_NAME[m] .. "는 " .. r end end
+    if cut > 0 then parts[#parts + 1] = "멀리 있는 " .. cut .. "마리는 뺐어요" end
     return table.concat(lines, "\n"), table.concat(parts, " · ")
 end
 
@@ -312,7 +400,7 @@ local function CreateBar()
     end
     -- 자동: 매크로 단추. 전투 밖에서 누르는 순간 매크로를 새로 만듦
     local auto = PillButton(bar, "LeelMarkAuto", "자동", "ic_wand", true,
-        "자동", "보이는 적에게 우선순위대로 빈 징을 채워요 (시전 몹·정예 먼저). 전투 밖에서만")
+        "자동", "대상(없으면 가장 가까운 몹) 둘레 무리에만 우선순위대로 빈 징을 채워요 (시전 몹·정예 먼저). 전투 밖에서만")
     auto:SetAttribute("type", "macro")
     auto:SetAttribute("macrotext", "")
     auto:SetScript("PreClick", function(self, _, down)
@@ -396,6 +484,9 @@ SlashCmdList.LEELMARK = function(msg)
             bar:SetScale(db.scale); ApplyPos()
             Print("바 크기 " .. math.floor(db.scale * 100 + 0.5) .. "%")
         end
+    elseif cmd == "무리" or cmd == "pack" then
+        db.packOnly = (db.packOnly == false)
+        Print("자동: " .. (db.packOnly ~= false and "대상 둘레 가까운 무리만 찍어요" or "보이는 적 전부 찍어요"))
     elseif cmd == "점검" or cmd == "debug" then
         db.debug = not db.debug
         Print("점검 " .. (db.debug and "켬: 자동을 누르면 만든 매크로를 채팅에 보여 줘요" or "끔"))
@@ -403,7 +494,7 @@ SlashCmdList.LEELMARK = function(msg)
         db.pos = nil; ApplyPos()
         Print("바 자리를 처음대로 돌렸어요.")
     else
-        Print("/lmark 보이기 · 숨기기 · 알림 · 크기 80 · 위치")
+        Print("/lmark 보이기 · 숨기기 · 알림 · 무리 · 크기 80 · 위치")
         Print("단축키: 게임 메뉴 > 단축키 > 애드온 > Leel Mark (자동 · 지우기 · 마우스 올린 몹에 다음 징)")
     end
 end

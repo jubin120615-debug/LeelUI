@@ -222,13 +222,19 @@ local function ScanMinis()
     miniUsed = n
 end
 
+local RefreshLoot   -- 아래 Refresh 뒤에서 채움
 -- 0.4초마다 가볍게 훑기 (이름표 몇 개뿐이라 부담 없음)
 local scanT = 0
 CreateFrame("Frame"):SetScript("OnUpdate", function(_, el)
     scanT = scanT + el
     if scanT < 0.4 then return end
     scanT = 0
-    if db then ScanMinis() end
+    if db then
+        ScanMinis()
+        -- 바라보는 시체가 나중에 '주울 수 있음'으로 바뀌는 경우(다른 사람이 남기고 간 전리품이 풀릴 때)
+        -- 따로 알려주는 이벤트가 없어서, 상자가 안 떠 있으면 가끔 다시 확인
+        if RefreshLoot and not lootOpen and not loot:IsShown() then RefreshLoot() end
+    end
 end)
 
 -- 미리보기: 시체가 없어도 지금 고른 대상/상호작용 대상 이름표 기준으로 몇 초 띄우기
@@ -393,13 +399,18 @@ local function HasSoft()
 end
 
 -- 주울 시체를 바라볼 때만 상호작용 이름표판 켜기 (NPC에겐 게임 기본 이름 그대로)
-local corpsePlate
+local wantPlate
 local function SetCorpsePlate(on)
     on = on and true or false
-    if corpsePlate == on or InCombatLockdown() then return end
-    if pcall(SetCVar, "SoftTargetNameplateInteract", on and "1" or "0") then corpsePlate = on end
+    wantPlate = on
+    -- 저장해 둔 값 말고 실제 게임 설정을 보고 맞춤 (다른 애드온·재접속으로 바뀌어 있어도 다시 켜지게)
+    local cur = GetCVar("SoftTargetNameplateInteract")
+    if (cur == "1") == on then return end
+    if InCombatLockdown() then return end   -- 전투가 끝나면 PLAYER_REGEN_ENABLED에서 다시 맞춤
+    pcall(SetCVar, "SoftTargetNameplateInteract", on and "1" or "0")
 end
 
+local retrying = false
 local function Refresh()
     SetCorpsePlate(db and db.on ~= false and db.loot ~= false and not lootOpen and HasSoft() and LootableCorpse())
     if db and Previewing() and not LootableCorpse() then Mute(nil); Detach(); ShowPreview() return end
@@ -414,6 +425,11 @@ local function Refresh()
     if db.loot and not lootOpen and LootableCorpse() then
         Detach(); Mute(plate)
         ShowLoot(plate)
+        -- 이름표판이 막 켜지는 중이면 한 박자 뒤에 다시 (판이 생기면 상자가 붙음)
+        if not plate and not retrying then
+            retrying = true
+            C_Timer.After(0.25, function() retrying = false; Refresh() end)
+        end
         return
     end
     HideLoot()
@@ -469,6 +485,10 @@ local function Refresh()
         pill:SetPoint("CENTER", UIParent, "CENTER", 0, db.fy or 140)
     end
     pill:Show()
+end
+
+RefreshLoot = function()
+    if db and db.on ~= false and db.loot ~= false and HasSoft() and LootableCorpse() then Refresh() end
 end
 
 ----------------------------------------------------------------------

@@ -370,6 +370,30 @@ end
 ----------------------------------------------------------------------
 -- 갱신: 체력, 정보, 테두리
 ----------------------------------------------------------------------
+-- 남의 몹 + 퀘스트 원(A안): 원 안 그림을 자물쇠로, 원은 회색, 개수는 흐리게. 바 끝 자물쇠는 숨김
+local function TapQuest(f)
+    local q = f.quest
+    local onQuest = q:IsShown()
+    if f.lock then f.lock:SetShown((f.tapped and not onQuest) and true or false) end
+    q.fill:SetDesaturated(false); q.icon:SetDesaturated(false)
+    q:SetAlpha(1)
+    if f.tapped and onQuest then
+        q.fill:SetVertexColor(0.29, 0.27, 0.275, 1)
+        q.icon:SetTexture(ns.MEDIA .. "lock")
+        q.icon:SetSize(26, 26)
+        q.icon:SetVertexColor(0.93, 0.90, 0.91, 1)
+        q.tag:SetAlpha(0.55)
+        q.badge:SetAlpha(0.55)
+    else
+        if q.iconFile then q.icon:SetTexture(q.iconFile) end
+        if q.fillColor then q.fill:SetVertexColor(q.fillColor[1], q.fillColor[2], q.fillColor[3], 1) end
+        q.icon:SetSize(22, 22)
+        q.icon:SetVertexColor(1, 1, 1, 1)
+        q.tag:SetAlpha(1)
+        q.badge:SetAlpha(1)
+    end
+end
+
 -- 다른 사람이 먼저 친 몹(선점): 회색 바 + 빗금, 퀘스트 원은 흐리게
 local function UpdateTap(f, unit)
     local tapped = UnitIsTapDenied and Try(UnitIsTapDenied, unit) or false
@@ -393,7 +417,6 @@ local function UpdateTap(f, unit)
         ic:SetVertexColor(0.92, 0.89, 0.90, 1)
         f.lock = lk
     end
-    if f.lock then f.lock:SetShown(tapped and true or false) end
     f.headTex:SetDesaturated(tapped and true or false)
     f.headTex:SetAlpha(tapped and 0.7 or 1)
     if tapped then
@@ -408,9 +431,7 @@ local function UpdateTap(f, unit)
     else
         f.name:SetTextColor(0.76, 0.73, 0.74)
     end
-    local q = f.quest
-    q.fill:SetDesaturated(tapped); q.icon:SetDesaturated(tapped)
-    q:SetAlpha(tapped and 0.75 or 1)
+    TapQuest(f)
 end
 
 -- 죽은 몹: 이름표는 숨김 (주울 게 있으면 Leel Spot이 반짝 상자를 대신 띄움)
@@ -740,19 +761,20 @@ local function UpdateQuest(f, unit)
     local ok, info = pcall(QuestInfo, unit)
     if not ok or not info or ns.db.questCircle == false then
         q:Hide()
+        TapQuest(f)
         HideQuestieIcon(f:GetParent(), false)
         PlacePct(f)
         return
     end
 
     if info.done then
-        q.fill:SetVertexColor(0.353, 0.29, 0.278, 1)
-        q.icon:SetTexture(ns.MEDIA .. "q_done")
+        q.fillColor = { 0.353, 0.29, 0.278 }
+        q.iconFile = ns.MEDIA .. "q_done"
         q.tagBg:SetColor({ 0.54, 0.48, 0.46 })
         q.count:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
     else
-        q.fill:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
-        q.icon:SetTexture(ns.MEDIA .. (info.loot and "q_loot" or "q_slay"))
+        q.fillColor = C.acc
+        q.iconFile = ns.MEDIA .. (info.loot and "q_loot" or "q_slay")
         q.tagBg:SetColor(C.accHi)
         q.count:SetTextColor(C.ink[1], C.ink[2], C.ink[3])
     end
@@ -769,6 +791,7 @@ local function UpdateQuest(f, unit)
     q.badgeText:SetText(info.open)
 
     q:Show()
+    TapQuest(f)
     HideQuestieIcon(f:GetParent(), true)
     PlacePct(f)
 end
