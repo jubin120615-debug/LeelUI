@@ -284,6 +284,8 @@ end)
 local function Mode()
     local d = DB()
     if d.tracker == nil then d.tracker = (d.blizzTracker == false) and "questie" or "blizz" end
+    -- Questie를 꺼 두었으면 Questie 목록 대신 르엘 퀘스트 판 따라가기 창
+    if d.tracker == "questie" and not _G.Questie then return _G.ForgLevelingFrame and "guide" or "blizz" end
     return d.tracker
 end
 ns.QuestTrackerMode = Mode

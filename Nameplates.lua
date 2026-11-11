@@ -1,6 +1,6 @@
 -- LeelUI / Nameplates.lua
 -- 적 이름표: 15px 알약 바 + 검은 외곽, 체력 %, 대상 강조, 6px 시전바,
--- 내 디버프(게임 디버프 칸을 옮겨 붙임), Questie 퀘스트 원(칼 / 줍는 손 / 체크)
+-- 내 디버프(게임 디버프 칸을 옮겨 붙임), 퀘스트 원(칼 / 줍는 손 / 체크) — Questie가 있으면 그 자료, 없으면 QuestMobs.lua
 
 local _, ns = ...
 
@@ -82,7 +82,7 @@ local function PaintCream(holder)
     end
 end
 
--- 바·이름 색: 하찮음 회색 / 비선공 크림 / 선공 분홍
+-- 바·이름 색: 하찮음 회색 / 비선공 크림 / 선공 루비 레드
 local function PaintPlate(f)
     if f.trivial then
         ns.PaintFlat(f.hp, C.grey)
@@ -91,7 +91,7 @@ local function PaintPlate(f)
         PaintCream(f.hp)
         f.name:SetTextColor(CREAM_NAME[1], CREAM_NAME[2], CREAM_NAME[3])
     else
-        ns.PaintHealth(f.hp)
+        ns.PaintHealthRed(f.hp)
         f.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
     end
 end
@@ -126,7 +126,7 @@ local function Build(plate)
     f.glow:SetBlendMode("ADD")
     f.glow:SetPoint("TOPLEFT", -6, 6); f.glow:SetPoint("BOTTOMRIGHT", 6, -6)
     f.glow:Hide()
-    ns.PaintHealth(f.hp)
+    ns.PaintHealthRed(f.hp)
 
     f.pct = Outline(f.hp.over:CreateFontString(nil, "OVERLAY"), 13, ns.NUM)
     f.pct:SetTextColor(1, 1, 1)
@@ -395,9 +395,16 @@ local function TapQuest(f)
 end
 
 -- 다른 사람이 먼저 친 몹(선점): 회색 바 + 빗금, 퀘스트 원은 흐리게
+local RefreshInfo   -- 아래 UpdateInfo (선점이 풀리면 레벨·등급을 다시 읽음)
 local function UpdateTap(f, unit)
     local tapped = UnitIsTapDenied and Try(UnitIsTapDenied, unit) or false
     if tapped == f.tapped then return end
+    -- 레벨 맞춤 지역: 남이 친 몹은 그 사람 레벨로 보이다가, 선점이 풀리면 내 레벨 기준으로 바뀜
+    -- 이때 레벨 바뀜 알림이 안 와서 이름표 레벨이 예전 숫자로 남음 → 선점이 바뀔 때마다 다시 읽기
+    if f.tapped ~= nil and RefreshInfo then
+        f.tapped = nil
+        RefreshInfo(f, unit)
+    end
     f.tapped = tapped
     ns.SetTapped(f.hp, tapped)
     -- C안: 바 끝 동그란 자물쇠 + 이름 가로줄 + 토끼 배지 흑백
@@ -503,6 +510,7 @@ local function UpdateInfo(f, unit)
     FitTitle(f)
     f.tapped = nil
 end
+RefreshInfo = UpdateInfo
 
 -- 테두리: 평소 장미색 / 내 대상 흰색 + 빛 / 나를 공격 중 빨강 + 빛
 -- 대상이 있으면 대상이 아닌 이름표는 살짝 흐리게
@@ -723,7 +731,11 @@ end
 -- 이 몹에 걸린 목표들: 진행 중 목표 수, 대표 목표(아이콘 종류, 모은 수/필요 수), 전부 완료 여부
 local function QuestInfo(unit)
     local qt = QuestieTooltips()
-    if not (qt and qt.lookupByKey and Questie) then return end
+    if not (qt and qt.lookupByKey and Questie) then
+        -- Questie 없음: 게임 툴팁 · 내가 잡아 본 몹 기억으로 (QuestMobs.lua)
+        if ns.QuestMobInfo then return ns.QuestMobInfo(unit) end
+        return
+    end
     local ok, guid = pcall(UnitGUID, unit)
     if not ok or type(guid) ~= "string" then return end
     local kind, _, _, _, _, npcId = strsplit("-", guid)

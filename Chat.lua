@@ -287,6 +287,34 @@ local function PaintRail()
         rail.plus:ClearAllPoints()
         rail.plus:SetPoint("TOP", rail, "TOP", 2, y)
     end
+    -- 탭이 늘어 기둥 아래 단추(친구 · 음성 · 메뉴)와 겹치면 채팅창을 위로 늘리고,
+    -- 탭이 줄면 늘렸던 만큼 다시 줄여요 (아래 끝은 그대로, 내가 정한 크기보다 작아지진 않아요)
+    do
+        local f1 = ChatFrame1
+        local have, H = rail:GetHeight() or 0, f1:GetHeight() or 0
+        if have > 0 and H > 0 and not InCombatLockdown() then
+            local db = DB()
+            local extra = db.autoGrow or 0
+            if extra > H - 60 then extra = 0 end
+            local base = H - extra                          -- 내가 정한 크기
+            local need = -y + 30 + 10 + (RAIL - 12 + 8) * 3 + 8
+            local needH = need - (have - H)                 -- 단추가 안 겹치는 채팅창 높이
+            local target = math.max(base, needH)
+            db.autoGrow = target - base
+            if math.abs(target - H) > 0.5 then
+                local l, b = f1:GetLeft(), f1:GetBottom()
+                if l and b then
+                    pcall(function()
+                        f1:SetHeight(target)
+                        f1:ClearAllPoints()
+                        f1:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l, b)
+                        FCF_SavePositionAndDimensions(f1)
+                        if db.pos then db.pos[4] = math.floor(target + 0.5) end
+                    end)
+                end
+            end
+        end
+    end
     if head then
         head.title:SetText(TabName(sel))
         HeadChips(sel)
@@ -356,11 +384,9 @@ local function Build()
     gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
     head:EnableMouse(true)
     head:RegisterForDrag("LeftButton")
-    head:SetScript("OnDragStart", function() if IsShiftKeyDown() then ChatFrame1:StartMoving() end end)
-    head:SetScript("OnDragStop", function()
-        ChatFrame1:StopMovingOrSizing()
-        pcall(FCF_SavePositionAndDimensions, ChatFrame1)
-    end)
+    -- 머리 줄을 끌면 채팅창 이동 (블리자드 화면 편집 없이)
+    head:SetScript("OnDragStart", function() if ns.ChatStartMove then ns.ChatStartMove() end end)
+    head:SetScript("OnDragStop", function() if ns.ChatStopMove then ns.ChatStopMove() end end)
 
     -- 새 글 알약 (위로 올려 보는 중일 때)
     newPill = CreateFrame("Button", nil, plate)
@@ -383,12 +409,27 @@ local function Build()
     local SZ = RAIL - 12
     local function Skin(btn, icon, y, tip)
         if not btn then return end
+        -- 블리자드가 다시 옮기면(이용 시간 알림 · 토스트 등) 기둥 자리로 돌려놔요
+        local function Pin()
+            if btn.leelPinning then return end
+            btn.leelPinning = true
+            pcall(function()
+                if btn:GetParent() ~= rail then btn:SetParent(rail) end
+                btn:ClearAllPoints()
+                btn:SetPoint("BOTTOM", rail, "BOTTOM", 1, y)
+                btn:SetScale(1)
+                btn:SetSize(SZ, SZ)
+            end)
+            btn.leelPinning = false
+        end
+        if not btn.leelPinHooked then
+            btn.leelPinHooked = true
+            hooksecurefunc(btn, "SetPoint", function() if not btn.leelPinning then C_Timer.After(0, Pin) end end)
+            hooksecurefunc(btn, "SetParent", function(_, p) if not btn.leelPinning and p ~= rail then C_Timer.After(0, Pin) end end)
+            hooksecurefunc(btn, "SetScale", function() if not btn.leelPinning then C_Timer.After(0, Pin) end end)
+        end
         pcall(function()
-            btn:SetParent(rail)
-            btn:ClearAllPoints()
-            btn:SetPoint("BOTTOM", rail, "BOTTOM", 1, y)
-            btn:SetScale(1)
-            btn:SetSize(SZ, SZ)
+            Pin()
             btn:SetAlpha(1); btn:EnableMouse(true)
             -- 블리자드 그림 숨기기 (숫자 글씨는 남김)
             for _, r in ipairs({ btn:GetRegions() }) do
@@ -596,6 +637,7 @@ local function Init()
     if FCFDock_UpdateTabs then hooksecurefunc("FCFDock_UpdateTabs", function() C_Timer.After(0, Apply) end) end
     if FCF_DockFrame then hooksecurefunc("FCF_DockFrame", function() C_Timer.After(0, Apply) end) end
     if ChatEdit_UpdateHeader then hooksecurefunc("ChatEdit_UpdateHeader", PaintEdit) end
+    if FCF_Close then hooksecurefunc("FCF_Close", function() C_Timer.After(0, PaintRail) end) end
     if FCF_SetTabText then hooksecurefunc("FCF_SetTabText", function() C_Timer.After(0, PaintRail) end) end
 
     local ev = CreateFrame("Frame")
@@ -627,7 +669,9 @@ function ns:SetChatAlpha(v)
     if not plate then return end
     local a = (v or 0) / 100
     plate.fill:SetColor({ 0.114, 0.082, 0.078 }, a * 0.95)
-    plate.edge:SetColor({ 0.949, 0.702, 0.761 }, 0.15 + a * 0.3)
+    -- 테두리 그림은 판 전체를 칠한 분홍이라(안쪽은 판이 덮음), 판이 투명하면 분홍 막이 비쳐 보임
+    -- → 판이 옅을수록 테두리도 같이 옅게 (0%면 완전 투명)
+    plate.edge:SetColor({ 0.949, 0.702, 0.761 }, a * 0.45)
     rail.bg:SetColor({ 0.129, 0.094, 0.086 }, math.min(1, a * 1.1))
     rail.sq:SetVertexColor(0.129, 0.094, 0.086, math.min(1, a * 1.1))
 end
@@ -643,10 +687,115 @@ local function SaveGeo()
     }
 end
 
+----------------------------------------------------------------------
+-- 채팅창 옮기기 · 크기: 르엘 이동 모드 + 머리 줄 끌기 (블리자드 화면 편집 대신)
+-- 자리는 우리 설정에 저장하고, 게임이 화면 편집 배치로 되돌려도 다시 맞춰요
+----------------------------------------------------------------------
+local function SavePos()
+    local f = ChatFrame1
+    if not (f and f:GetLeft()) then return end
+    DB().pos = { math.floor(f:GetLeft() + 0.5), math.floor(f:GetBottom() + 0.5),
+                 math.floor(f:GetWidth() + 0.5), math.floor(f:GetHeight() + 0.5) }
+    pcall(FCF_SavePositionAndDimensions, f)
+end
+
+local applying = false
+local function ApplyPos()
+    local p = DB().pos
+    if not (p and ChatFrame1) or InCombatLockdown() then return end
+    applying = true
+    pcall(function()
+        local f = ChatFrame1
+        f:ClearAllPoints()
+        f:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", p[1], p[2])
+        if p[3] and p[4] then f:SetSize(p[3], p[4]) end
+        if f.SetUserPlaced then f:SetUserPlaced(true) end
+    end)
+    applying = false
+end
+ns.ApplyChatPos = ApplyPos
+
+local function Movable()
+    local f = ChatFrame1
+    pcall(f.SetMovable, f, true)
+    pcall(f.SetResizable, f, true)
+    pcall(f.SetClampedToScreen, f, true)
+end
+
+function ns.ChatStartMove()
+    if InCombatLockdown() then return end
+    Movable()
+    pcall(ChatFrame1.StartMoving, ChatFrame1)
+end
+function ns.ChatStopMove()
+    pcall(ChatFrame1.StopMovingOrSizing, ChatFrame1)
+    SavePos()
+end
+
+-- 이동 모드일 때 채팅창 위에 덮는 분홍 상자 (끌기 = 옮기기, 오른쪽 위 모서리 = 크기)
+local mover
+function ns:SetChatMoveMode(on)
+    if not plate then return end
+    if on and not mover then
+        mover = CreateFrame("Frame", nil, UIParent)
+        mover:SetFrameStrata("DIALOG")
+        mover:SetAllPoints(plate)
+        mover:EnableMouse(true)
+        mover:RegisterForDrag("LeftButton")
+        local tint = mover:CreateTexture(nil, "BACKGROUND")
+        tint:SetAllPoints(); tint:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.10)
+        for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+            local e = mover:CreateTexture(nil, "BORDER")
+            e:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.9)
+            if side == "TOP" or side == "BOTTOM" then
+                e:SetPoint(side .. "LEFT"); e:SetPoint(side .. "RIGHT"); e:SetHeight(2)
+            else
+                e:SetPoint("TOP" .. side); e:SetPoint("BOTTOM" .. side); e:SetWidth(2)
+            end
+        end
+        local lb = ns.Font(mover, 13, C.accHi)
+        lb:SetPoint("CENTER"); lb:SetText("채팅창\n끌면 옮기기 · 오른쪽 위 손잡이로 크기")
+        mover:SetScript("OnDragStart", ns.ChatStartMove)
+        mover:SetScript("OnDragStop", ns.ChatStopMove)
+        -- 크기 손잡이 (아래 끝은 그대로, 위·오른쪽으로 늘리고 줄여요)
+        local grip = CreateFrame("Button", nil, mover)
+        grip:SetSize(22, 22); grip:SetPoint("TOPRIGHT", -2, -2)
+        grip:SetSize(26, 26)
+        local gt = grip:CreateTexture(nil, "OVERLAY")
+        gt:SetTexture(ns.MEDIA .. "grip_resize"); gt:SetAllPoints()
+        local gh = grip:CreateTexture(nil, "HIGHLIGHT")
+        gh:SetTexture(ns.MEDIA .. "circle"); gh:SetAllPoints(); gh:SetVertexColor(1, 1, 1, 0.25); gh:SetBlendMode("ADD")
+        grip:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("끌면 크기 조절"); GameTooltip:Show()
+        end)
+        grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        grip:RegisterForDrag("LeftButton")
+        grip:SetScript("OnDragStart", function()
+            if InCombatLockdown() then return end
+            Movable()
+            if ChatFrame1.SetResizeBounds then pcall(ChatFrame1.SetResizeBounds, ChatFrame1, 200, 120, 900, 900) end
+            pcall(ChatFrame1.StartSizing, ChatFrame1, "TOPRIGHT")
+        end)
+        grip:SetScript("OnDragStop", function()
+            pcall(ChatFrame1.StopMovingOrSizing, ChatFrame1)
+            DB().autoGrow = 0          -- 직접 정한 크기를 새 기준으로
+            SavePos()
+        end)
+    end
+    if mover then mover:SetShown(on and true or false) end
+end
+
 local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGOUT")
 boot:RegisterEvent("PLAYER_LOGIN")
+pcall(boot.RegisterEvent, boot, "EDIT_MODE_LAYOUTS_UPDATED")
+boot:RegisterEvent("PLAYER_REGEN_ENABLED")
 boot:SetScript("OnEvent", function(_, e)
     if e == "PLAYER_LOGOUT" then pcall(SaveGeo) return end
-    C_Timer.After(1, function() pcall(Init) end)
+    if e == "PLAYER_LOGIN" then
+        C_Timer.After(1, function() pcall(Init); pcall(ApplyPos) end)
+        C_Timer.After(4, function() pcall(ApplyPos) end)    -- 화면 편집 배치가 늦게 덮어써도 다시
+        return
+    end
+    if ns.db and DB().on ~= false then C_Timer.After(0.2, function() pcall(ApplyPos) end) end
 end)

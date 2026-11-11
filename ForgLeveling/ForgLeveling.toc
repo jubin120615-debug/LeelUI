@@ -1,17 +1,15 @@
 ## Interface: 16001
-## Title: |cfff2b3c2르엘|r 길잡이
-## Notes: 레벨링 길잡이 (바람구체자 스카이본 · 호드). 데이터 출처: forg.gg 와우 포에버. /forg 또는 /길잡이
-## Author: personal build from forg.gg data
-## Version: 4.3.3
+## Title: |cfff2b3c2르엘|r 퀘스트 판
+## Notes: 내가 받은 퀘스트로 오늘 할 길을 짜고 따라가요. 다른 애드온 필요 없음. /퀘판 · /forg
+## Author: 슈엘
+## Version: 5.0.0
 ## Category: 르엘 UI
 ## Group: LeelUI
 ## IconTexture: Interface\AddOns\ForgLeveling\media\logo
 ## SavedVariables: ForgLevelingDB
 ## SavedVariablesPerCharacter: ForgLevelingCharDB
-## OptionalDeps: LeelUI, TomTom, Questie
+## OptionalDeps: LeelUI
 
 Data.lua
-Hubs.lua
-Guide.lua
-Core.lua
-Minimap.lua
+Reveal.lua
+Board.lua

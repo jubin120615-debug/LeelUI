@@ -96,12 +96,15 @@ local function Toast(lines)
     toast:SetHeight(math.max(56, 34 + #lines * 16))
     toast:SetWidth(math.max(220, toast.body:GetStringWidth() + 70))
     toast:ClearAllPoints()
-    local mf = _G.MerchantFrame
-    if mf and mf:IsShown() then
-        toast:SetPoint("BOTTOMLEFT", mf, "TOPLEFT", 4, 6)
+    -- 르엘 가방이 열려 있으면 가방 바로 위, 아니면 화면 위 가운데
+    -- (상인 창 위에 붙이면 상인 창이 화면 왼쪽 위라서 구석에 떠요)
+    local bag = _G.LeelUI_Bag
+    if bag and bag:IsShown() then
+        toast:SetPoint("BOTTOM", bag, "TOP", 0, 8)
     else
-        toast:SetPoint("TOP", UIParent, "TOP", 0, -120)
+        toast:SetPoint("TOP", UIParent, "TOP", 0, -140)
     end
+    toast:SetClampedToScreen(true)
     toast.t = 0
     toast:SetAlpha(1)
     toast:Show()
@@ -111,6 +114,7 @@ end
 -- 팔기 + 고치기
 ----------------------------------------------------------------------
 local selling, queue, sold, soldN = false, nil, 0, 0
+local open = false          -- 상인 창이 열려 있는지 (이벤트로 판단: 창 모양을 바꾼 애드온이 있어도)
 local pass = 0
 local ticker
 
@@ -149,8 +153,7 @@ local function Finish()
         pass = pass + 1
         if ticker then ticker:Cancel(); ticker = nil end
         C_Timer.After(0.6, function()
-            local mf = _G.MerchantFrame
-            if not (selling and mf and mf:IsShown()) then return end
+            if not (selling and open) then return end
             queue = DB().sell and Collect() or {}
             if #queue == 0 then pass = 99; Finish() return end
             ticker = C_Timer.NewTicker(0.2, SellStep)
@@ -165,8 +168,7 @@ local function Finish()
 end
 
 SellStep = function()
-    local mf = _G.MerchantFrame
-    if not (mf and mf:IsShown()) then
+    if not open then
         selling = false
         if ticker then ticker:Cancel(); ticker = nil end
         return
@@ -210,9 +212,24 @@ Collect = function()
     return list
 end
 
+-- 가방에 "안 팔기"로 정한 회색 템이 있는지
+local function KeptJunkInBags()
+    local d = DB()
+    if not next(d.keep) then return false end
+    local first, last = BAGS()
+    for bag = first, last do
+        for slot = 1, (NumSlots(bag) or 0) do
+            local q, _, link, id = SlotInfo(bag, slot)
+            id = id or IDFromLink(link)
+            if link and q == 0 and id and d.keep[id] then return true end
+        end
+    end
+    return false
+end
+
 local function OnMerchant()
     local d = DB()
-    if not d.on then return end
+    if not d.on or not open then return end
     if IsShiftKeyDown() then
         Print("Shift: 이번엔 상점 토끼가 쉬어요.")
         return
@@ -221,6 +238,23 @@ local function OnMerchant()
     selling = true
     queue = d.sell and Collect() or {}
     if #queue == 0 then pass = 99; Finish() return end
+    -- 게임의 "잡동사니 모두 팔기"가 있으면 그걸로 한 번에 (안 팔기 템이 가방에 없을 때)
+    local sellAll = C_MerchantFrame and C_MerchantFrame.SellAllJunkItems
+    if sellAll and not KeptJunkInBags() then
+        for _, it in ipairs(queue) do
+            local _, count = SlotInfo(it.bag, it.slot)
+            sold = sold + (Price(it.link) or it.price or 0) * (count or 1)
+            soldN = soldN + 1
+        end
+        local ok = pcall(sellAll)
+        if ok then
+            queue = {}
+            pass = 2          -- 한 번만 더 훑어서 남은 게 있으면 하나씩
+            Finish()
+            return
+        end
+        sold, soldN = 0, 0
+    end
     if ticker then ticker:Cancel() end
     ticker = C_Timer.NewTicker(0.2, SellStep)
     SellStep()
@@ -303,8 +337,13 @@ ev:RegisterEvent("MERCHANT_CLOSED")
 ev:SetScript("OnEvent", function(_, event)
     if not ns.db then return end
     if event == "MERCHANT_SHOW" then
-        OnMerchant()
-    elseif selling then
+        open = true
+        -- 상인 창이 다 열리고 가방 정보가 올 때까지 살짝 기다렸다가
+        C_Timer.After(0.3, OnMerchant)
+    else
+        open = false
+    end
+    if event == "MERCHANT_CLOSED" and selling then
         selling = false
         if ticker then ticker:Cancel(); ticker = nil end
     end

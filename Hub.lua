@@ -178,7 +178,7 @@ local MODULES = {
             { t = "toggle", label = "선공 / 비선공 구별", hint = "선공은 분홍 바, 비선공은 크림색 바",
               get = function() return ns.db.npAggro ~= false end,
               set = function(v) ns.db.npAggro = v; if ns.RefreshPlateInfo then ns:RefreshPlateInfo() end end },
-            { t = "toggle", label = "퀘스트 몹 표시", hint = "Questie 퀘스트 원",
+            { t = "toggle", label = "퀘스트 몹 표시", hint = "퀘스트 원 (Questie 없이도: 한 번 잡은 몹은 기억)",
               get = function() return ns.db.questCircle ~= false end,
               set = function(v) ns.db.questCircle = v; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
         },
@@ -298,18 +298,17 @@ local MODULES = {
         },
     },
     {
-        key = "ForgLeveling", title = "|cfff2b3c2르엘|r 길잡이", sub = "레벨링 안내", icon = "hb_guide", slash = "FORGLEVELING",
-        desc = "레벨링 길잡이 (forg.gg 자료).",
+        key = "ForgLeveling", title = "|cfff2b3c2르엘|r 퀘스트 판", sub = "내 퀘로 길 짜기", icon = "hb_guide", slash = "FORGLEVELING",
+        desc = "내가 받은 퀘스트 중 하고 싶은 것만 골라요.\n가까운 순서로 길을 짜고 작은 창이 방향을 알려줘요.\n/퀘판",
         items = {
-            { t = "button", label = "길잡이 창 열기", cmd = "" },
-            { t = "toggle", label = "미니맵 버튼", hint = "미니맵 아이콘 정리를 켜면 숨겨져요",
-              get = function() return not GuideDB().minimapHide end,
-              set = function(v)
-                  if not ForgLevelingDB then return end
-                  ForgLevelingDB.minimapHide = not v
-                  local b = _G.ForgLevelingMinimapButton
-                  if b then b:SetShown(v) end
-              end },
+            { t = "button", label = "고르기 판 열기", cmd = "" },
+            { t = "toggle", label = "새 지역 알림", hint = "지역에 들어가면 할 퀘 수를 한 번 알려줘요",
+              get = function() return GuideDB().zoneToast ~= false end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.zoneToast = v and true or false end end },
+            { t = "toggle", label = "지도 · 미니맵에 길 그리기", hint = "따라가는 중일 때 분홍 점선과 번호",
+              get = function() return GuideDB().mapLines ~= false end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.mapLines = v and true or false end end },
+            { t = "button", label = "창 자리 처음대로", cmd = "초기화" },
         },
     },
     {
@@ -348,6 +347,15 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_Profile", builtin = true, always = true, cat = "util",
+        title = "설정 나누기", sub = "내보내기 · 가져오기", icon = "hb_apps",
+        desc = "르엘 UI · 지도 · 징 · 반짝 상자 설정을 글자 한 줄로.\n친구에게 보내거나 다른 컴퓨터·캐릭터로 옮길 때 써요. (/르엘설정)",
+        items = {
+            { t = "button", label = "내 설정 내보내기", run = function() if ns.ShowProfileExport then ns:ShowProfileExport() end end },
+            { t = "button", label = "설정 가져오기", run = function() if ns.ShowProfileImport then ns:ShowProfileImport() end end },
+        },
+    },
+    {
         key = "LeelUI_QTracker", builtin = true, always = true, cat = "util",
         title = "퀘스트 목록", sub = "셋 중 하나만", icon = "hb_guide",
         desc = "화면에 띄울 퀘스트 목록을 하나만 골라요.\n고르지 않은 둘은 자동으로 숨겨요.",
@@ -355,12 +363,22 @@ local MODULES = {
             { t = "toggle", label = "블리자드 기본", hint = "미니맵 아래 기본 퀘스트 목록",
               get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "blizz" end,
               set = function() ns:SetQuestTrackerMode("blizz") end },
-            { t = "toggle", label = "Questie 추적창", hint = "Questie 목록 (다시 불러오기 후 적용)",
+            { t = "toggle", label = "Questie 추적창", hint = "Questie를 켰을 때만 (다시 불러오기 후 적용)",
               get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "questie" end,
               set = function() ns:SetQuestTrackerMode("questie") ; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
-            { t = "toggle", label = "르엘 길잡이", hint = "Leel Guide 레벨링 창",
+            { t = "toggle", label = "르엘 퀘스트 판", hint = "오늘 할 퀘 따라가기 창",
               get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "guide" end,
               set = function() ns:SetQuestTrackerMode("guide") end },
+        },
+    },
+    {
+        key = "LeelUI_QItem", builtin = true, cat = "util",
+        title = "퀘템 알림", sub = "이 몹엔 이 템", icon = "hb_quest",
+        desc = "퀘스트에 써야 하는 템이 가방에 있고 지금 대상이 그 몹이면\n이름표 위와 대상 창 옆에 템이 떠요. 누르면 바로 써요.\n한 번 쓴 몹은 기억해서 다음부터 바로 알려줘요.",
+        onoff = { get = function() return ns.QItemDB and ns.QItemDB().on end,
+                  set = function(v) if ns.QItemDB then ns.QItemDB().on = v; if ns.QuestItemRefresh then ns.QuestItemRefresh() end end end },
+        items = {
+            { t = "button", label = "그만 보기 목록 비우기", run = function() if ns.QItemDB then ns.QItemDB().no = {} ; ns.Print("그만 보기 목록을 비웠어요.") end end },
         },
     },
     {
@@ -979,6 +997,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.14", "르엘 퀘스트 판 · Leel Quest", "퀘템 알림 · 채팅창 직접 옮기기" },
     { "1.3.13", "르엘 채팅창 · 새 글 숫자", "남의 몹 자물쇠 · 자동 징 무리만" },
     { "1.3.12", "파티 힐러 타일 · 들어올 치유", "르엘 툴팁 · 남의 몹 자물쇠" },
     { "1.3.5", "줍기 창이 분홍 카드로", "파티 링이 전투 중에도 시계 방향으로" },

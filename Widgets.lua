@@ -127,6 +127,20 @@ function ns.PaintHealth(holder)
     end
 end
 
+-- 위쪽 HUD · 몹 이름표 체력바: 루비 레드 (아래 깊은 빨강, 위 밝게)
+ns.HP_RED = { 0.722, 0.118, 0.208 }   -- #B81E35
+function ns.PaintHealthRed(holder)
+    local fill = holder.fill
+    if fill.SetGradient and CreateColor then
+        fill:SetVertexColor(1, 1, 1, 1)
+        fill:SetGradient("VERTICAL",
+            CreateColor(0.722, 0.118, 0.208, 1),
+            CreateColor(0.949, 0.439, 0.498, 1))
+    else
+        fill:SetVertexColor(ns.HP_RED[1], ns.HP_RED[2], ns.HP_RED[3], 1)
+    end
+end
+
 -- 선점된 몹: 회색 바 + 사선 빗금 (바 모양대로 잘라서)
 ns.TAP = { 0.56, 0.54, 0.55 }
 function ns.SetTapped(holder, tapped)
@@ -173,7 +187,7 @@ function ns.SetStrike(fs, on)
         if on then
             line:ClearAllPoints()
             line:SetPoint("LEFT", fs, "LEFT", -1, -1)
-            line:SetWidth(math.max(4, (fs:GetStringWidth() or 0) + 2))
+            if not pcall(function() line:SetWidth(math.max(4, (fs:GetStringWidth() or 0) + 2)) end) then line:SetWidth(40) end
         end
         line:SetShown(on and true or false)
     end
@@ -356,6 +370,7 @@ do
         st:SetPoint("TOPLEFT", bg, "TOPLEFT", 1, -10)
         st:SetPoint("BOTTOMLEFT", bg, "BOTTOMLEFT", 1, 10)
         st:SetWidth(5)
+        st:Hide()          -- A안: 왼쪽 세로 줄 대신 이름 옆 "적대/중립/우호" 칩 (빨강은 체력 바만)
         tt.leelStripe = st
         if bunny then
             local b = CreateFrame("Frame", nil, tt)
@@ -385,18 +400,49 @@ do
         sb.leelSkinned = true
         -- 블리자드가 체력에 따라 초록/노랑으로 다시 칠해도 우리 색으로
         local painting = false
+        local RED = ns.HP_RED or { 0.722, 0.118, 0.208 }
         hooksecurefunc(sb, "SetStatusBarColor", function(self)
             if painting then return end
-            local c = GameTooltip.leelUnitCol or C.acc
             painting = true
-            self:SetStatusBarColor(c[1], c[2], c[3], 1)
+            self:SetStatusBarColor(RED[1], RED[2], RED[3], 1)   -- 체력은 항상 빨강
             painting = false
         end)
         sb:SetStatusBarTexture(ns.WHITE)
-        sb:ClearAllPoints()
-        sb:SetPoint("TOPLEFT", GameTooltip, "BOTTOMLEFT", 14, -3)
-        sb:SetPoint("TOPRIGHT", GameTooltip, "BOTTOMRIGHT", -14, -3)
-        sb:SetHeight(4)
+        -- 툴팁 안쪽 아래에 넣어요 (자리는 툴팁에 빈 줄 2개를 더해서 마련)
+        local function Place()
+            sb:ClearAllPoints()
+            sb:SetPoint("BOTTOMLEFT", GameTooltip, "BOTTOMLEFT", 12, 22)
+            sb:SetPoint("BOTTOMRIGHT", GameTooltip, "BOTTOMRIGHT", -12, 22)
+            sb:SetHeight(8)
+        end
+        Place()
+        hooksecurefunc(sb, "SetPoint", function() if not sb.leelPlacing then sb.leelPlacing = true; Place(); sb.leelPlacing = false end end)
+        sb.leelL = ns.Font(sb, 11, C.tx2); sb.leelL:SetPoint("TOPLEFT", sb, "BOTTOMLEFT", 0, -3); sb.leelL:SetText("체력")
+        sb.leelR = ns.Num(sb, 12, C.accHi); sb.leelR:SetPoint("TOPRIGHT", sb, "BOTTOMRIGHT", 0, -2)
+        local acc = 0
+        sb:HookScript("OnUpdate", function(self, el)
+            acc = acc + el
+            if acc < 0.2 then return end
+            acc = 0
+            local txt = ""
+            pcall(function()
+                local _, unit = GameTooltip:GetUnit()
+                unit = unit or "mouseover"
+                local h, m = UnitHealth(unit), UnitHealthMax(unit)
+                if m and m > 0 then
+                    txt = ("%d%%  ·  %s"):format(math.floor(h / m * 100 + 0.5), BreakUpLargeNumbers and BreakUpLargeNumbers(h) or h)
+                end
+            end)
+            -- 게임이 체력 숫자를 숨기면: 바가 차 있는 길이로 % 만
+            if txt == "" then
+                pcall(function()
+                    local tex, w = self:GetStatusBarTexture(), self:GetWidth()
+                    local fw = tex and tex:GetWidth()
+                    if w and w > 0 and fw then txt = ("%d%%"):format(math.floor(math.min(1, fw / w) * 100 + 0.5)) end
+                end)
+            end
+            self.leelR:SetText(txt)
+        end)
         local m = sb:CreateMaskTexture()
         m:SetTexture(ns.MEDIA .. "pill32", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
         m:SetAllPoints(sb)
@@ -500,12 +546,69 @@ do
         end)
 
         if TooltipDataProcessor and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Unit then
+            -- 이름 옆 관계 칩 (적대 · 중립 · 우호)
+            local chip = CreateFrame("Frame", nil, GameTooltip)
+            chip:SetHeight(15)
+            chip:SetFrameLevel(GameTooltip:GetFrameLevel() + 3)
+            chip.bg = ns.RoundRect(chip, 7, { 0.29, 0.14, 0.14 }, "ARTWORK", 0, 0)
+            chip.fs = ns.Font(chip, 10.5, { 1, 0.69, 0.69 }); chip.fs:SetPoint("CENTER", 0, 0); chip.fs:SetShadowColor(0, 0, 0, 0)
+            chip:Hide()
+            GameTooltip:HookScript("OnHide", function() chip:Hide() end)
+            local KIND = {
+                hostile = { "적대", { 0.29, 0.14, 0.14 }, { 1, 0.69, 0.69 } },
+                neutral = { "중립", { 0.29, 0.247, 0.133 }, { 0.945, 0.851, 0.541 } },
+                friend  = { "우호", { 0.184, 0.29, 0.173 }, { 0.75, 0.9, 0.706 } },
+            }
             TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tt)
                 if not tt or not tt.leelStripe then return end
                 local ok, _, unit = pcall(tt.GetUnit, tt)
                 if not ok or not unit then return end
                 local col = UnitColor(unit)
                 if col then tt.leelUnitCol = col; SetStripe(tt, col) end
+                if tt ~= GameTooltip then return end
+                -- 관계 칩 (플레이어는 직업 색 이름이라 생략)
+                local kind
+                pcall(function()
+                    if not UnitIsPlayer(unit) then
+                        local r = UnitReaction(unit, "player")
+                        if r then kind = (r <= 3 and "hostile") or (r == 4 and "neutral") or "friend" end
+                    end
+                end)
+                local line1 = _G.GameTooltipTextLeft1
+                if kind and line1 then
+                    local k = KIND[kind]
+                    chip.fs:SetText(k[1]); chip.fs:SetTextColor(k[3][1], k[3][2], k[3][3])
+                    chip.bg:SetColor(k[2])
+                    chip:SetWidth(36)      -- 글자 폭은 비밀 값일 수 있어 고정 (두 글자)
+                    -- 이름 뒤에 칩 들어갈 자리를 띄워 둠
+                    pcall(function()
+                        local t = line1:GetText()
+                        if type(t) == "string" and not t:find("%s%s%s%s%s%s%s$") then
+                            local w = line1:GetStringWidth()
+                            line1.leelW = not (issecretvalue and issecretvalue(w)) and w or nil
+                            line1:SetText(t .. "            ")
+                        end
+                        chip:ClearAllPoints()
+                        local w = line1.leelW
+                        if w == nil or (issecretvalue and issecretvalue(w)) then w = nil end
+                        if w then chip:SetPoint("LEFT", line1, "LEFT", w + 6, 0) else chip:SetPoint("LEFT", line1, "RIGHT", -60, 0) end
+                    end)
+                    chip:Show()
+                else
+                    chip:Hide()
+                end
+            end)
+            -- 체력 바 자리: 툴팁 줄이 다 들어간 뒤(Questie 줄 포함) 맨 아래에 높이를 더해요
+            hooksecurefunc(GameTooltip, "Show", function(self)
+                local sb = _G.GameTooltipStatusBar
+                if not (sb and sb:IsShown()) then return end
+                local ok, _, unit = pcall(self.GetUnit, self)
+                if not (ok and unit) then return end
+                pcall(function()
+                    local h = self:GetHeight()
+                    if issecretvalue and issecretvalue(h) then return end
+                    self:SetHeight(h + 26)
+                end)
             end)
         end
     end)

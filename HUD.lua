@@ -57,7 +57,7 @@ local function CreateSide(hud, unit, mirrored)
     -- 체력바
     f.hp = ns.CreateSkewBar(f, BAR_W, BAR_H, { mirrored = mirrored, inset = 2 })
     f.hp:SetPoint(A, f, A, BAR_X * sx, -34)
-    ns.PaintHealth(f.hp)
+    ns.PaintHealthRed(f.hp)
 
     -- 받을 치유: 체력 끝에서 이어서 민트 빗금 (바 모양 밖은 잘림)
     do
@@ -109,10 +109,10 @@ local function CreateSide(hud, unit, mirrored)
     f.cls.ring:SetAllPoints()
     f.cls:Hide()
 
-    f.hpValue = ns.Num(f.hp.over, 23, C.ink)
-    f.hpValue:SetShadowColor(0, 0, 0, 0)
-    f.hpPct = ns.Num(f.hp.over, 15, { 0.416, 0.227, 0.275 })
-    f.hpPct:SetShadowColor(0, 0, 0, 0)
+    f.hpValue = ns.Num(f.hp.over, 23, { 1, 0.953, 0.953 })
+    f.hpValue:SetShadowColor(0.35, 0.06, 0.1, 0.8); f.hpValue:SetShadowOffset(1, -1)
+    f.hpPct = ns.Num(f.hp.over, 15, { 1, 0.86, 0.86 })
+    f.hpPct:SetShadowColor(0.35, 0.06, 0.1, 0.8); f.hpPct:SetShadowOffset(1, -1)
     if mirrored then
         f.hpValue:SetPoint("RIGHT", f.hp, "RIGHT", -20, 0)
         f.hpPct:SetPoint("BOTTOMRIGHT", f.hpValue, "BOTTOMLEFT", -6, 2)
@@ -305,10 +305,12 @@ local function UpdateHealth(f)
     if f.mirrored then
         local tapped = UnitIsTapDenied and Try(UnitIsTapDenied, u) or false
         if tapped ~= f.tapped then
+            -- 선점이 바뀌면 레벨이 달라질 수 있어(레벨 맞춤) 이름·레벨을 다시 읽음
+            if f.tapped ~= nil and ns.HudRefreshInfo then pcall(ns.HudRefreshInfo, f) end
             f.tapped = tapped
             ns.SetTapped(f.hp, tapped)
             ns.SetStrike(f.name, tapped)
-            if not tapped then ns.PaintHealth(f.hp) end
+            if not tapped then ns.PaintHealthRed(f.hp) end
         end
     end
     UpdateDead(f)
@@ -392,6 +394,7 @@ local function UpdateInfo(f)
 
     SetPortraitTexture(f.portrait.tex, u)
 end
+ns.HudRefreshInfo = UpdateInfo
 
 local function UpdatePower(f)
     local pType = UnitPowerType("player")
@@ -399,15 +402,18 @@ local function UpdatePower(f)
     ns.SetBar(f.power.bar, cur, max)
     ns.SetText(f.powerText, cur)
 
-    local c = C.accHi
+    local c, tc = C.accHi, nil
     if pType == ENERGY then
         c = { 1.00, 0.84, 0.30 }   -- 기력: 노랑 (게임 기본 노랑보다 살짝 부드럽게)
+    elseif pType == MANA then
+        c, tc = C.mana, { 0.56, 0.69, 1 }   -- 마나: 대상 창과 같은 파스텔 파랑
     else
         local pc = PowerBarColor and PowerBarColor[pType]
         if pc then c = { pc.r, pc.g, pc.b } end
     end
+    tc = tc or c
     f.power.fill:SetVertexColor(c[1], c[2], c[3], 1)
-    f.powerText:SetTextColor(c[1], c[2], c[3])
+    f.powerText:SetTextColor(tc[1], tc[2], tc[3])
 
 
     -- 마나: 주 자원이 마나가 아닐 때 얇은 줄로
@@ -772,9 +778,9 @@ local function CreatePet(hud)
 
     f.hp = ns.CreateSkewBar(f, PET_BAR, 18, { inset = 2, noShadow = true })
     f.hp:SetPoint("TOPLEFT", f, "TOPLEFT", PET_POR - 8, -22)
-    ns.PaintHealth(f.hp)
-    f.hpValue = ns.Num(f.hp.over, 15, C.ink)
-    f.hpValue:SetShadowColor(0, 0, 0, 0)
+    ns.PaintHealthRed(f.hp)
+    f.hpValue = ns.Num(f.hp.over, 15, { 1, 0.953, 0.953 })
+    f.hpValue:SetShadowColor(0.35, 0.06, 0.1, 0.8); f.hpValue:SetShadowOffset(1, -1)
     f.hpValue:SetPoint("LEFT", f.hp, "LEFT", 16, 0)
     f.hpPct = f.hp.over:CreateFontString(nil, "OVERLAY")
     f.hpPct:SetFont(ns.NUM, 12, "OUTLINE")
@@ -905,6 +911,9 @@ function ns:CreateHUD()
     local center = CreateCenter(hud)
     local pet = CreatePet(hud)
     RegisterUnitWatch(pet)
+    -- 펫 창은 내 창을 따라다님 (조각 이동 때 같이)
+    pet:ClearAllPoints()
+    pet:SetPoint("TOPLEFT", player, "TOPLEFT", 14, -(POR_H + 14))
 
     -- 대상 징표: 대상 초상화 위 가운데
     local raid = target:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -942,6 +951,7 @@ function ns:CreateHUD()
         player = player, target = target, pet = pet, center = center,
         refresh = function() All(player); All(target); UpdatePet(pet) end,
     }
+    if ns.ApplyHudParts then ns:ApplyHudParts() end
 
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")

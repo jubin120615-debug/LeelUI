@@ -94,7 +94,7 @@ local function Buttons()
 end
 
 -- 동그란 어두운 판 + 분홍 테 위에 게임 아이콘 그대로 (누르면 원래 기능)
-local function Orb(btn, size)
+local function Orb(btn, size, flat)
     if not btn or btn.leelOrb then return btn end
     btn.leelOrb = true
     -- 해/달 표시는 그림 자체가 "Background"라서 숨기지 않고 크기만 줄임
@@ -123,6 +123,8 @@ local function Orb(btn, size)
     bg:SetTexture(ns.MEDIA .. "mm_round")
     bg:SetSize(size, size); bg:SetPoint("CENTER")
     bg:SetVertexColor(0.16, 0.12, 0.11, 1)
+    -- 알약 줄(B안)에서는 단추마다 동그라미 판 없이 아이콘만
+    if flat then edge:Hide(); bg:Hide() end
     -- 버튼이 숨으면 판도 같이
     plate:SetShown(btn:IsShown())
     btn:HookScript("OnShow", function() plate:Show() end)
@@ -210,10 +212,10 @@ local function Clock()
     return string.format("%d:%02d", h, m)
 end
 
-local function ClockButton(parent)
+local function ClockButton(parent, flat)
     local b = CreateFrame("Button", nil, parent)
     b:SetHeight(22)
-    ns.RoundPlate(b, 11, { 0.125, 0.094, 0.086, 0.95 }, { 0.949, 0.702, 0.761, 0.55 })
+    if not flat then ns.RoundPlate(b, 11, { 0.125, 0.094, 0.086, 0.95 }, { 0.949, 0.702, 0.761, 0.55 }) end
     b.fs = ns.Num(b, 14, C.accHi)
     b.fs:SetPoint("CENTER", 0, 0)
     function b:Set(t) self.fs:SetText(t); self:SetWidth(math.max(40, self.fs:GetStringWidth() + 22)) end
@@ -415,24 +417,30 @@ styles.bar = function()
     bar:SetHeight(32)
     bar:SetPoint("TOP", Minimap, "BOTTOM", 0, -10)
     ns.RoundPlate(bar, 16, { 0.125, 0.094, 0.086, 0.95 }, { 0.949, 0.702, 0.761, 0.55 })
-    clockPill = ClockButton(bar)
-    local bun = BunnyButton(bar, 26)
+    -- B안: 아이콘 + 시계를 알약 하나에 (칸막이 선으로만 나눔), 토끼는 알약 오른쪽에 따로
+    ns.mmLine = true
+    clockPill = ClockButton(bar, true)
+    local bun = BunnyButton(skin, 28)
+    local sep = bar:CreateTexture(nil, "ARTWORK")
+    sep:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.3); sep:SetSize(1, 16)
     local list = {}
     for _, k in ipairs({ "mail", "track", "cal", "sun", "comp", "lfg", "pvp" }) do
-        if B[k] then Orb(B[k], 24); list[#list + 1] = B[k] end
+        if B[k] then Orb(B[k], 22, true); list[#list + 1] = B[k] end
     end
     local function Lay()
-        local x = 4   -- 버튼 크기가 제각각이라 "가운데"를 기준으로 32px 간격
+        local x = 6   -- 버튼 크기가 제각각이라 "가운데"를 기준으로 28px 간격
         for _, btn in ipairs(list) do
             if btn:IsShown() then
-                Put(btn, "CENTER", bar, "LEFT", x + 14, 0)
-                x = x + 32
+                Put(btn, "CENTER", bar, "LEFT", x + 12, 0)
+                x = x + 28
             end
         end
-        clockPill:ClearAllPoints(); clockPill:SetPoint("LEFT", bar, "LEFT", x + 2, 0)
-        x = x + clockPill:GetWidth() + 6
-        bun:ClearAllPoints(); bun:SetPoint("LEFT", bar, "LEFT", x, 0)
-        bar:SetWidth(x + 26 + 5)
+        sep:ClearAllPoints(); sep:SetPoint("CENTER", bar, "LEFT", x + 4, 0)
+        x = x + 8
+        clockPill:ClearAllPoints(); clockPill:SetPoint("LEFT", bar, "LEFT", x, 0)
+        x = x + clockPill:GetWidth() + 2
+        bar:SetWidth(x)
+        bun:ClearAllPoints(); bun:SetPoint("LEFT", bar, "RIGHT", 6, 0)
     end
     for _, btn in ipairs(list) do
         btn:HookScript("OnShow", function() C_Timer.After(0, Lay) end)
@@ -514,6 +522,14 @@ local function LeelIcon(btn, file, size)
     holder:SetAllPoints()
     holder:SetFrameLevel(btn:GetFrameLevel() + 5)
     local t = holder:CreateTexture(nil, "OVERLAY")
+    -- B안(알약 줄): 알록달록 토끼 아이콘 대신 분홍 선 아이콘
+    if ns.mmLine and file:find("^mmi_") then
+        file = file:gsub("^mmi_", "li_")
+        t:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+        size = 17
+        btn:HookScript("OnEnter", function() t:SetVertexColor(C.accHi[1], C.accHi[2], C.accHi[3], 1) end)
+        btn:HookScript("OnLeave", function() t:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) end)
+    end
     t:SetTexture(ns.MEDIA .. file)
     local sc = btn:GetScale() or 1
     t:SetSize((size or 22) / sc, (size or 22) / sc)
@@ -528,9 +544,9 @@ local function CalendarIcon(btn)
     local t = LeelIcon(btn, "mmi_cal", 22)
     if not t or btn.leelDay then return end
     local sc = btn:GetScale() or 1
-    btn.leelDay = ns.Num(btn.leelIconHolder, 10 / sc, C.ink, true)
+    btn.leelDay = ns.Num(btn.leelIconHolder, (ns.mmLine and 8 or 10) / sc, ns.mmLine and C.acc or C.ink, true)
     btn.leelDay:SetShadowColor(0, 0, 0, 0)
-    btn.leelDay:SetPoint("CENTER", t, "CENTER", 0, -3 / sc)
+    btn.leelDay:SetPoint("CENTER", t, "CENTER", 0, (ns.mmLine and -2 or -3) / sc)
     btn.leelDay:SetText((date("%d"):gsub("^0", "")))
 end
 
@@ -538,7 +554,8 @@ end
 UpdateSun = function(btn)
     if not (btn and btn.leelIcon) then return end
     local h = GetGameTime()
-    btn.leelIcon:SetTexture(ns.MEDIA .. ((h >= 6 and h < 18) and "mmi_day" or "mmi_night"))
+    local pre = ns.mmLine and "li_" or "mmi_"
+    btn.leelIcon:SetTexture(ns.MEDIA .. pre .. ((h >= 6 and h < 18) and "day" or "night"))
 end
 
 local function TidyCompartment(btn)
@@ -639,6 +656,7 @@ local function Apply()
     local st = Style()
     if st == "blizz" or not styles[st] or not Minimap then return end
     B = Buttons()
+    ns.mmLine = (st == "bar")      -- 알약 줄 모양이면 분홍 선 아이콘
     pcall(TidyCompartment, B.comp)
     local ok, err = pcall(styles[st])
     if not ok then ns.Print("미니맵 꾸미기 오류: " .. tostring(err)) return end
