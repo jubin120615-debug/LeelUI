@@ -376,10 +376,37 @@ local function UpdateTap(f, unit)
     if tapped == f.tapped then return end
     f.tapped = tapped
     ns.SetTapped(f.hp, tapped)
+    -- C안: 바 끝 동그란 자물쇠 + 이름 가로줄 + 토끼 배지 흑백
+    if tapped and not f.lock then
+        local lk = CreateFrame("Frame", nil, f.hp.over)
+        lk:SetSize(17, 17)
+        lk:SetPoint("CENTER", f.hp, "RIGHT", 3, 0)
+        lk:SetFrameLevel(f.hp.over:GetFrameLevel() + 4)
+        local bg = lk:CreateTexture(nil, "BACKGROUND")
+        bg:SetTexture(ns.MEDIA .. "circle"); bg:SetVertexColor(0.54, 0.51, 0.53, 1)
+        bg:SetPoint("TOPLEFT", -1.5, 1.5); bg:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+        local in2 = lk:CreateTexture(nil, "BORDER")
+        in2:SetTexture(ns.MEDIA .. "circle"); in2:SetVertexColor(0.17, 0.15, 0.16, 1)
+        in2:SetAllPoints()
+        local ic = lk:CreateTexture(nil, "ARTWORK")
+        ic:SetTexture(ns.MEDIA .. "lock"); ic:SetPoint("CENTER"); ic:SetSize(11, 11)
+        ic:SetVertexColor(0.92, 0.89, 0.90, 1)
+        f.lock = lk
+    end
+    if f.lock then f.lock:SetShown(tapped and true or false) end
+    f.headTex:SetDesaturated(tapped and true or false)
+    f.headTex:SetAlpha(tapped and 0.7 or 1)
+    if tapped then
+        f.lvColor = f.lvColor or { f.lv:GetTextColor() }
+        f.lv:SetTextColor(0.72, 0.69, 0.70)
+    elseif f.lvColor then
+        f.lv:SetTextColor(f.lvColor[1], f.lvColor[2], f.lvColor[3]); f.lvColor = nil
+    end
+    ns.SetStrike(f.name, tapped)
     if not tapped then
         PaintPlate(f)
     else
-        f.name:SetTextColor(0.73, 0.70, 0.71)
+        f.name:SetTextColor(0.76, 0.73, 0.74)
     end
     local q = f.quest
     q.fill:SetDesaturated(tapped); q.icon:SetDesaturated(tapped)
@@ -404,6 +431,7 @@ end
 
 local function UpdateInfo(f, unit)
     ns.SetText(f.name, UnitName(unit))
+    if f.tapped then ns.SetStrike(f.name, true) end
 
     local lvl = UnitLevel(unit)
     local c = C.accHi
@@ -418,7 +446,9 @@ local function UpdateInfo(f, unit)
             local d = getColor(lvl); c = { d.r, d.g, d.b }
         end
     end
+    f.lvColor = nil   -- 새 몹 색으로 (남의 몹이면 UpdateTap이 다시 회색으로)
     f.lv:SetTextColor(c[1], c[2], c[3])
+    if f.tapped then f.lvColor = { c[1], c[2], c[3] }; f.lv:SetTextColor(0.72, 0.69, 0.70) end
 
     -- 몹 등급 (숨겨진 값이면 일반으로)
     local rank = "normal"

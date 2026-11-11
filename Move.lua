@@ -173,8 +173,12 @@ function ns:CreateMover(hud)
     local bar = CreateFrame("Frame", nil, UIParent)
     bar:SetFrameStrata("DIALOG")
     bar:SetHeight(28)
-    bar:SetPoint("TOPLEFT", m, "BOTTOMLEFT", 0, -8)
-    bar:SetPoint("TOPRIGHT", m, "BOTTOMRIGHT", 0, -8)
+    -- 화면 맨 위 가운데에 따로 둬서 옮길 창들과 안 겹치게 (글씨 칸을 끌면 막대도 옮겨져요)
+    bar:SetMovable(true)
+    bar:SetClampedToScreen(true)
+    local bp = ns.db.moveBarPos
+    if bp then bar:SetPoint(bp[1], UIParent, bp[2], bp[3], bp[4])
+    else bar:SetPoint("TOP", UIParent, "TOP", 0, -12) end
 
     local chip = CreateFrame("Frame", nil, bar)
     chip:SetHeight(28)
@@ -182,8 +186,16 @@ function ns:CreateMover(hud)
     ns.RoundPlate(chip, 14)
     local cfs = ns.Font(chip, 13)
     cfs:SetPoint("LEFT", 14, 0)
-    cfs:SetText("이동 모드: 드래그해서 옮기기, 방향키 1px (Shift 10px)")
+    cfs:SetText("이동 모드: 드래그해서 옮기기, 방향키 1px (Shift 10px) · 이 칸을 끌면 막대 이동")
     chip:SetWidth(cfs:GetStringWidth() + 28)
+    chip:EnableMouse(true)
+    chip:RegisterForDrag("LeftButton")
+    chip:SetScript("OnDragStart", function() bar:StartMoving() end)
+    chip:SetScript("OnDragStop", function()
+        bar:StopMovingOrSizing()
+        local pt, _, rp, x, y = bar:GetPoint()
+        ns.db.moveBarPos = { pt, rp, x, y }
+    end)
 
     local done = ns.MakeButton(bar, "완료", true, function() ns:SetMoveMode(false) end)
     done:SetPoint("LEFT", chip, "RIGHT", 8, 0)
@@ -210,6 +222,10 @@ function ns:CreateMover(hud)
         if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("RIGHT") end
         prev = b
     end
+
+    -- 막대 폭 = 글씨 칸 + 완료 + 격자 + 방향 버튼들
+    local w = chip:GetWidth() + 8 + done:GetWidth() + 8 + math.max(gridBtn:GetWidth(), 90) + 24 + 4 * 28 + 3 * 4
+    bar:SetWidth(math.max(w, 400))
 
     m:Hide(); bar:Hide()
     ns.mover, ns.moverBar = m, bar

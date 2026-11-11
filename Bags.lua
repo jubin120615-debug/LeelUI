@@ -8,7 +8,7 @@ local GetItemInfo = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo  -- 새 �
 local function DB()
     ns.db.bags = ns.db.bags or {}
     local d = ns.db.bags
-    local def = { on = true, chip = true, bar = true, warn = true, low = 3, skin = true }
+    local def = { on = true, chip = false, bar = true, warn = true, low = 3, skin = true }
     for k, v in pairs(def) do if d[k] == nil then d[k] = v end end
     d.skin = true -- 르엘 통합 가방은 항상 사용
     return d
@@ -639,7 +639,7 @@ end
 ev:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         DB()
-        BuildChip()
+        -- BuildChip()  -- 미니맵 아래 숫자: 다른 기능과 겹쳐서 뺐어요
         if DB().skin then
             BuildWindow()
             TakeOver()

@@ -1,211 +1,37 @@
 -- LeelUI / Party.lua
--- 파티 프레임 (C안: 동글 체력 링)
--- 바깥 링 = 체력, 안쪽 얇은 링 = 마나/분노/기력, 가운데 르엘 UI 직업 아이콘(파스텔 원), 분홍 왕관
--- 상황: 체력 35% 아래 산호색(20% 아래 맥박), 테두리 한 자리(어그로 빨강 / 내 대상 흰색),
---       해제할 디버프(작은 동그라미 아이콘), 힐러 마나 부족, 쓰러짐/유령/접속 끊김, 부활 중, 멀리 있음(흐림)
+-- 파티 프레임 (힐러 타일): 칸이 체력만큼 직업색 파스텔로 차요
+-- 민트 = 들어올 치유, 아래 얇은 줄 = 마나/분노/기력, 오른쪽 위 = 내가 건 버프, 오른쪽 아래 = 해제할 디버프
+-- 상황: 35% 아래 산호 빛, 20% 아래 맥박 / 테두리 어그로 빨강, 내 대상 흰색 / 쓰러짐·유령·끊김·부활 중 / 멀리 있음(흐림)
 
 local _, ns = ...
 local C = ns.C
 local Try = ns.Try
 
-local RING   = 84    -- 체력 링 지름 (기본 크기 75%에서 화면상 약 63px)
-local MRING  = 62    -- 마나 링 지름
-local POR    = 52    -- 초상화 지름
-local CELL_W = 104
-local CELL_H = RING + 52
-local GAP    = 10
+local CELL_W, CELL_H = 152, 76
+local GAP = 8
+local PAD = 8
 local LOW_HP, CRIT_HP, LOW_MANA = 0.35, 0.20, 0.20
 local HEALERS = { PRIEST = true, DRUID = true, SHAMAN = true, PALADIN = true }
+local TILE = ns.MEDIA .. "tile"
 
 local PCOL = {
-    [0] = { 0.31, 0.49, 1.00 },   -- 마나
+    [0] = { 0.44, 0.55, 1.00 },   -- 마나
     [1] = { 0.88, 0.28, 0.28 },   -- 분노
     [2] = { 1.00, 0.61, 0.25 },   -- 집중
     [3] = { 1.00, 0.82, 0.12 },   -- 기력
 }
 local CORAL = { 1.00, 0.48, 0.40 }
+local MINT  = { 0.50, 0.84, 0.76 }
+local RIM   = { 0.23, 0.165, 0.157 }
 
-----------------------------------------------------------------------
--- 동그란 진행 링
--- 숫자를 계산할 수 있으면 12시부터 시계 방향으로 비어 가는 호(반원 두 장 회전)
--- 전투 중 숨겨진 값이면 계산을 못 하니 아래에서 위로 차는 링으로 대신
-----------------------------------------------------------------------
--- 조각마다 '퍼센트 → 막대 채움' 곡선 (게임 곡선 기능). 직선으로 채우면 원호와 어긋나서
--- 링 중심선(반지름 약 0.455) 위의 점까지 정확히 채워지도록 sin/cos로 보정
-local QR = 0.455
-local function QFill(i, p)
-    local lo, hi = (i - 1) * 0.25, i * 0.25
-    if p <= lo then return 0 end
-    if p >= hi then return 1 end
-    local t = p * 2 * math.pi
-    if i == 1 then return 0.5 + QR * math.sin(t)          -- 12 → 9시 (가로, 오른쪽에서)
-    elseif i == 2 then return 0.5 - QR * math.cos(t)      -- 9 → 6시 (세로, 위에서)
-    elseif i == 3 then return 0.5 - QR * math.sin(t)      -- 6 → 3시 (가로, 왼쪽에서)
-    else return 0.5 + QR * math.cos(t) end                -- 3 → 12시 (세로, 아래에서)
-end
-local QCURVE
-local function QCurves()
-    if QCURVE ~= nil then return QCURVE or nil end
-    QCURVE = false
-    if not (C_CurveUtil and C_CurveUtil.CreateCurve) then return nil end
-    local ok, list = pcall(function()
-        local L = {}
-        for i = 1, 4 do
-            local c = C_CurveUtil.CreateCurve()
-            if c.SetType and Enum and Enum.LuaCurveType and Enum.LuaCurveType.Linear then
-                c:SetType(Enum.LuaCurveType.Linear)
-            end
-            for k = 0, 48 do
-                local p = k / 48
-                c:AddPoint(p, QFill(i, p))
-            end
-            L[i] = c
-        end
-        return L
-    end)
-    if ok and list then QCURVE = list end
-    return QCURVE or nil
-end
-ns.PartyQCurves = QCurves
-
-local function CreateRing(parent, size, full, half, layer)
-    local r = CreateFrame("Frame", nil, parent)
-    r:SetSize(size, size)
-
-    local track = r:CreateTexture(nil, layer, nil, 0)
-    track:SetTexture(ns.MEDIA .. full)
-    track:SetAllPoints()
-    track:SetVertexColor(0.23, 0.17, 0.16, 1)
-
-    local function Half(side)
-        local t = r:CreateTexture(nil, layer, nil, 1)
-        t:SetTexture(ns.MEDIA .. half)
-        t:SetAllPoints()
-        local m = r:CreateMaskTexture()
-        m:SetTexture(ns.WHITE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-        if side == "RIGHT" then
-            m:SetPoint("TOPLEFT", r, "TOP", 0, 0); m:SetPoint("BOTTOMRIGHT")
-        else
-            m:SetPoint("TOPLEFT"); m:SetPoint("BOTTOMRIGHT", r, "BOTTOM", 0, 0)
-        end
-        t:AddMaskTexture(m)
-        return t
-    end
-    r.right, r.left = Half("RIGHT"), Half("LEFT")
-
-    -- 숨겨진 값용 (퍼센트를 받을 수 있을 때): 네 조각으로 12시부터 시계 방향
-    -- 조각마다 링 전체 그림을 쓰는 상태바 + 그 사분면만 보이게 자르는 틀.
-    -- 상태바 최소/최대를 상수로 어긋나게 줘서 퍼센트(숨겨진 값)를 그대로 넣어도 됨.
-    local Q = {
-        -- 사분면 자리(틀),  방향,          거꾸로,  최소, 최대  (0~100 기준)
-        -- 남은 양 = 12시에서 거꾸로 재는 호 → 줄어들 땐 빈 곳이 12시부터 시계 방향으로 커짐
-        { "TOPLEFT",     "HORIZONTAL", true,  -25, 25 },   -- 12 → 9시 쪽 (마지막까지 남음)
-        { "BOTTOMLEFT",  "VERTICAL",   true,    0, 50 },   -- 9 → 6시
-        { "BOTTOMRIGHT", "HORIZONTAL", false,  25, 75 },   -- 6 → 3시
-        { "TOPRIGHT",    "VERTICAL",   false,  50, 100 },  -- 3 → 12시 (가장 먼저 빔)
-    }
-    r.q = {}
-    for i, d in ipairs(Q) do
-        local clip = CreateFrame("Frame", nil, r)
-        clip:SetSize(size / 2, size / 2)
-        clip:SetPoint(d[1], r, d[1], 0, 0)
-        clip:SetClipsChildren(true)
-        local b = CreateFrame("StatusBar", nil, clip)
-        b:SetSize(size, size)
-        b:SetPoint(d[1], clip, d[1], 0, 0)
-        b:SetOrientation(d[2])
-        if b.SetReverseFill then b:SetReverseFill(d[3]) end
-        b:SetStatusBarTexture(ns.MEDIA .. full)
-        b.lo, b.hi = d[4], d[5]
-        clip:Hide()
-        r.q[i] = { clip = clip, bar = b }
-    end
-
-    -- 퍼센트도 못 받을 때만: 세로로 차는 링
-    local sb = CreateFrame("StatusBar", nil, r)
-    sb:SetAllPoints()
-    sb:SetOrientation("VERTICAL")
-    sb:SetStatusBarTexture(ns.MEDIA .. full)
-    sb:SetMinMaxValues(0, 1)
-    sb:Hide()
-    r.sb = sb
-
-    function r:SetColor(c)
-        self.right:SetVertexColor(c[1], c[2], c[3], 1)
-        self.left:SetVertexColor(c[1], c[2], c[3], 1)
-        self.sb:SetStatusBarColor(c[1], c[2], c[3], 1)
-        for _, q in ipairs(self.q) do q.bar:SetStatusBarColor(c[1], c[2], c[3], 1) end
-    end
-
-    local function ShowQuads(self, on)
-        for _, q in ipairs(self.q) do q.clip:SetShown(on) end
-    end
-
-    -- 반환: 0~1 비율 (숨겨진 값이면 nil)
-    -- pct, scale: 숨겨진 값일 때 쓸 퍼센트(게임 함수 값)와 그 단위(1 또는 100)
-    -- getq(i, curve): 조각 i용 곡선을 거친 숨겨진 값 (없으면 nil)
-    function r:SetValue(cur, max, pct, scale, getq)
-        local ok, p = pcall(function()
-            if not max or max <= 0 then return 0 end
-            local v = cur / max
-            if v < 0 then v = 0 elseif v > 1 then v = 1 end
-            return v
-        end)
-        if not ok or type(p) ~= "number" then
-            self.right:Hide(); self.left:Hide()
-            local curves = getq and QCurves()
-            if curves then
-                local okc = pcall(function()
-                    for i, q in ipairs(self.q) do
-                        local v = getq(i, curves[i])
-                        if v == nil then error("no value") end
-                        q.bar:SetMinMaxValues(0, 1)
-                        q.bar:SetValue(v)
-                    end
-                end)
-                if okc then
-                    self.sb:Hide(); ShowQuads(self, true)
-                    return nil
-                end
-            end
-            if pct ~= nil and scale then
-                local k = scale / 100
-                local okq = pcall(function()
-                    for _, q in ipairs(self.q) do
-                        q.bar:SetMinMaxValues(q.bar.lo * k, q.bar.hi * k)
-                        q.bar:SetValue(pct)
-                    end
-                end)
-                if okq then
-                    self.sb:Hide(); ShowQuads(self, true)
-                    return nil
-                end
-            end
-            ShowQuads(self, false)
-            self.sb:Show()
-            ns.SetBar(self.sb, cur, max)
-            return nil
-        end
-        self.sb:Hide(); ShowQuads(self, false)
-        -- 남은 양은 12시에서 반시계로 재는 호 → 줄어들 땐 12시부터 시계 방향으로 비어 감
-        -- (반쪽 그림은 왼쪽 반원. SetRotation 음수 = 시계 방향)
-        if p <= 0 then
-            self.right:Hide(); self.left:Hide()
-        elseif p <= 0.5 then
-            self.left:Show(); self.left:SetRotation(-(math.pi - p * 2 * math.pi))
-            self.right:Hide()
-        else
-            self.left:Show(); self.left:SetRotation(0)
-            self.right:Show(); self.right:SetRotation(p * 2 * math.pi - math.pi)
-        end
-        return p
-    end
-
-    function r:Clear()
-        self.right:Hide(); self.left:Hide(); self.sb:Hide(); ShowQuads(self, false)
-    end
-    return r
-end
+-- 직업색 파스텔 (블리자드 직업색을 흰색 쪽으로 섞음)
+local PASTEL = {
+    WARRIOR = { 0.902, 0.804, 0.690 }, PALADIN = { 0.980, 0.776, 0.863 }, HUNTER  = { 0.824, 0.910, 0.702 },
+    ROGUE   = { 1.000, 0.953, 0.651 }, PRIEST  = { 0.949, 0.933, 0.914 }, SHAMAN  = { 0.651, 0.784, 0.957 },
+    MAGE    = { 0.678, 0.886, 0.965 }, WARLOCK = { 0.788, 0.741, 0.918 }, DRUID   = { 1.000, 0.776, 0.604 },
+    DEATHKNIGHT = { 0.933, 0.627, 0.667 }, MONK = { 0.600, 1.000, 0.820 }, DEMONHUNTER = { 0.855, 0.659, 0.929 },
+    EVOKER  = { 0.580, 0.835, 0.780 },
+}
 
 ----------------------------------------------------------------------
 -- 직업
@@ -216,25 +42,10 @@ local function ClassOf(u)
     return file
 end
 
-local function ClassColor(file)
-    local c = file and ((C_ClassColor and C_ClassColor.GetClassColor and C_ClassColor.GetClassColor(file))
-        or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[file]))
-    if c then return { c.r, c.g, c.b } end
-    return C.tx
+local function Pastel(file)
+    return (file and PASTEL[file]) or C.acc
 end
 
--- 체력 알약 색: 평소 분홍 + 진한 글씨, 위험하면 빨강 + 흰 글씨
-local function PaintPill(f, low)
-    if low then
-        f.pill.fill:SetVertexColor(0.88, 0.33, 0.25, 1)
-        f.val:SetTextColor(1, 1, 1)
-    else
-        f.pill.fill:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
-        f.val:SetTextColor(C.ink[1], C.ink[2], C.ink[3])
-    end
-end
-
--- 르엘 UI 전용 직업 아이콘 (파스텔 원). 직업을 모르면 게임 초상화
 local CLASS_ICON = {
     WARRIOR = "cls_warrior", PALADIN = "cls_paladin", HUNTER = "cls_hunter",
     ROGUE = "cls_rogue", PRIEST = "cls_priest", SHAMAN = "cls_shaman",
@@ -250,7 +61,7 @@ local function SetIcon(f, unit)
     end
 end
 
--- 체력 숫자 (% 기호 없이)
+-- 체력 숫자 (% 기호는 따로)
 local function PctText(fs, unit, cur, max)
     local ok = pcall(function()
         if max > 0 then fs:SetFormattedText("%d", math.floor(cur / max * 100 + 0.5)) else fs:SetText("") end
@@ -266,58 +77,105 @@ local function PctText(fs, unit, cur, max)
     fs:SetText("")
 end
 
-----------------------------------------------------------------------
--- 해제할 디버프 (블리자드 애드온용 오라 컨테이너, 내가 풀 수 있는 것만)
-----------------------------------------------------------------------
-local DSIZE = 22
-local function InitDebuff(btn)
-    btn:SetSize(DSIZE, DSIZE)
-    local black = btn:CreateTexture(nil, "BACKGROUND")
-    black:SetTexture(ns.MEDIA .. "circle"); black:SetVertexColor(0.11, 0.08, 0.07, 1)
-    black:SetPoint("TOPLEFT", -2, 2); black:SetPoint("BOTTOMRIGHT", 2, -2)
-    local icon = btn:CreateTexture(nil, "ARTWORK")
-    icon:SetAllPoints()
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    local m = btn:CreateMaskTexture()
-    m:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    m:SetAllPoints(icon)
-    icon:AddMaskTexture(m)
-    btn:SetIcon(icon)
+-- 전투 중 숨겨진 체력에서도 '35% 아래'를 알 수 있게: 체력% → 빛 투명도 곡선
+local LOWCURVE
+local function LowCurve()
+    if LOWCURVE ~= nil then return LOWCURVE or nil end
+    LOWCURVE = false
+    if not (C_CurveUtil and C_CurveUtil.CreateCurve) then return nil end
+    local ok, c = pcall(function()
+        local c = C_CurveUtil.CreateCurve()
+        if c.SetType and Enum and Enum.LuaCurveType and Enum.LuaCurveType.Linear then c:SetType(Enum.LuaCurveType.Linear) end
+        c:AddPoint(0, 1); c:AddPoint(LOW_HP - 0.005, 1); c:AddPoint(LOW_HP, 0); c:AddPoint(1, 0)
+        return c
+    end)
+    if ok and c then LOWCURVE = c end
+    return LOWCURVE or nil
 end
 
-local function CreateDebuffs(f)
-    local ok, cont = pcall(CreateFrame, "AuraContainer", nil, f, "CustomAuraContainerTemplate")
+----------------------------------------------------------------------
+-- 글씨: 밝은 칸 위에서도 읽히게 외곽선
+----------------------------------------------------------------------
+local function OFont(parent, size, color)
+    local fs = ns.Font(parent, size, color)
+    fs:SetFont(ns.FONT, size, "OUTLINE")
+    if ns.TrackText then ns.TrackText(fs, size, "OUTLINE") end
+    fs:SetShadowColor(0.16, 0.09, 0.08, 0.9)
+    fs:SetShadowOffset(1, -1)
+    return fs
+end
+local function ONum(parent, size, color)
+    local fs = ns.Num(parent, size, color)
+    local file = ns.NUM
+    if not fs:SetFont(file, size, "OUTLINE") then fs:SetFont(ns.FONT, size, "OUTLINE") end
+    fs:SetShadowColor(0.16, 0.09, 0.08, 0.9)
+    fs:SetShadowOffset(1, -1)
+    return fs
+end
+
+----------------------------------------------------------------------
+-- 오라 (블리자드 애드온용 오라 컨테이너)
+----------------------------------------------------------------------
+local DSIZE, BSIZE = 18, 16
+local function InitAura(size, shape)
+    return function(btn)
+        btn:SetSize(size, size)
+        local black = btn:CreateTexture(nil, "BACKGROUND")
+        black:SetTexture(ns.MEDIA .. shape); black:SetVertexColor(0.11, 0.08, 0.07, 1)
+        black:SetPoint("TOPLEFT", -1.5, 1.5); black:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints()
+        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local m = btn:CreateMaskTexture()
+        m:SetTexture(ns.MEDIA .. shape, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        m:SetAllPoints(icon)
+        icon:AddMaskTexture(m)
+        btn:SetIcon(icon)
+    end
+end
+
+local function AuraBox(f, key, filter, max, size, shape, point, x, y)
+    local ok, cont = pcall(CreateFrame, "AuraContainer", nil, f.top, "CustomAuraContainerTemplate")
     if not ok or not cont then return end
     local ok2 = pcall(function()
-        cont:SetPoint("TOP", f.ring, "TOPRIGHT", -8, 2)
-        if cont.SetFlowLayoutAnchorPoint then cont:SetFlowLayoutAnchorPoint("TOP") end
+        cont:SetPoint(point, f, point, x, y)
+        if cont.SetFlowLayoutAnchorPoint then cont:SetFlowLayoutAnchorPoint(point) end
         if cont.SetFlowLayoutGrowthDirection and AnchorUtil and AnchorUtil.FlowDirection then
-            cont:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Down, AnchorUtil.FlowDirection.Left)
+            cont:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Left,
+                point:find("TOP") and AnchorUtil.FlowDirection.Down or AnchorUtil.FlowDirection.Up)
         end
-        cont:AddAuraGroup("leelDispel", "HARMFUL|RAID", {
-            maxFrameCount = 3,
+        cont:AddAuraGroup(key, filter, {
+            maxFrameCount = max,
             sortMethod = AuraContainerSortMethod and AuraContainerSortMethod.Expiration or 0,
             sortDirection = AuraContainerSortDirection and AuraContainerSortDirection.Normal or 0,
-            initializeFrame = InitDebuff,
-            layout = { elementSpacing = 4, elementWidth = DSIZE, elementHeight = DSIZE },
+            initializeFrame = InitAura(size, shape),
+            layout = { elementSpacing = 3, elementWidth = size, elementHeight = size },
         })
         cont:SetUnit(f.unit)
     end)
     if ok2 then
         cont:SetFrameLevel(f.top:GetFrameLevel() + 1)
-        f.debuffs = cont
+        return cont
     end
 end
 
 ----------------------------------------------------------------------
--- 한 칸
+-- 한 칸 (타일)
 ----------------------------------------------------------------------
-local function Circle(parent, layer, sub, size, color, alpha)
+local function TileTex(parent, layer, sub, c, a)
     local t = parent:CreateTexture(nil, layer, nil, sub or 0)
-    t:SetTexture(ns.MEDIA .. "circle")
-    t:SetSize(size, size)
-    t:SetVertexColor(color[1], color[2], color[3], alpha or 1)
+    t:SetTexture(TILE)
+    t:SetVertexColor(c[1], c[2], c[3], a or 1)
     return t
+end
+
+local function MaskedBar(f, level)
+    local b = CreateFrame("StatusBar", nil, f)
+    b:SetFrameLevel(level)
+    b:SetStatusBarTexture(ns.WHITE)
+    b:SetMinMaxValues(0, 1); b:SetValue(0)
+    b:GetStatusBarTexture():AddMaskTexture(f.mask)
+    return b
 end
 
 local function CreateMember(parent, i)
@@ -330,36 +188,77 @@ local function CreateMember(parent, i)
     f:SetAttribute("*type2", "togglemenu")
     f:RegisterForClicks("AnyUp")
 
-    -- 링 영역
-    local ringHolder = CreateFrame("Frame", nil, f)
-    ringHolder:SetSize(RING, RING)
-    ringHolder:SetPoint("TOP", 0, -8)
-    f.ring = ringHolder
+    -- 바깥 빛 (체력 낮음): 테두리 바깥이라 흰/빨강 테두리와 같이 보임
+    f.glow = f:CreateTexture(nil, "BACKGROUND", nil, -8)
+    f.glow:SetTexture(ns.MEDIA .. "tile_glow")
+    f.glow:SetPoint("TOPLEFT", -18, 16); f.glow:SetPoint("BOTTOMRIGHT", 18, -16)
+    f.glow:SetVertexColor(CORAL[1], CORAL[2], CORAL[3], 1)
+    f.glow:SetAlpha(0)
+    f.pulse = f:CreateTexture(nil, "BACKGROUND", nil, -7)
+    f.pulse:SetTexture(ns.MEDIA .. "tile_glow")
+    f.pulse:SetAllPoints(f.glow)
+    f.pulse:SetVertexColor(1, 0.3, 0.2, 1)
+    local ag = f.pulse:CreateAnimationGroup()
+    ag:SetLooping("BOUNCE")
+    local a = ag:CreateAnimation("Alpha")
+    a:SetFromAlpha(0.1); a:SetToAlpha(0.9); a:SetDuration(0.55); a:SetSmoothing("IN_OUT")
+    f.pulse:SetScript("OnShow", function() ag:Play() end)
+    f.pulse:SetScript("OnHide", function() ag:Stop() end)
+    f.pulse:Hide()
 
-    -- 바깥 테두리 한 자리: 평소 검정, 어그로 빨강, 내 대상 흰색
-    f.rim = ringHolder:CreateTexture(nil, "BACKGROUND", nil, -7)
-    f.rim:SetTexture(ns.MEDIA .. "tring")
-    f.rim:SetPoint("TOPLEFT", -4, 4); f.rim:SetPoint("BOTTOMRIGHT", 4, -4)
-    f.rim:SetVertexColor(0, 0, 0, 0.9)
+    -- 그림자, 테두리, 바탕
+    local sh = TileTex(f, "BACKGROUND", -6, { 0, 0, 0 }, 0.45)
+    sh:SetPoint("TOPLEFT", 0, -3); sh:SetPoint("BOTTOMRIGHT", 0, -5)
+    f.rim = TileTex(f, "BACKGROUND", -5, RIM, 1)
+    f.rim:SetPoint("TOPLEFT", -2, 2); f.rim:SetPoint("BOTTOMRIGHT", 2, -2)
+    local bg = TileTex(f, "BACKGROUND", -4, { 0.102, 0.075, 0.07 }, 0.96)
+    bg:SetAllPoints()
 
-    local bg = Circle(ringHolder, "BACKGROUND", -6, RING + 6, { 0.078, 0.055, 0.051 }, 0.95)
-    bg:SetPoint("CENTER")
+    f.mask = f:CreateMaskTexture()
+    f.mask:SetTexture(TILE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    f.mask:SetAllPoints(f)
 
-    f.hp = CreateRing(ringHolder, RING, "pring", "pring_half", "BORDER")
-    f.hp:SetPoint("CENTER")
-    f.hp:SetColor(C.acc)
+    local lv = f:GetFrameLevel()
+    -- 체력 (직업색)
+    f.hp = MaskedBar(f, lv + 1)
+    f.hp:SetAllPoints()
+    -- 들어올 치유: 체력 끝에서 이어서, 칸 밖으로 넘치는 건 둥근 틀에 잘림
+    f.heal = MaskedBar(f, lv + 1)
+    f.heal:SetSize(CELL_W, CELL_H)
+    f.heal:SetPoint("TOPLEFT", f.hp:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+    f.heal:SetStatusBarColor(MINT[1], MINT[2], MINT[3], 0.7)
+    local stripes = f.heal:CreateTexture(nil, "OVERLAY")
+    stripes:SetTexture(ns.MEDIA .. "stripes", "REPEAT", "REPEAT")
+    stripes:SetHorizTile(true); stripes:SetVertTile(true)
+    stripes:SetAllPoints(f.heal:GetStatusBarTexture())
+    stripes:SetVertexColor(1, 1, 1, 0.25)
+    stripes:AddMaskTexture(f.mask)
+    -- 위쪽 윤기
+    local shine = f.hp:CreateTexture(nil, "OVERLAY")
+    shine:SetTexture(ns.WHITE)
+    shine:SetAllPoints(f)
+    shine:SetGradient("VERTICAL", CreateColor(0, 0, 0, 0.10), CreateColor(1, 1, 1, 0.16))
+    shine:AddMaskTexture(f.mask)
 
-    f.pw = CreateRing(ringHolder, MRING, "mring", "mring_half", "BORDER")
-    f.pw:SetPoint("CENTER")
-    f.pw:SetFrameLevel(f.hp:GetFrameLevel() + 1)
+    -- 아래 자원 줄
+    f.pw = MaskedBar(f, lv + 2)
+    f.pw:SetPoint("BOTTOMLEFT"); f.pw:SetPoint("BOTTOMRIGHT"); f.pw:SetHeight(4)
+    local pbg = f.pw:CreateTexture(nil, "BACKGROUND")
+    pbg:SetTexture(ns.WHITE); pbg:SetAllPoints(); pbg:SetVertexColor(0.08, 0.06, 0.055, 0.85)
+    pbg:AddMaskTexture(f.mask)
 
-    -- 초상화
-    local pf = CreateFrame("Frame", nil, ringHolder)
-    pf:SetSize(POR, POR)
-    pf:SetPoint("CENTER")
-    pf:SetFrameLevel(f.pw:GetFrameLevel() + 1)
-    local pbg = Circle(pf, "BACKGROUND", 0, POR + 4, { 0.11, 0.08, 0.07 })
-    pbg:SetPoint("CENTER")
+    -- 글씨·아이콘 층
+    local top = CreateFrame("Frame", nil, f)
+    top:SetAllPoints()
+    top:SetFrameLevel(lv + 4)
+    f.top = top
+
+    local pf = CreateFrame("Frame", nil, top)
+    pf:SetSize(20, 20)
+    pf:SetPoint("TOPLEFT", PAD, -PAD + 1)
+    local pring = pf:CreateTexture(nil, "BACKGROUND")
+    pring:SetTexture(ns.MEDIA .. "circle"); pring:SetVertexColor(0.16, 0.09, 0.08, 0.9)
+    pring:SetPoint("TOPLEFT", -1.5, 1.5); pring:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
     f.por = pf:CreateTexture(nil, "ARTWORK")
     f.por:SetAllPoints()
     local pm = pf:CreateMaskTexture()
@@ -367,136 +266,55 @@ local function CreateMember(parent, i)
     pm:SetAllPoints(f.por)
     f.por:AddMaskTexture(pm)
 
-    -- 체력 20% 아래: 붉은 기운 맥박
-    f.danger = Circle(pf, "OVERLAY", 0, POR, { 1, 0.24, 0.16 }, 1)
-    f.danger:SetPoint("CENTER")
-    f.danger:SetBlendMode("ADD")
-    local ag = f.danger:CreateAnimationGroup()
-    ag:SetLooping("BOUNCE")
-    local a = ag:CreateAnimation("Alpha")
-    a:SetFromAlpha(0.05); a:SetToAlpha(0.4); a:SetDuration(0.6); a:SetSmoothing("IN_OUT")
-    f.danger:SetScript("OnShow", function() ag:Play() end)
-    f.danger:SetScript("OnHide", function() ag:Stop() end)
-    f.danger:Hide()
+    f.name = OFont(top, 14)
+    f.name:SetPoint("LEFT", pf, "RIGHT", 5, 0)
+    f.name:SetWidth(CELL_W - PAD * 2 - 25 - 56)
+    f.name:SetJustifyH("LEFT")
+    f.name:SetWordWrap(false)
 
-    -- 배지들 (맨 위 층)
-    local top = CreateFrame("Frame", nil, ringHolder)
-    top:SetAllPoints()
-    top:SetFrameLevel(pf:GetFrameLevel() + 3)
-    f.top = top
+    f.val = ONum(top, 26)
+    f.val:SetPoint("BOTTOMLEFT", PAD, PAD + 1)
+    f.pct = ONum(top, 13)
+    f.pct:SetText("%")
+    f.pct:SetPoint("BOTTOMLEFT", f.val, "BOTTOMRIGHT", 1, 2)
 
-    -- 가운데 상태 아이콘 (해골 / 부활)
+    -- 쓰러짐 / 유령 / 끊김
+    f.state = OFont(top, 15, { 0.78, 0.70, 0.67 })
+    f.state:SetPoint("BOTTOMLEFT", PAD, PAD + 3)
+    f.state:Hide()
     f.mid = top:CreateTexture(nil, "OVERLAY")
-    f.mid:SetSize(26, 26)
-    f.mid:SetPoint("CENTER")
+    f.mid:SetSize(20, 20)
+    f.mid:SetPoint("LEFT", f.state, "RIGHT", 4, 0)
     f.mid:Hide()
 
-    -- 파티장 왕관 (위 가운데)
-    f.lead = top:CreateTexture(nil, "OVERLAY")
-    f.lead:SetTexture(ns.MEDIA .. "crown")
-    f.lead:SetSize(20, 20)
-    f.lead:SetPoint("CENTER", ringHolder, "TOP", 0, 0)
-    f.lead:Hide()
-
-    -- 한 줄: 이름 + 체력 숫자 (쓰러지면 숫자 대신 상태 글씨)
-    -- 링 아래에 걸친 체력 숫자 알약 (B안): 평소 분홍, 35% 아래 빨강
-    -- capsule.tga = 2:1 알약 모양 (끝이 완전히 둥글게)
-    local pill = CreateFrame("Frame", nil, ringHolder)
-    pill:SetSize(40, 20)
-    pill:SetPoint("CENTER", ringHolder, "BOTTOM", 0, 4)
-    pill:SetFrameLevel(top:GetFrameLevel() + 2)
-    local pe = pill:CreateTexture(nil, "BACKGROUND")
-    pe:SetTexture(ns.MEDIA .. "capsule"); pe:SetVertexColor(0.09, 0.07, 0.06, 1)
-    pe:SetPoint("TOPLEFT", -2, 2); pe:SetPoint("BOTTOMRIGHT", 2, -2)
-    pill.fill = pill:CreateTexture(nil, "BORDER")
-    pill.fill:SetTexture(ns.MEDIA .. "capsule"); pill.fill:SetAllPoints()
-    local shine = pill:CreateTexture(nil, "ARTWORK")
-    shine:SetTexture(ns.MEDIA .. "capsule"); shine:SetVertexColor(1, 1, 1, 0.28)
-    shine:SetPoint("TOPLEFT", 5, -2); shine:SetPoint("TOPRIGHT", -5, -2); shine:SetHeight(6)
-    f.val = ns.Num(pill, 16, C.ink)
-    f.val:SetShadowColor(0, 0, 0, 0)
-    f.val:SetPoint("CENTER", 0, 0)
-    f.pill = pill
-
-    -- 이름 (알약 아래), 쓰러지면 이름 아래 상태 글씨, 힐러 마나 경고
-    f.name = ns.Font(f, 14)
-    f.name:SetPoint("TOP", ringHolder, "BOTTOM", 0, -16)
-    f.name:SetWidth(CELL_W)
-    f.name:SetWordWrap(false)
-    f.state = ns.Font(f, 12, { 0.62, 0.58, 0.58 })
-    f.state:SetPoint("TOP", f.name, "BOTTOM", 0, -1)
-    f.state:Hide()
-    f.mana = ns.Font(f, 11, { 0.58, 0.67, 0.94 })
-    f.mana:SetPoint("TOP", f.name, "BOTTOM", 0, -1)
+    -- 힐러 마나 부족
+    f.mana = OFont(top, 11, { 0.68, 0.76, 1 })
+    f.mana:SetPoint("BOTTOMRIGHT", -PAD, PAD + 1)
     f.mana:Hide()
 
-    CreateDebuffs(f)
+    -- 파티장 왕관 (왼쪽 위 모서리)
+    f.lead = top:CreateTexture(nil, "OVERLAY", nil, 2)
+    f.lead:SetTexture(ns.MEDIA .. "crown")
+    f.lead:SetSize(18, 18)
+    f.lead:SetPoint("CENTER", top, "TOPLEFT", 6, -2)
+    f.lead:SetRotation(math.rad(18))
+    f.lead:Hide()
+
+    -- 내가 건 버프 (오른쪽 위), 해제할 디버프 (오른쪽 아래)
+    f.buffs = AuraBox(f, "leelMine", "HELPFUL|PLAYER", 3, BSIZE, "mm_squircle", "TOPRIGHT", -PAD + 2, -PAD + 2)
+    f.debuffs = AuraBox(f, "leelDispel", "HARMFUL|RAID", 2, DSIZE, "mm_squircle", "BOTTOMRIGHT", -PAD + 2, PAD + 4)
     return f
 end
 
 ----------------------------------------------------------------------
 -- 갱신
 ----------------------------------------------------------------------
--- 게임 퍼센트 함수 (전투 중 숨겨진 값도 그대로 상태바에 넣을 수 있음)
--- 단위(0~1인지 0~100인지)는 값이 보일 때 재 둠
-local hpScale, pwScale
-local function Measure(raw, p, old)
-    if not p or type(raw) ~= "number" or ns.IsSecret(raw) then return old end
-    if raw > 1.5 then return 100 end
-    if p > 0.02 and raw <= 1.0001 then return 1 end
-    return old
-end
-local function RawPct(fn, ...)
-    if not fn then return nil end
-    local ok, v = pcall(fn, ...)
-    if ok then return v end
-end
--- 퍼센트 값은 늘 숨겨져 있어서 직접 못 읽음.
--- 1) 게임이 0~100으로 바꿔 주는 곡선(CurveConstants.ScaleTo100)이 있으면 그걸로 단위를 못 박음
--- 2) 없으면 숨겨진 값을 0~100 상태바에 넣고 채워진 길이로 단위를 잼
-local SCALE100 = CurveConstants and CurveConstants.ScaleTo100
-local function HP(u)
-    if SCALE100 then
-        local v = RawPct(UnitHealthPercent, u, false, SCALE100)
-        if v ~= nil then return v, 100 end
-    end
-    return RawPct(UnitHealthPercent, u), nil
-end
-local function PW(u, pt)
-    if SCALE100 then
-        local v = RawPct(UnitPowerPercent, u, pt, false, SCALE100)
-        if v ~= nil then return v, 100 end
-    end
-    return RawPct(UnitPowerPercent, u, pt), nil
-end
-
-local probe
-local function ProbeScale(raw)
-    if raw == nil then return nil end
-    if not probe then
-        probe = CreateFrame("StatusBar", nil, UIParent)
-        probe:SetSize(200, 4); probe:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", 0, -50)
-        probe:SetStatusBarTexture(ns.WHITE or "Interface\\Buttons\\WHITE8X8")
-        probe:SetMinMaxValues(0, 100)
-    end
-    probe:SetValue(raw)
-    local ok, w = pcall(function() return probe:GetStatusBarTexture():GetWidth() + 0 end)
-    if not ok or type(w) ~= "number" then return nil end
-    -- 0~1 단위면 0~100 막대에서 1% 이하로만 참
-    if w > 4 then return 100 end
-    if w > 0.05 then return 1 end
-    return nil -- 아직 그려지기 전이거나 0: 다음에 다시
-end
-
-local function EnsureScales()
-    if not hpScale then
-        local v, k = HP("player")
-        hpScale = k or ProbeScale(v)
-    end
-    if not pwScale then
-        local v, k = PW("player", UnitPowerType("player"))
-        pwScale = k or ProbeScale(v)
-    end
+local function UpdateHeal(f)
+    local u = f.unit
+    if not UnitExists(u) or f.gone then f.heal:SetValue(0) return end
+    local inc = UnitGetIncomingHeals and select(2, pcall(UnitGetIncomingHeals, u)) or nil
+    pcall(f.heal.SetMinMaxValues, f.heal, 0, UnitHealthMax(u))
+    if inc == nil or not pcall(f.heal.SetValue, f.heal, inc) then f.heal:SetValue(0) end
 end
 
 local function UpdateHealth(f)
@@ -506,63 +324,68 @@ local function UpdateHealth(f)
     local ghost = dead and Try(UnitIsGhost, u)
     local off = not Try(UnitIsConnected, u)
     local gone = dead or off
+    f.gone = gone
 
     f.por:SetDesaturated(gone)
-    f.por:SetVertexColor(gone and 0.5 or 1, gone and 0.5 or 1, gone and 0.5 or 1)
+    f.por:SetVertexColor(gone and 0.55 or 1, gone and 0.55 or 1, gone and 0.55 or 1)
 
     if gone then
-        f.hp:Clear(); f.pw:Clear()
-        f.danger:Hide()
-        f.pill:Hide(); f.mana:Hide()
+        f.hp:SetValue(0); f.heal:SetValue(0); f.pw:SetValue(0)
+        f.glow:SetAlpha(0); f.pulse:Hide()
+        f.val:Hide(); f.pct:Hide(); f.mana:Hide()
         f.state:SetText(off and "접속 끊김" or (ghost and "유령" or "쓰러짐"))
         f.state:Show()
-        f.name:SetTextColor(0.62, 0.58, 0.58)
+        f.name:SetTextColor(0.72, 0.66, 0.64)
         local res = not off and UnitHasIncomingResurrection and Try(UnitHasIncomingResurrection, u)
         if res then
-            f.mid:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
-            f.mid:SetVertexColor(0.62, 1, 0.66)
-            f.mid:Show()
+            f.mid:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez"); f.mid:SetVertexColor(0.62, 1, 0.66); f.mid:Show()
         elseif dead then
-            f.mid:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull")
-            f.mid:SetVertexColor(1, 1, 1)
-            f.mid:Show()
+            f.mid:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull"); f.mid:SetVertexColor(1, 1, 1); f.mid:Show()
         else
             f.mid:Hide()
         end
         return
     end
 
-    f.mid:Hide()
-    f.state:Hide()
-    f.pill:Show()
-    local col = ClassColor(f.classFile)
-    f.name:SetTextColor(col[1], col[2], col[3])
+    f.mid:Hide(); f.state:Hide()
+    f.val:Show(); f.pct:Show()
+    f.name:SetTextColor(1, 0.97, 0.955)
+    local col = Pastel(f.classFile)
+    f.hp:SetStatusBarColor(col[1], col[2], col[3], 0.9)
 
     local cur, max = UnitHealth(u), UnitHealthMax(u)
-    EnsureScales()
-    local pct, k = HP(u)
-    local p = f.hp:SetValue(cur, max, pct, k or hpScale,
-        function(_, curve) return RawPct(UnitHealthPercent, u, false, curve) end)
+    ns.SetBar(f.hp, cur, max)
     PctText(f.val, u, cur, max)
-    local low = p and p < LOW_HP
-    f.hp:SetColor(low and CORAL or C.acc)
-    PaintPill(f, low)
-    f.danger:SetShown(p and p < CRIT_HP and true or false)
+
+    local okp, p = pcall(function() if max > 0 then return cur / max end return 1 end)
+    if okp and type(p) == "number" then
+        f.glow:SetAlpha(p < LOW_HP and 1 or 0)
+        f.pulse:SetShown(p < CRIT_HP)
+        local lc = p < LOW_HP and { 1, 0.83, 0.80 } or { 1, 0.97, 0.955 }
+        f.val:SetTextColor(lc[1], lc[2], lc[3]); f.pct:SetTextColor(lc[1], lc[2], lc[3])
+    else
+        -- 전투 중 숨겨진 값: 곡선으로 빛만 (맥박은 생략)
+        f.pulse:Hide()
+        local lc = LowCurve()
+        local ok = lc and UnitHealthPercent and pcall(function() f.glow:SetAlpha(UnitHealthPercent(u, false, lc)) end)
+        if not ok then f.glow:SetAlpha(0) end
+        f.val:SetTextColor(1, 0.97, 0.955); f.pct:SetTextColor(1, 0.97, 0.955)
+    end
+    UpdateHeal(f)
 end
 
 local function UpdatePower(f)
     local u = f.unit
     if not UnitExists(u) then return end
-    if Try(UnitIsDeadOrGhost, u) or not Try(UnitIsConnected, u) then f.pw:Clear(); f.mana:Hide(); return end
+    if f.gone then f.pw:SetValue(0); f.mana:Hide(); return end
     local pt = UnitPowerType(u)
     if ns.IsSecret(pt) then pt = 0 end
     local c = PCOL[pt] or PCOL[0]
-    f.pw:SetColor(c)
+    f.pw:SetStatusBarColor(c[1], c[2], c[3], 1)
     local cur, max = UnitPower(u, pt), UnitPowerMax(u, pt)
-    local pct, k = PW(u, pt)
-    local p = f.pw:SetValue(cur, max, pct, k or pwScale,
-        function(_, curve) return RawPct(UnitPowerPercent, u, pt, false, curve) end)
-    if pt == 0 and p and p < LOW_MANA and HEALERS[f.classFile or ""] then
+    ns.SetBar(f.pw, cur, max)
+    local okp, p = pcall(function() if max > 0 then return cur / max end end)
+    if pt == 0 and okp and type(p) == "number" and p < LOW_MANA and HEALERS[f.classFile or ""] then
         f.mana:SetFormattedText("마나 %d%%", math.floor(p * 100 + 0.5))
         f.mana:Show()
     else
@@ -579,14 +402,14 @@ local function UpdateInfo(f)
     f.lead:SetShown(Try(UnitIsGroupLeader, u))
 end
 
--- 테두리: 어그로 빨강 > 내 대상 흰색 > 평소 검정
+-- 테두리: 어그로 빨강 > 내 대상 흰색 > 평소 진한 갈색
 local function PaintRim(f)
     if f.aggroOn then
-        f.rim:SetVertexColor(C.dmg[1], C.dmg[2], C.dmg[3], 1)
+        f.rim:SetVertexColor(1, 0.35, 0.35, 1)
     elseif f.selOn then
-        f.rim:SetVertexColor(1, 1, 1, 1)
+        f.rim:SetVertexColor(1, 0.953, 0.965, 1)
     else
-        f.rim:SetVertexColor(0, 0, 0, 0.9)
+        f.rim:SetVertexColor(RIM[1], RIM[2], RIM[3], 1)
     end
 end
 
@@ -617,6 +440,11 @@ local function UpdateRange(f)
     f:SetAlpha((inRange or not checked) and 1 or 0.42)
 end
 
+local function UpdateAuras(f)
+    if f.debuffs then pcall(f.debuffs.UpdateAllAuras, f.debuffs) end
+    if f.buffs then pcall(f.buffs.UpdateAllAuras, f.buffs) end
+end
+
 local function UpdateAll(f)
     if not UnitExists(f.unit) then return end
     UpdateInfo(f)
@@ -625,7 +453,7 @@ local function UpdateAll(f)
     UpdateThreat(f)
     UpdateTarget(f)
     UpdateRange(f)
-    if f.debuffs then pcall(f.debuffs.UpdateAllAuras, f.debuffs) end
+    UpdateAuras(f)
 end
 
 ----------------------------------------------------------------------
@@ -716,32 +544,33 @@ end
 -- 이동 모드: 예시 파티 + 분홍 테두리 드래그
 ----------------------------------------------------------------------
 local FAKE = {
-    { "슈엘",   "DRUID",   0.92, 0, 0.74, false, false },
-    { "빵떡이", "WARRIOR", 0.48, 1, 0.62, true,  true  },
-    { "모모",   "PRIEST",  0.86, 0, 0.18, false, false },
-    { "구름",   "ROGUE",   0.17, 3, 0.80, false, false },
+    -- 이름, 직업, 체력, 자원종류, 자원, 어그로, 파티장, 들어올 치유
+    { "든든곰",   "WARRIOR", 0.71, 1, 0.38, true,  true,  0.12 },
+    { "눈꽃별",   "MAGE",    0.24, 0, 0.80, false, false, 0.30 },
+    { "보라밤",   "WARLOCK", 0.93, 0, 0.55, false, false, 0 },
+    { "달빛사냥", "HUNTER",  1.00, 0, 0.90, false, false, 0 },
 }
 
 local function Fake(f, d)
-    local name, file, hp, pt, pw, agg, lead = unpack(d)
-    f.classFile = file
-    local col = ClassColor(file)
-    f.name:SetText(name); f.name:SetTextColor(col[1], col[2], col[3])
+    local name, file, hp, pt, pw, agg, lead, inc = unpack(d)
+    f.classFile, f.gone = file, false
+    f.name:SetText(name); f.name:SetTextColor(1, 0.97, 0.955)
     f.por:SetDesaturated(false); f.por:SetVertexColor(1, 1, 1)
     SetIcon(f)
-    f.mid:Hide(); f.state:Hide(); f.pill:Show()
-    f.hp:SetValue(hp, 1)
-    local low = hp < LOW_HP
-    f.hp:SetColor(low and CORAL or C.acc)
+    f.mid:Hide(); f.state:Hide(); f.val:Show(); f.pct:Show()
+    local col = Pastel(file)
+    f.hp:SetStatusBarColor(col[1], col[2], col[3], 0.9)
+    f.hp:SetMinMaxValues(0, 1); f.hp:SetValue(hp)
+    f.heal:SetMinMaxValues(0, 1); f.heal:SetValue(inc or 0)
     f.val:SetFormattedText("%d", math.floor(hp * 100 + 0.5))
-    PaintPill(f, low)
-    f.danger:SetShown(hp < CRIT_HP)
-    f.pw:SetColor(PCOL[pt]); f.pw:SetValue(pw, 1)
-    if pt == 0 and pw < LOW_MANA and HEALERS[file] then
-        f.mana:SetFormattedText("마나 %d%%", math.floor(pw * 100 + 0.5)); f.mana:Show()
-    else
-        f.mana:Hide()
-    end
+    local low = hp < LOW_HP
+    local lc = low and { 1, 0.83, 0.80 } or { 1, 0.97, 0.955 }
+    f.val:SetTextColor(lc[1], lc[2], lc[3]); f.pct:SetTextColor(lc[1], lc[2], lc[3])
+    f.glow:SetAlpha(low and 1 or 0)
+    f.pulse:SetShown(hp < CRIT_HP)
+    local c = PCOL[pt]
+    f.pw:SetStatusBarColor(c[1], c[2], c[3], 1); f.pw:SetMinMaxValues(0, 1); f.pw:SetValue(pw)
+    f.mana:Hide()
     f.aggroOn, f.selOn = agg, false
     PaintRim(f)
     f.lead:SetShown(lead)
@@ -838,7 +667,8 @@ function ns:CreateParty()
         for _, e in ipairs({ "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER",
                              "UNIT_DISPLAYPOWER", "UNIT_NAME_UPDATE", "UNIT_PORTRAIT_UPDATE",
                              "UNIT_MODEL_CHANGED", "UNIT_CONNECTION", "UNIT_FLAGS",
-                             "UNIT_THREAT_SITUATION_UPDATE", "INCOMING_RESURRECT_CHANGED" }) do
+                             "UNIT_THREAT_SITUATION_UPDATE", "INCOMING_RESURRECT_CHANGED",
+                             "UNIT_HEAL_PREDICTION" }) do
             pcall(ev.RegisterUnitEvent, ev, e, f.unit)
         end
         ev:SetScript("OnEvent", function(_, event)
@@ -847,6 +677,8 @@ function ns:CreateParty()
                or event == "UNIT_CONNECTION" or event == "INCOMING_RESURRECT_CHANGED" then
                 UpdateHealth(f)
                 if event ~= "UNIT_HEALTH" then UpdatePower(f) end
+            elseif event == "UNIT_HEAL_PREDICTION" then
+                UpdateHeal(f)
             elseif event == "UNIT_THREAT_SITUATION_UPDATE" then
                 UpdateThreat(f)
             elseif event == "UNIT_NAME_UPDATE" or event == "UNIT_PORTRAIT_UPDATE" or event == "UNIT_MODEL_CHANGED" then
@@ -886,13 +718,11 @@ function ns:CreateParty()
 end
 
 
--- 점검: /르엘파티  (전투 중 링 방식 확인)
+-- 점검: /르엘파티
 SLASH_LEELPARTYDBG1 = "/르엘파티"
 SlashCmdList.LEELPARTYDBG = function()
-    EnsureScales()
-    local hp = HP("player")
-    local pw = PW("player", UnitPowerType("player"))
-    print("|cfff2b3c2[르엘 파티]|r 체력%함수=" .. tostring(UnitHealthPercent ~= nil) .. " 값=" .. (ns.IsSecret(hp) and "<숨김>" or tostring(hp)) ..
-        "  자원%함수=" .. tostring(UnitPowerPercent ~= nil) .. " 값=" .. (ns.IsSecret(pw) and "<숨김>" or tostring(pw)) ..
-        "  단위=" .. tostring(hpScale) .. "/" .. tostring(pwScale) .. "  곡선=" .. tostring(SCALE100 ~= nil) .. "  보정곡선=" .. tostring(QCurves() ~= nil))
+    local inc = UnitGetIncomingHeals and select(2, pcall(UnitGetIncomingHeals, "player"))
+    print("|cfff2b3c2[르엘 파티]|r 들어올치유함수=" .. tostring(UnitGetIncomingHeals ~= nil) ..
+        " 값=" .. (ns.IsSecret(inc) and "<숨김>" or tostring(inc)) ..
+        "  체력%곡선=" .. tostring(LowCurve() ~= nil) .. "  오라상자=" .. tostring(ns.partyMembers and ns.partyMembers[1] and ns.partyMembers[1].buffs ~= nil))
 end

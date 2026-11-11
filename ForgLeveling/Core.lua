@@ -3276,6 +3276,80 @@ function LV.GuideSteps(log)
   return steps, ("%d/%d %s"):format(idx, #z.steps, z.steps[idx].t)
 end
 
+-- 창 위쪽은 그대로 두고 아래로만 늘고 줄게 (위 = 미니맵, 아래 = 미터기)
+local OBSTACLES = { "DetailsBaseFrame1", "DetailsBaseFrame2", "DetailsBaseFrame3", "SkadaBarWindowSkada",
+                    "Recount_MainWindow", "TinyDPSFrame" }
+function LV.AvailH()
+  local top = f:GetTop()
+  if not top then return nil end
+  local s = f:GetEffectiveScale()
+  local fl, fr = (f:GetLeft() or 0) * s, (f:GetRight() or 0) * s
+  local limit = 20
+  for _, n in ipairs(OBSTACLES) do
+    local o = _G[n]
+    if o and o.IsShown and o:IsShown() and o:GetTop() then
+      local os = o:GetEffectiveScale()
+      local ol, or2, ot = (o:GetLeft() or 0) * os, (o:GetRight() or 0) * os, o:GetTop() * os
+      if or2 > fl and ol < fr and ot < top * s then
+        limit = math.max(limit, ot + 28 * os)   -- 미터기 제목 줄 자리까지
+      end
+    end
+  end
+  return top - limit / s - 6
+end
+function LV.KeepTop()
+  if InCombatLockdown and InCombatLockdown() and f:IsProtected() then return end
+  local l, t = f:GetLeft(), f:GetTop()
+  if not (l and t) or f.leelMoving then return end
+  local p = DB.point
+  if p and p[1] == "TOPLEFT" and p[2] == "BOTTOMLEFT" and math.abs((p[3] or 0) - l) < 0.5 and math.abs((p[4] or 0) - t) < 0.5 then return end
+  f:ClearAllPoints()
+  f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+  DB.point = { "TOPLEFT", "BOTTOMLEFT", l, t }
+end
+
+-- 아래 가장자리 손잡이: 위아래(높이)만 마우스로 조절 (폭은 그대로)
+do
+  local g = CreateFrame("Button", nil, f)
+  g:SetHeight(10)
+  g:SetPoint("BOTTOMLEFT", 30, 0); g:SetPoint("BOTTOMRIGHT", -30, 0)
+  g:SetFrameLevel(f:GetFrameLevel() + 20)
+  local bar = g:CreateTexture(nil, "OVERLAY")
+  bar:SetSize(36, 4); bar:SetPoint("CENTER", 0, 1)
+  bar:SetColorTexture(1, 1, 1, 0.18)
+  g:SetScript("OnEnter", function()
+    bar:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.9)
+    GameTooltip:SetOwner(g, "ANCHOR_BOTTOM")
+    GameTooltip:SetText("위아래로 끌어서 높이 조절")
+    GameTooltip:AddLine("오른쪽 클릭: 자동 높이로 되돌리기", 0.8, 0.8, 0.8)
+    GameTooltip:Show()
+  end)
+  g:SetScript("OnLeave", function() if not g.drag then bar:SetColorTexture(1, 1, 1, 0.18) end; GameTooltip:Hide() end)
+  g:RegisterForClicks("RightButtonUp")
+  g:SetScript("OnClick", function() if DB then DB.miniMaxH = nil; if Render then Render() end end end)
+  g:SetScript("OnMouseDown", function(self, btn)
+    if btn ~= "LeftButton" or not DB or DB.mode ~= "mini" then return end
+    if LV.KeepTop then LV.KeepTop() end
+    local _, cy = GetCursorPosition()
+    self.drag = { y = cy / f:GetEffectiveScale(), h = f:GetHeight() }
+    self:SetScript("OnUpdate", function()
+      local _, ny = GetCursorPosition()
+      ny = ny / f:GetEffectiveScale()
+      local want = math.max(110, math.floor(self.drag.h + (self.drag.y - ny)))
+      if not self.last or math.abs(self.last - want) >= 6 then
+        self.last = want
+        DB.miniMaxH = want
+        if Render then Render() end
+      end
+    end)
+  end)
+  g:SetScript("OnMouseUp", function(self)
+    self:SetScript("OnUpdate", nil); self.drag = nil; self.last = nil
+    bar:SetColorTexture(1, 1, 1, 0.18)
+  end)
+  LV.sizeGrip = g
+end
+
 local function RenderMini(b, log, lv)
   f:SetWidth(MINI_W)
   cGoto:SetWidth(MINI_W - 2 * PAD - 60 - 52)
@@ -3728,7 +3802,7 @@ local function RenderMini(b, log, lv)
         end
         return st.npcs and st.npcs[1] and (st.npcs[1] .. " 근처") or nil
       end
-      local lastN = math.min(#steps, 4) -- 그다음은 3개까지
+      local lastN = math.min(#steps, LV.nextCap or 4) -- 그다음은 3개까지 (아래 창에 닿으면 줄여요)
       local prevX, prevY = StepPos(cur)
       local prevZone = cur.zone
       local prevG = cur.gstep
@@ -3872,10 +3946,20 @@ Render = function()
   LayoutChrome(mini)
   if mini then
     miniRoot:Show()
-    RenderMini(b, log, lv)
+    if LV.sizeGrip then LV.sizeGrip:Show() end
+    -- 아래 다른 창(피해량 미터기 등)에 안 닿게 '그다음' 줄 수를 줄여요
+    local avail = LV.AvailH and LV.AvailH() or nil
+    if DB.miniMaxH then avail = math.min(avail or DB.miniMaxH, DB.miniMaxH) end
+    for cap = 4, 1, -1 do
+      LV.nextCap = cap
+      RenderMini(b, log, lv)
+      if not avail or f:GetHeight() <= avail then break end
+    end
+    if LV.KeepTop then LV.KeepTop() end
     return
   end
   miniRoot:Hide()
+  if LV.sizeGrip then LV.sizeGrip:Hide() end
   RenderFull(b, log, lv)
 
   content:SetHeight(y + 8)

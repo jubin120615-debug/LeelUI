@@ -439,10 +439,11 @@ styles.bar = function()
         btn:HookScript("OnHide", function() C_Timer.After(0, Lay) end)
     end
     bar.Lay = Lay
+    -- 지역 이름 + 좌표: 지도 바로 위 알약 (분홍 테 바깥으로 살짝 띄워서)
     zonePill = Pill(skin)
-    zonePill:SetPoint("TOP", bar, "BOTTOM", 0, -5)
+    zonePill:SetPoint("BOTTOM", Minimap, "TOP", 0, 11)
     coordPill = { fs = ns.Num(zonePill, 13, C.tx2), Set = function(self, t) self.fs:SetText(t) end }
-    ns.MinimapFoot = zonePill
+    ns.MinimapFoot = bar   -- 미니맵 묶음의 맨 아래 = 버튼 줄 (퀘스트 목록이 여기 밑에 붙어요)
     styles.barFrame = bar
 end
 

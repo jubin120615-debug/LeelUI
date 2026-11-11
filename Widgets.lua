@@ -128,21 +128,55 @@ function ns.PaintHealth(holder)
 end
 
 -- 선점된 몹: 회색 바 + 사선 빗금 (바 모양대로 잘라서)
-ns.TAP = { 0.6, 0.58, 0.6 }
+ns.TAP = { 0.56, 0.54, 0.55 }
 function ns.SetTapped(holder, tapped)
     if tapped and not holder.hatch then
+        -- 굵고 진한 빗금 (C안): 무늬 한 장을 크게 늘려서 줄을 두껍게
         local h = holder.over:CreateTexture(nil, "BACKGROUND")
         h:SetTexture(ns.MEDIA .. "stripes", "REPEAT", "REPEAT")
-        h:SetHorizTile(true); h:SetVertTile(true)
         h:SetAllPoints(holder.bar)
+        local bw, bh = holder:GetSize()
+        h:SetTexCoord(0, math.max(1, (bw or 160) / 44), 0, math.max(0.3, (bh or 16) / 44))
+        h:SetVertexColor(0.16, 0.14, 0.15, 1)
+        local h2 = holder.over:CreateTexture(nil, "BACKGROUND", nil, 1)
+        h2:SetTexture(ns.MEDIA .. "stripes", "REPEAT", "REPEAT")
+        h2:SetAllPoints(holder.bar)
+        h2:SetTexCoord(0, math.max(1, (bw or 160) / 44), 0, math.max(0.3, (bh or 16) / 44))
+        h2:SetVertexColor(0.16, 0.14, 0.15, 1)
         local m = holder.over:CreateMaskTexture()
         m:SetTexture(ns.MEDIA .. (holder.shapeName or "pill16"), "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
         m:SetAllPoints(holder.bar)
-        h:AddMaskTexture(m)
-        holder.hatch = h
+        h:AddMaskTexture(m); h2:AddMaskTexture(m)
+        holder.hatch, holder.hatch2 = h, h2
     end
-    if holder.hatch then holder.hatch:SetShown(tapped and true or false) end
+    if holder.hatch then
+        holder.hatch:SetShown(tapped and true or false)
+        holder.hatch2:SetShown(tapped and true or false)
+    end
     if tapped then ns.PaintFlat(holder, ns.TAP) end
+end
+
+-- 글씨 위 가로줄 (남의 몹 이름)
+function ns.SetStrike(fs, on)
+    local line = fs.leelStrike
+    if on and not line then
+        local parent = fs:GetParent()
+        line = parent:CreateTexture(nil, "OVERLAY", nil, 7)
+        line:SetTexture(ns.WHITE)
+        line:SetVertexColor(0.86, 0.82, 0.84, 0.95)
+        line:SetHeight(2)
+        line:SetPoint("LEFT", fs, "LEFT", -1, 0)
+        line:SetPoint("RIGHT", fs, "LEFT", 1, 0)
+        fs.leelStrike = line
+    end
+    if line then
+        if on then
+            line:ClearAllPoints()
+            line:SetPoint("LEFT", fs, "LEFT", -1, -1)
+            line:SetWidth(math.max(4, (fs:GetStringWidth() or 0) + 2))
+        end
+        line:SetShown(on and true or false)
+    end
 end
 
 function ns.PaintFlat(holder, c)
@@ -288,4 +322,162 @@ function ns.RoundPlate(parent, r, fill, edge)
     local e = ns.RoundRect(parent, r, edge or C.edge, "BACKGROUND", 0, 0)
     local f = ns.RoundRect(parent, math.max(1, r - 1), fill or C.plate, "BACKGROUND", 1, 1)
     return f, e
+end
+
+----------------------------------------------------------------------
+-- 마우스 툴팁 (C안): 진한 둥근 판 + 왼쪽 색 줄(적/중립/우호/직업) + 오른쪽 위 작은 토끼
+-- 내용은 블리자드 그대로, 겉모양과 위치(커서 오른쪽 아래)만 바꿈
+----------------------------------------------------------------------
+do
+    local PASTEL = {
+        WARRIOR = { 0.902, 0.804, 0.690 }, PALADIN = { 0.980, 0.776, 0.863 }, HUNTER = { 0.824, 0.910, 0.702 },
+        ROGUE = { 1.000, 0.953, 0.651 }, PRIEST = { 0.949, 0.933, 0.914 }, SHAMAN = { 0.651, 0.784, 0.957 },
+        MAGE = { 0.678, 0.886, 0.965 }, WARLOCK = { 0.788, 0.741, 0.918 }, DRUID = { 1.000, 0.776, 0.604 },
+    }
+    local HOSTILE, NEUTRAL, FRIEND = { 1, 0.54, 0.54 }, { 1, 0.85, 0.42 }, { 0.62, 0.92, 0.66 }
+
+    local function SetStripe(tt, c)
+        if tt.leelStripe then tt.leelStripe:SetVertexColor(c[1], c[2], c[3], 1) end
+        local sb = tt == GameTooltip and _G.GameTooltipStatusBar
+        if sb and sb.leelSkinned then sb:SetStatusBarColor(c[1], c[2], c[3], 1) end
+    end
+
+    local function Skin(tt, bunny)
+        if not tt or tt.leelSkin then return end
+        tt.leelSkin = true
+        if tt.NineSlice then tt.NineSlice:SetAlpha(0) end
+        if tt.SetBackdrop then pcall(tt.SetBackdrop, tt, nil) end
+        local bg = CreateFrame("Frame", nil, tt)
+        bg:SetAllPoints()
+        bg:SetFrameLevel(math.max(0, tt:GetFrameLevel() - 1))
+        ns.RoundPlate(bg, 14, { 0.114, 0.082, 0.078, 0.97 }, { 0.949, 0.702, 0.761, 0.38 })
+        local st = bg:CreateTexture(nil, "BORDER")
+        st:SetTexture(ns.WHITE)
+        st:SetPoint("TOPLEFT", bg, "TOPLEFT", 1, -10)
+        st:SetPoint("BOTTOMLEFT", bg, "BOTTOMLEFT", 1, 10)
+        st:SetWidth(5)
+        tt.leelStripe = st
+        if bunny then
+            local b = CreateFrame("Frame", nil, tt)
+            b:SetSize(24, 24)
+            b:SetPoint("CENTER", tt, "TOPRIGHT", -4, -2)
+            b:SetFrameLevel(tt:GetFrameLevel() + 5)
+            local r = b:CreateTexture(nil, "BACKGROUND")
+            r:SetTexture(ns.MEDIA .. "circle"); r:SetVertexColor(0.949, 0.702, 0.761, 0.8)
+            r:SetPoint("TOPLEFT", -1.5, 1.5); r:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+            local d = b:CreateTexture(nil, "BORDER")
+            d:SetTexture(ns.MEDIA .. "circle"); d:SetVertexColor(0.17, 0.13, 0.125, 1); d:SetAllPoints()
+            local i = b:CreateTexture(nil, "ARTWORK")
+            i:SetTexture(ns.MEDIA .. "bunny"); i:SetPoint("CENTER"); i:SetSize(20, 20)
+        end
+        SetStripe(tt, C.acc)
+        tt:HookScript("OnHide", function(self) SetStripe(self, C.acc) end)
+        -- 다른 곳에서 테두리를 다시 그리면 또 숨김
+        if tt.NineSlice then
+            hooksecurefunc(tt.NineSlice, "Show", function(ns9) ns9:SetAlpha(0) end)
+        end
+    end
+
+    -- 체력바: 툴팁 아래 얇은 알약
+    local function SkinStatusBar()
+        local sb = _G.GameTooltipStatusBar
+        if not sb or sb.leelSkinned then return end
+        sb.leelSkinned = true
+        sb:SetStatusBarTexture(ns.WHITE)
+        sb:ClearAllPoints()
+        sb:SetPoint("TOPLEFT", GameTooltip, "BOTTOMLEFT", 14, -3)
+        sb:SetPoint("TOPRIGHT", GameTooltip, "BOTTOMRIGHT", -14, -3)
+        sb:SetHeight(4)
+        local m = sb:CreateMaskTexture()
+        m:SetTexture(ns.MEDIA .. "pill32", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        m:SetAllPoints(sb)
+        sb:GetStatusBarTexture():AddMaskTexture(m)
+        local bg = sb:CreateTexture(nil, "BACKGROUND")
+        bg:SetTexture(ns.WHITE); bg:SetAllPoints(); bg:SetVertexColor(0.11, 0.08, 0.075, 0.9)
+        bg:AddMaskTexture(m)
+        if sb.NineSlice then sb.NineSlice:SetAlpha(0) end
+        for _, r in ipairs({ sb:GetRegions() }) do
+            if r ~= sb:GetStatusBarTexture() and r ~= bg and r.GetObjectType and r:GetObjectType() == "Texture"
+               and r.GetTexture and r:GetTexture() ~= nil and r ~= m then
+                local ok, file = pcall(r.GetTexture, r)
+                if ok and type(file) == "string" and file:lower():find("border") then r:SetAlpha(0) end
+            end
+        end
+    end
+
+    -- 유닛 색: 플레이어 = 직업 파스텔, 몹 = 적대 빨강 / 중립 노랑 / 우호 초록
+    local function UnitColor(unit)
+        local col
+        pcall(function()
+            if UnitIsPlayer(unit) then
+                local _, file = UnitClass(unit)
+                col = PASTEL[file]
+            end
+            if not col then
+                local r = UnitReaction(unit, "player")
+                if r then col = (r <= 3 and HOSTILE) or (r == 4 and NEUTRAL) or FRIEND end
+            end
+        end)
+        return col
+    end
+
+    -- 커서 오른쪽 아래에 붙어서 따라다니기
+    local follow = CreateFrame("Frame")
+    follow:Hide()
+    follow:SetScript("OnUpdate", function()
+        local tt = GameTooltip
+        if not tt:IsShown() or not tt.leelCursor then follow:Hide() return end
+        local x, y = GetCursorPosition()
+        local s = tt:GetEffectiveScale()
+        tt:ClearAllPoints()
+        tt:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s + 20, y / s - 22)
+    end)
+
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:SetScript("OnEvent", function()
+        Skin(GameTooltip, true)
+        for _, n in ipairs({ "ItemRefTooltip", "ShoppingTooltip1", "ShoppingTooltip2", "EmbeddedItemTooltip" }) do
+            Skin(_G[n], false)
+        end
+        SkinStatusBar()
+        GameTooltip:SetClampedToScreen(true)
+
+        hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tt, parent)
+            if tt ~= GameTooltip then return end
+            if ns.db and ns.db.tipCursor == false then tt.leelCursor = nil return end
+            tt:SetOwner(parent, "ANCHOR_NONE")
+            tt.leelCursor = true
+            follow:Show()
+            local x, y = GetCursorPosition()
+            local s = tt:GetEffectiveScale()
+            tt:ClearAllPoints()
+            tt:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s + 20, y / s - 22)
+        end)
+        GameTooltip:HookScript("OnHide", function(self) self.leelCursor = nil end)
+
+        -- 마우스를 떼면 천천히 사라지지 말고 바로 닫기
+        if GameTooltip.FadeOut then
+            hooksecurefunc(GameTooltip, "FadeOut", function(self) self:Hide() end)
+        end
+        local mo = CreateFrame("Frame")
+        mo:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+        mo:SetScript("OnUpdate", function()
+            local tt = GameTooltip
+            if not tt:IsShown() or tt:GetOwner() ~= UIParent then return end
+            if UnitExists("mouseover") then return end
+            local ok, isUnit = pcall(function() local _, u = tt:GetUnit(); return u ~= nil end)
+            if ok and isUnit then tt:Hide() end
+        end)
+
+        if TooltipDataProcessor and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Unit then
+            TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tt)
+                if not tt or not tt.leelStripe then return end
+                local ok, _, unit = pcall(tt.GetUnit, tt)
+                if not ok or not unit then return end
+                local col = UnitColor(unit)
+                if col then SetStripe(tt, col) end
+            end)
+        end
+    end)
 end

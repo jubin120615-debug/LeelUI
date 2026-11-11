@@ -115,8 +115,59 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_ABar", builtin = true, cat = "view",
+        title = "액션바", sub = "둥둥 바 · 토끼 메뉴", icon = "hb_apps",
+        desc = "판 없는 둥근 액션바 + 토끼 메뉴 (시험 중).\n스위치는 다시 불러오기 후 적용. 토끼는 Shift + 끌기로 옮겨요.",
+        onoff = { reload = true, get = function() return ns.ABarDB and ns.ABarDB().on end,
+                  set = function(v) ns.ABarDB().on = v and true or false end },
+        items = {
+            { t = "slider", label = "액션바 크기", min = 60, max = 150,
+              get = function() return (ns.ABarDB and ns.ABarDB().scale) or 100 end,
+              set = function(v)
+                  if ns.SetABarScale then ns:SetABarScale(v) else ns.ABarDB().scale = v end
+                  if InCombatLockdown() then Print("전투가 끝나면 액션바 크기가 바뀌어요.") end
+              end },
+            { t = "slider", label = "토끼 메뉴 크기", min = 60, max = 150,
+              get = function() return (ns.ABarDB and ns.ABarDB().mscale) or 100 end,
+              set = function(v)
+                  if ns.SetABarMenuScale then ns:SetABarMenuScale(v) else ns.ABarDB().mscale = v end
+                  if InCombatLockdown() then Print("전투가 끝나면 토끼 메뉴 크기가 바뀌어요.") end
+              end },
+            { t = "button", label = "액션바 · 토끼 메뉴 위치 초기화",
+              run = function() if ns.ResetABarPosition then ns:ResetABarPosition() end; Print("액션바와 토끼 메뉴를 처음 자리로 돌렸어요.") end },
+            { t = "button", label = "점검 (채팅창)", run = function() SlashCmdList.LEELABAR("") end },
+        },
+    },
+    {
+        key = "LeelUI_Cast", builtin = true, always = true, cat = "view",
+        title = "시전바", sub = "깡충 토끼, 발자국", icon = "hb_cast",
+        desc = "모양을 바꾸면 다시 불러오기 후 적용.\n자리 옮기기는 아래 '이동 모드'.",
+        items = {
+            { t = "toggle", label = "깡충 토끼", hint = "알약 바 위를 토끼가 달려가요 (화면 가운데 아래)",
+              get = function() return (ns.db.castStyle or "bunny") == "bunny" end,
+              set = function() SetCastStyle("bunny") end },
+            { t = "toggle", label = "토끼 발자국", hint = "발자국 6개가 하나씩 찍혀요 (화면 가운데 아래)",
+              get = function() return ns.db.castStyle == "paw" end,
+              set = function() SetCastStyle("paw") end },
+            { t = "toggle", label = "예전 얇은 바", hint = "위쪽 HUD 아래에 붙은 얇은 바",
+              get = function() return ns.db.castStyle == "hud" end,
+              set = function() SetCastStyle("hud") end },
+            { t = "toggle", label = "내 시전바만 보기", hint = "대상(적)의 시전바는 숨겨요",
+              get = function() return ns.db.castMineOnly end,
+              set = function(v)
+                  ns.db.castMineOnly = v and true or false
+                  local tc = ns.casts and ns.casts.target
+                  if tc then
+                      if v then tc.casting, tc.finishing = false, false; tc:SetScript("OnUpdate", nil); tc:Hide(); if tc.OnLayout then tc:OnLayout() end end
+                  end
+              end },
+            { t = "button", label = "시전바 위치 초기화",
+              run = function() if ns.ResetCastPosition then ns:ResetCastPosition() end; Print("시전바 위치를 처음대로 돌렸어요.") end },
+        },
+    },
+    {
         key = "LeelUI_Plates", builtin = true, cat = "view",
-        title = "적 이름표", sub = "토끼 레벨, 몹 등급, 선공", icon = "hb_plate",
+        title = "적 이름표", sub = "몹 등급 · 선공 구별", icon = "hb_plate",
         desc = "적 머리 위 분홍 이름표. 왼쪽 스위치는 다시 불러오기 후 적용.",
         onoff = { reload = true, get = function() return ns.db.nameplates end,
                   set = function(v) ns.db.nameplates = v end },
@@ -148,30 +199,13 @@ local MODULES = {
         },
     },
     {
-        key = "LeelUI_Cast", builtin = true, always = true, cat = "view",
-        title = "시전바", sub = "깡충 토끼, 발자국", icon = "hb_cast",
-        desc = "모양을 바꾸면 다시 불러오기 후 적용.\n자리 옮기기는 아래 '이동 모드'.",
+        key = "LeelUI_Tip", builtin = true, always = true, cat = "view",
+        title = "툴팁", sub = "마우스 설명 창", icon = "hb_search",
+        desc = "몹·아이템에 마우스를 올리면 뜨는 설명 창.\n르엘 판 + 왼쪽 색 줄(적 빨강, 중립 노랑, 우호 초록).",
         items = {
-            { t = "toggle", label = "깡충 토끼", hint = "알약 바 위를 토끼가 달려가요 (화면 가운데 아래)",
-              get = function() return (ns.db.castStyle or "bunny") == "bunny" end,
-              set = function() SetCastStyle("bunny") end },
-            { t = "toggle", label = "토끼 발자국", hint = "발자국 6개가 하나씩 찍혀요 (화면 가운데 아래)",
-              get = function() return ns.db.castStyle == "paw" end,
-              set = function() SetCastStyle("paw") end },
-            { t = "toggle", label = "예전 얇은 바", hint = "위쪽 HUD 아래에 붙은 얇은 바",
-              get = function() return ns.db.castStyle == "hud" end,
-              set = function() SetCastStyle("hud") end },
-            { t = "toggle", label = "내 시전바만 보기", hint = "대상(적)의 시전바는 숨겨요",
-              get = function() return ns.db.castMineOnly end,
-              set = function(v)
-                  ns.db.castMineOnly = v and true or false
-                  local tc = ns.casts and ns.casts.target
-                  if tc then
-                      if v then tc.casting, tc.finishing = false, false; tc:SetScript("OnUpdate", nil); tc:Hide(); if tc.OnLayout then tc:OnLayout() end end
-                  end
-              end },
-            { t = "button", label = "시전바 위치 초기화",
-              run = function() if ns.ResetCastPosition then ns:ResetCastPosition() end; Print("시전바 위치를 처음대로 돌렸어요.") end },
+            { t = "toggle", label = "마우스 따라다니기", hint = "끄면 블리자드 기본 자리(오른쪽 아래)",
+              get = function() return ns.db.tipCursor ~= false end,
+              set = function(v) ns.db.tipCursor = v and true or false end },
         },
     },
     {
@@ -302,19 +336,31 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_QTracker", builtin = true, always = true, cat = "util",
+        title = "퀘스트 목록", sub = "셋 중 하나만", icon = "hb_guide",
+        desc = "화면에 띄울 퀘스트 목록을 하나만 골라요.\n고르지 않은 둘은 자동으로 숨겨요.",
+        items = {
+            { t = "toggle", label = "블리자드 기본", hint = "미니맵 아래 기본 퀘스트 목록",
+              get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "blizz" end,
+              set = function() ns:SetQuestTrackerMode("blizz") end },
+            { t = "toggle", label = "Questie 추적창", hint = "Questie 목록 (다시 불러오기 후 적용)",
+              get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "questie" end,
+              set = function() ns:SetQuestTrackerMode("questie") ; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+            { t = "toggle", label = "르엘 길잡이", hint = "Leel Guide 레벨링 창",
+              get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "guide" end,
+              set = function() ns:SetQuestTrackerMode("guide") end },
+        },
+    },
+    {
         key = "LeelUI_Bags", builtin = true, cat = "util",
         title = "르엘 가방", sub = "통합 가방, 남은 칸", icon = "hb_bag",
-        desc = "가방 5개를 분홍 창 하나로. 창 머리를 끌면 옮겨져요.\n미니맵 아래 숫자: 클릭 = 가방 열기, Shift+끌기 = 옮기기.",
+        desc = "가방 5개를 분홍 창 하나로. 창 머리를 끌면 옮겨져요.",
         onoff = { get = function() return ns.BagsDB().on end,
                   set = function(v) ns.BagsDB().on = v; if ns.UpdateBags then ns.UpdateBags() end end },
         items = {
             { t = "header", label = "가방 창",
               btn = { label = "위치 초기화", run = function() ns.BagsDB().winPos = nil; local w = _G.LeelUI_Bag; if w and w.Place then w.Place() end end } },
-            { t = "header", label = "남은 칸",
-              btn = { label = "숫자 위치 초기화", run = function() ns.BagsDB().chipPos = nil; local c = _G.LeelUI_BagChip; if c and c.Place then c.Place() end end } },
-            { t = "toggle", label = "미니맵 아래 숫자",
-              get = function() return ns.BagsDB().chip end,
-              set = function(v) ns.BagsDB().chip = v; if ns.UpdateBags then ns.UpdateBags() end end },
+            { t = "header", label = "남은 칸" },
             { t = "toggle", label = "거의 찼을 때 알림", hint = "남은 칸 3개 이하가 되는 순간 한 번",
               get = function() return ns.BagsDB().warn end,
               set = function(v) ns.BagsDB().warn = v end },
@@ -917,6 +963,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.12", "파티 힐러 타일 · 들어올 치유", "르엘 툴팁 · 남의 몹 자물쇠" },
     { "1.3.5", "줍기 창이 분홍 카드로", "파티 링이 전투 중에도 시계 방향으로" },
     { "1.3.4", "르엘 가방 · 상점 토끼 · 시체 반짝 상자", "퀘스트 자동, 토끼 미니맵" },
     { "1.3.3", "르엘 허브 · 르엘 글씨체", "몹 등급 토끼 이름표" },

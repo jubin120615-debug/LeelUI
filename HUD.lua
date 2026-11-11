@@ -59,6 +59,34 @@ local function CreateSide(hud, unit, mirrored)
     f.hp:SetPoint(A, f, A, BAR_X * sx, -34)
     ns.PaintHealth(f.hp)
 
+    -- 받을 치유: 체력 끝에서 이어서 민트 빗금 (바 모양 밖은 잘림)
+    do
+        local sb = f.hp.bar
+        local hb = CreateFrame("StatusBar", nil, f.hp)
+        hb:SetFrameLevel(sb:GetFrameLevel() + 1)
+        hb:SetSize(BAR_W - 4, BAR_H - 4)
+        if mirrored then
+            hb:SetPoint("TOPRIGHT", f.hp.fill, "TOPLEFT", 0, 0)
+            hb:SetReverseFill(true)
+        else
+            hb:SetPoint("TOPLEFT", f.hp.fill, "TOPRIGHT", 0, 0)
+        end
+        hb:SetStatusBarTexture(ns.WHITE)
+        hb:SetStatusBarColor(0.50, 0.84, 0.76, 0.85)
+        hb:SetMinMaxValues(0, 1); hb:SetValue(0)
+        local m = hb:CreateMaskTexture()
+        m:SetTexture(ns.MEDIA .. f.hp.shapeName, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        m:SetAllPoints(sb)
+        hb:GetStatusBarTexture():AddMaskTexture(m)
+        local st = hb:CreateTexture(nil, "OVERLAY")
+        st:SetTexture(ns.MEDIA .. "stripes", "REPEAT", "REPEAT")
+        st:SetHorizTile(true); st:SetVertTile(true)
+        st:SetAllPoints(hb:GetStatusBarTexture())
+        st:SetVertexColor(1, 1, 1, 0.3)
+        st:AddMaskTexture(m)
+        f.heal = hb
+    end
+
     -- 직업 아이콘 캡 (G안): 체력바 시작점에 동그란 직업 아이콘, 플레이어 캐릭터일 때만
     f.cls = CreateFrame("Frame", nil, f)
     f.cls:SetSize(44, 44)   -- HUD 60%에서 화면상 약 26px
@@ -256,11 +284,22 @@ local function UpdateDead(f)
     end
 end
 
+local function UpdateHeal(f)
+    local hb = f.heal
+    if not hb then return end
+    local u = f.unit
+    if not UnitExists(u) or Try(UnitIsDeadOrGhost, u) then hb:SetValue(0) return end
+    local ok, inc = pcall(UnitGetIncomingHeals or function() end, u)
+    pcall(hb.SetMinMaxValues, hb, 0, UnitHealthMax(u))
+    if not ok or inc == nil or not pcall(hb.SetValue, hb, inc) then hb:SetValue(0) end
+end
+
 local function UpdateHealth(f)
     local u = f.unit
     if not UnitExists(u) then return end
     local cur, max = UnitHealth(u), UnitHealthMax(u)
     ns.SetBar(f.hp.bar, cur, max)
+    UpdateHeal(f)
     ns.SetText(f.hpValue, cur)
     ns.HealthPercentText(f.hpPct, u, cur, max)
     if f.mirrored then
@@ -268,6 +307,7 @@ local function UpdateHealth(f)
         if tapped ~= f.tapped then
             f.tapped = tapped
             ns.SetTapped(f.hp, tapped)
+            ns.SetStrike(f.name, tapped)
             if not tapped then ns.PaintHealth(f.hp) end
         end
     end
@@ -909,8 +949,9 @@ function ns:CreateHUD()
     ev:RegisterEvent("LOOT_CLOSED")
     ev:RegisterEvent("LOOT_OPENED")
     for _, e in ipairs({ "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_FLAGS",
-                         "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED" }) do
-        ev:RegisterUnitEvent(e, "player", "target")
+                         "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED",
+                         "UNIT_HEAL_PREDICTION" }) do
+        pcall(ev.RegisterUnitEvent, ev, e, "player", "target")
     end
     for _, e in ipairs({ "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" }) do
         ev:RegisterUnitEvent(e, "player", "target")
@@ -948,7 +989,9 @@ function ns:CreateHUD()
         else
             local f = frames[unit]
             if not f then return end
-            if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_FLAGS" then
+            if event == "UNIT_HEAL_PREDICTION" then
+                UpdateHeal(f)
+            elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_FLAGS" then
                 UpdateHealth(f)
             elseif event == "UNIT_POWER_FREQUENT" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
                 if f == player then UpdatePower(f) else UpdateTargetPower(f) end

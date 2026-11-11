@@ -276,3 +276,218 @@ ev:SetScript("OnEvent", function(_, event, a1, a2)
     elseif event == "QUEST_FINISHED" then if mark then mark:Hide() end
     end
 end)
+
+
+----------------------------------------------------------------------
+-- 퀘스트 목록: 셋 중 하나만 (blizz 블리자드 기본 / questie Questie 추적창 / guide 르엘 길잡이)
+----------------------------------------------------------------------
+local function Mode()
+    local d = DB()
+    if d.tracker == nil then d.tracker = (d.blizzTracker == false) and "questie" or "blizz" end
+    return d.tracker
+end
+ns.QuestTrackerMode = Mode
+
+local function QuestieProfile()
+    local ok, prof = pcall(function() return Questie and Questie.db and Questie.db.profile end)
+    return ok and prof or nil
+end
+
+local function SetQuestieTracker(on)
+    local prof = QuestieProfile()
+    if not prof then return end
+    local want = on and true or false
+    if (prof.trackerEnabled ~= false) == want then return end
+    prof.trackerEnabled = want
+    pcall(function()
+        local T = QuestieLoader and QuestieLoader.ImportModule and QuestieLoader:ImportModule("QuestieTracker")
+        if not T then return end
+        if want then
+            if T.Enable then T:Enable() end
+        elseif T.Disable then T:Disable() end
+    end)
+end
+
+-- 블리자드 목록 자리: 미니맵 아래 (남은 칸 숫자 밑)
+-- 블리자드는 이 목록을 '오른쪽 자동 배치 칸'에 넣어 자리를 계속 정해요 → 거기서 빼고 직접 자리 잡기
+local placingOT = false
+function ns:PlaceQuestTracker()
+    if Mode() ~= "blizz" or InCombatLockdown() then return end
+    local ot = _G.ObjectiveTrackerFrame
+    if not ot then return end
+    placingOT = true
+    pcall(function()
+        local mc = _G.UIParentRightManagedFrameContainer
+        if mc and mc.RemoveManagedFrame and ot.layoutParent == mc then mc:RemoveManagedFrame(ot) end
+        if ot:GetParent() ~= UIParent then ot:SetParent(UIParent) end
+        local chip = _G.LeelUI_BagChip
+        ot:ClearAllPoints()
+        local top
+        if chip and chip:IsShown() then
+            ot:SetPoint("TOPRIGHT", chip, "BOTTOMRIGHT", 30, -14)
+            top = (chip:GetBottom() or 700) * chip:GetEffectiveScale() / UIParent:GetEffectiveScale() - 14
+        else
+            -- 미니맵(르엘 미니맵 아래 줄) 바로 밑
+            local mm = ns.MinimapFoot or _G.Minimap
+            if mm and mm:IsShown() and mm:GetBottom() then
+                ot:SetPoint("TOPRIGHT", mm, "BOTTOMRIGHT", 30, -14)
+                top = mm:GetBottom() * mm:GetEffectiveScale() / UIParent:GetEffectiveScale() - 14
+            else
+                ot:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -20, -330)
+                top = UIParent:GetHeight() - 330
+            end
+        end
+        -- 아래 피해량 미터기 같은 창 위에서 멈추게
+        local limit = 40
+        for _, n in ipairs({ "DetailsBaseFrame1", "DetailsBaseFrame2", "SkadaBarWindowSkada", "Recount_MainWindow" }) do
+            local o = _G[n]
+            if o and o:IsShown() and o:GetTop() then
+                local ot2 = o:GetTop() * o:GetEffectiveScale() / UIParent:GetEffectiveScale()
+                if ot2 < top then limit = math.max(limit, ot2 + 30) end
+            end
+        end
+        local h = math.max(160, top - limit)
+        local want = DB().otH
+        if want then h = math.max(120, math.min(h, want)) end
+        ot:SetHeight(h)
+    end)
+    placingOT = false
+    ns:QuestTrackerGrip()
+end
+
+-- 퀘스트 목록 아래 손잡이: 위아래(높이)만 끌어서 조절, 오른쪽 클릭 = 자동
+function ns:QuestTrackerGrip()
+    local ot = _G.ObjectiveTrackerFrame
+    if not ot then return end
+    local g = self.otGrip
+    if not g then
+        g = CreateFrame("Button", "LeelUI_QTrackerGrip", UIParent)
+        g:SetSize(60, 12)
+        g:SetFrameStrata("MEDIUM")
+        local bar = g:CreateTexture(nil, "OVERLAY")
+        bar:SetSize(40, 4); bar:SetPoint("CENTER")
+        bar:SetColorTexture(1, 0.66, 0.74, 0.35)
+        g.bar = bar
+        g:RegisterForClicks("RightButtonUp")
+        g:SetScript("OnEnter", function()
+            bar:SetColorTexture(1, 0.66, 0.74, 0.95)
+            GameTooltip:SetOwner(g, "ANCHOR_BOTTOM")
+            GameTooltip:SetText("위아래로 끌어서 퀘스트 목록 높이 조절")
+            GameTooltip:AddLine("오른쪽 클릭: 자동 높이로 되돌리기", 0.8, 0.8, 0.8)
+            GameTooltip:Show()
+        end)
+        g:SetScript("OnLeave", function() if not g.drag then bar:SetColorTexture(1, 0.66, 0.74, 0.35) end; GameTooltip:Hide() end)
+        g:SetScript("OnClick", function()
+            if InCombatLockdown() then return end
+            DB().otH = nil; ns:PlaceQuestTracker()
+        end)
+        g:SetScript("OnMouseDown", function(self, btn)
+            if btn ~= "LeftButton" or InCombatLockdown() then return end
+            local _, cy = GetCursorPosition()
+            self.drag = { y = cy / UIParent:GetEffectiveScale(), h = ot:GetHeight() * ot:GetEffectiveScale() / UIParent:GetEffectiveScale() }
+            self:SetScript("OnUpdate", function()
+                if InCombatLockdown() then return end
+                local _, ny = GetCursorPosition()
+                ny = ny / UIParent:GetEffectiveScale()
+                local want = math.max(120, math.floor(self.drag.h + (self.drag.y - ny)))
+                if not self.last or math.abs(self.last - want) >= 4 then
+                    self.last = want
+                    DB().otH = want * UIParent:GetEffectiveScale() / ot:GetEffectiveScale()
+                    ns:PlaceQuestTracker()
+                end
+            end)
+        end)
+        g:SetScript("OnMouseUp", function(self)
+            self:SetScript("OnUpdate", nil); self.drag = nil; self.last = nil
+            bar:SetColorTexture(1, 0.66, 0.74, 0.35)
+        end)
+        self.otGrip = g
+    end
+    if Mode() == "blizz" and ot:IsShown() then
+        g:ClearAllPoints()
+        g:SetPoint("TOP", ot, "BOTTOM", 0, 2)
+        g:Show()
+    else
+        g:Hide()
+    end
+end
+
+function ns:ApplyQuestTracker(onlyTracker)
+    local m = Mode()
+    if not onlyTracker then SetQuestieTracker(m == "questie") end
+    local ot = _G.ObjectiveTrackerFrame
+    if ot then
+        -- 투명하게 만드는 건 전투 중에도 돼요 (블리자드가 다시 켜도 안 보이게)
+        pcall(ot.SetAlpha, ot, m == "blizz" and 1 or 0)
+        if not InCombatLockdown() then
+            if m == "blizz" then
+                if ns.otHolder and ot:GetParent() == ns.otHolder then pcall(ot.SetParent, ot, UIParent) end
+                pcall(ot.Show, ot); ns:PlaceQuestTracker()
+            else
+                -- 숨겨진 상자 안에 넣어두면 퀘스트가 바뀌어 다시 켜져도 화면에 안 나와요
+                if not ns.otHolder then ns.otHolder = CreateFrame("Frame", nil, UIParent); ns.otHolder:Hide() end
+                local mc = _G.UIParentRightManagedFrameContainer
+                if mc and mc.RemoveManagedFrame and ot.layoutParent == mc then pcall(mc.RemoveManagedFrame, mc, ot) end
+                if ot:GetParent() ~= ns.otHolder then pcall(ot.SetParent, ot, ns.otHolder) end
+                pcall(ot.Hide, ot)
+            end
+            ns:QuestTrackerGrip()
+        end
+    end
+    local guide = _G.ForgLevelingFrame
+    if guide and not onlyTracker then
+        if m == "guide" then guide:Show() elseif guide:IsShown() then guide:Hide() end
+    end
+end
+ns.ApplyQuestieTracker = ns.ApplyQuestTracker   -- 예전 이름
+
+local hooked = false
+local function Hooks()
+    if hooked then return end
+    hooked = true
+    local ot = _G.ObjectiveTrackerFrame
+    if ot then
+        hooksecurefunc(ot, "SetPoint", function()
+            if not placingOT and Mode() == "blizz" then C_Timer.After(0, function() ns:PlaceQuestTracker() end) end
+        end)
+        ot:HookScript("OnShow", function(self)
+            if Mode() ~= "blizz" then
+                pcall(self.SetAlpha, self, 0)
+                C_Timer.After(0, function() if Mode() ~= "blizz" then ns:ApplyQuestTracker(true) end end)
+            end
+        end)
+        hooksecurefunc(ot, "SetParent", function(self, p)
+            if Mode() ~= "blizz" and ns.otHolder and p ~= ns.otHolder then
+                C_Timer.After(0, function() if Mode() ~= "blizz" then ns:ApplyQuestTracker(true) end end)
+            end
+        end)
+    end
+    local guide = _G.ForgLevelingFrame
+    if guide then
+        guide:HookScript("OnShow", function(self)
+            if Mode() ~= "guide" then C_Timer.After(0, function() if Mode() ~= "guide" then self:Hide() end end) end
+        end)
+    end
+end
+
+function ns:SetQuestTrackerMode(m)
+    DB().tracker = m
+    Hooks()
+    ns:ApplyQuestTracker()
+end
+
+local qtev = CreateFrame("Frame")
+qtev:RegisterEvent("PLAYER_LOGIN")
+qtev:RegisterEvent("PLAYER_REGEN_ENABLED")
+qtev:RegisterEvent("QUEST_ACCEPTED")
+qtev:RegisterEvent("QUEST_WATCH_LIST_CHANGED")
+qtev:SetScript("OnEvent", function(_, ev)
+    if ev ~= "PLAYER_LOGIN" then
+        -- 퀘스트를 받거나 전투가 끝나면 고른 목록만 남게 다시 정리
+        if ns.db and hooked and Mode() ~= "blizz" then C_Timer.After(0.2, function() ns:ApplyQuestTracker(true) end) end
+        return
+    end
+    -- Questie·길잡이가 늦게 준비돼서 조금 기다렸다가
+    C_Timer.After(3, function() if ns.db then Hooks(); ns:ApplyQuestTracker() end end)
+    C_Timer.After(10, function() if ns.db then ns:ApplyQuestTracker() end end)
+end)
