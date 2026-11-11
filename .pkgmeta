@@ -10,6 +10,7 @@ ignore:
   - README.md
   - CHANGELOG.md
   - "*.bak"
+  - docs
 
 manual-changelog:
   filename: CHANGELOG.md
