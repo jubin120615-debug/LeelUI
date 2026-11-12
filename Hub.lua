@@ -294,6 +294,8 @@ local MODULES = {
             { t = "toggle", label = "물건 가리키는 선",
               get = function() return (SpotDB().stem or 34) > 0 end,
               set = function(v) Slash("LEELSPOT", v and "선 34" or "선 0") end },
+            { t = "toggle", label = "멀리서도 반짝이", hint = "퀘스트 물건에 게임 반짝이 (테두리 강조 대신)",
+              get = function() return SpotDB().sparkle ~= false end, cmd = "반짝" },
             { t = "button", label = "점검", cmd = "점검" },
         },
     },
@@ -997,6 +999,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.15", "퀘스트 물건 멀리서도 반짝", "새 지역 알림을 Leel Quest 띠로" },
     { "1.3.14", "르엘 퀘스트 판 · Leel Quest", "퀘템 알림 · 채팅창 직접 옮기기" },
     { "1.3.13", "르엘 채팅창 · 새 글 숫자", "남의 몹 자물쇠 · 자동 징 무리만" },
     { "1.3.12", "파티 힐러 타일 · 들어올 치유", "르엘 툴팁 · 남의 몹 자물쇠" },

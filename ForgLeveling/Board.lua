@@ -1533,6 +1533,48 @@ local function MakeTracker()
     line:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 0.35)
     trk.head = head
 
+    -- 알림 띠 (새 지역 도착 · 새 퀘): 제목 바로 아래 분홍 띠, 8초 뒤 접혀요
+    local band = CreateFrame("Frame", nil, trk)
+    band:SetHeight(26)
+    band:SetPoint("TOPLEFT", head, "BOTTOMLEFT", 0, -6); band:SetPoint("TOPRIGHT", head, "BOTTOMRIGHT", 0, -6)
+    Plate(band, 9, { 0.114, 0.082, 0.078, 0.96 }, { P.acc[1], P.acc[2], P.acc[3], 0.75 })
+    band.t = Font(band, 12.5, P.accHi); band.t:SetPoint("LEFT", 9, 0); band.t:SetJustifyH("LEFT"); band.t:SetWordWrap(false)
+    band.s = Font(band, 12, P.tx); band.s:SetPoint("LEFT", band.t, "RIGHT", 7, 0); band.s:SetJustifyH("LEFT"); band.s:SetWordWrap(false)
+    -- 띠 안에 맞는 작은 분홍 알약 단추
+    local bb = CreateFrame("Button", nil, band)
+    bb:SetHeight(18); bb:SetPoint("RIGHT", -5, 0)
+    bb.bg = RR(bb, 9, P.acc, "ARTWORK", 0, 0)
+    bb.fs = Font(bb, 11.5, P.ink); bb.fs:SetPoint("CENTER", 0, 0); bb.fs:SetShadowColor(0, 0, 0, 0)
+    function bb:SetLabel(t)
+        self.fs:SetText(t)
+        local w = 0
+        pcall(function() w = self.fs:GetStringWidth() end)
+        if type(w) ~= "number" or w <= 0 then w = 40 end
+        self:SetWidth(w + 18)
+    end
+    bb:SetScript("OnEnter", function(self) self.bg:SetColor(P.accHi) end)
+    bb:SetScript("OnLeave", function(self) self.bg:SetColor(P.acc) end)
+    bb:SetLabel("고르기")
+    band.b = bb
+    band.s:SetPoint("RIGHT", band.b, "LEFT", -6, 0)
+    band:EnableMouse(true)
+    band:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText(self.full1 or "", P.accHi[1], P.accHi[2], P.accHi[3])
+        if self.full2 then GameTooltip:AddLine(self.full2, 1, 1, 1, true) end
+        GameTooltip:AddLine("오른쪽 클릭: 닫기", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+        self.hover = true
+    end)
+    band:SetScript("OnLeave", function(self) GameTooltip:Hide(); self.hover = false end)
+    band:SetScript("OnMouseUp", function(self, btn) if btn == "RightButton" then self:Hide(); RefreshTracker() end end)
+    band:SetScript("OnUpdate", function(self, el)
+        if self.hover then return end
+        self.left = (self.left or 0) - el
+        if self.left <= 0 then self:Hide(); RefreshTracker() end
+    end)
+    band:Hide()
+    trk.band = band
+
     -- 근처 반납 노란 띠 (누르면 그 퀘들을 길 맨 앞으로)
     local near = CreateFrame("Button", nil, trk)
     near:SetHeight(24)
@@ -1708,6 +1750,8 @@ local seenNear = {}
 NearToast = function(g)
     if not g or seenNear[g.npc] then return end
     seenNear[g.npc] = true
+    local t0 = _G.ForgLevelingFrame
+    if t0 and t0:IsShown() and not DB.trkFold then return end   -- 추적 창의 노란 반납 띠가 이미 알려 줘요
     if Toast then Toast("근처에서 반납할 수 있어요", ("%s · %d개"):format(g.npc, #g.list), "길 앞으로", function()
         if trk and trk.PullNear then trk.PullNear() end
     end) end
@@ -1725,7 +1769,10 @@ RefreshTracker = function()
     else
         trk.near:Hide()
     end
-    local nearH = trk.near:IsShown() and 30 or 0
+    local bandH = trk.band:IsShown() and 32 or 0
+    trk.near:ClearAllPoints()
+    trk.near:SetPoint("TOPLEFT", trk.head, "BOTTOMLEFT", 0, -6 - bandH); trk.near:SetPoint("TOPRIGHT", trk.head, "BOTTOMRIGHT", 0, -6 - bandH)
+    local nearH = (trk.near:IsShown() and 30 or 0) + bandH
     local route = Route()
     local total = math.max(CDB.total or #route, #route)
     for _, r in ipairs(trk.rows) do r:Hide(); r.e = nil; r.cur = nil end
@@ -1739,7 +1786,7 @@ RefreshTracker = function()
         end
         trk.count:SetText("")
         trk.grip:Hide()
-        if DB.trkFold then trk.hint:Hide(); trk.pick:Hide(); trk:SetHeight(30) return end
+        if DB.trkFold then trk.hint:Hide(); trk.pick:Hide(); trk:SetHeight(30 + bandH) return end
         trk.hint:SetText(("%s\n여기서 할 퀘 %d개 · 완료 %d개"):format(MapName(m) or ZoneText(), here, done))
         trk.hint:ClearAllPoints(); trk.hint:SetPoint("TOPLEFT", trk.head, "BOTTOMLEFT", 0, -10 - nearH); trk.hint:SetPoint("RIGHT", 0, 0)
         trk.hint:Show()
@@ -1750,7 +1797,7 @@ RefreshTracker = function()
     trk.hint:Hide(); trk.pick:Hide()
     local doneN = math.max(0, total - #route)
     trk.count:SetText(("%d / %d"):format(doneN + 1, total))
-    if DB.trkFold then trk:SetHeight(30); trk.grip:Hide() return end
+    if DB.trkFold then trk:SetHeight(30 + bandH); trk.grip:Hide() return end
 
     trk.offset = 0
     local y = -38 - nearH
@@ -2080,7 +2127,19 @@ end)
 -- 알림 (새 지역 · 새 퀘)
 ----------------------------------------------------------------------
 local toast
-Toast = function(title, text, btnLabel, fn)
+Toast = function(title, text, btnLabel, fn, short1, short2)
+    local t0 = _G.ForgLevelingFrame
+    if trk and trk.band and t0 and t0:IsShown() then
+        local b = trk.band
+        b.full1, b.full2 = title, text
+        b.t:SetText(short1 or title); b.s:SetText(short2 or text)
+        b.b:SetLabel(btnLabel)
+        b.b:SetScript("OnClick", function() b:Hide(); fn(); RefreshTracker() end)
+        b.left = 8; b.hover = false
+        b:Show()
+        RefreshTracker()
+        return
+    end
     if not toast then
         toast = CreateFrame("Frame", nil, UIParent)
         toast:SetSize(380, 62); toast:SetFrameStrata("HIGH")
@@ -2134,7 +2193,7 @@ local function ZoneToast()
     seenZone[zone] = true
     Toast(zone .. " 도착!", ("받아 둔 퀘 중 여기서 할 것 %d개 · 완료 %d개"):format(here, done), "고르기", function()
         MakeBoard(); board:Show()
-    end)
+    end, zone, ("할 것 %d · 완료 %d"):format(here, done))
 end
 
 local function NewQuestToast(id)
@@ -2146,7 +2205,7 @@ local function NewQuestToast(id)
         CDB.route = BuildOrder()
         CDB.total = (CDB.total or 0) + 1
         RefreshTracker(); RefreshBoard()
-    end)
+    end, "새 퀘", e.title)
 end
 
 ----------------------------------------------------------------------

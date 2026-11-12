@@ -20,7 +20,7 @@ local C = {
     cream = { 0.965, 0.925, 0.910 },
     dim   = { 0.80, 0.64, 0.62 },
 }
-local DEFAULTS = { on = true, all = false, size = 1.0, y = 0, key = true, stem = 34, loot = true, lootY = -70, lootSize = 1.0, lootBob = true, lootMulti = true }
+local DEFAULTS = { on = true, all = false, size = 1.0, y = 0, key = true, stem = 34, loot = true, lootY = -70, lootSize = 1.0, lootBob = true, lootMulti = true, sparkle = true }
 local db
 
 local function P(msg) print("|cfff2b3c2[Leel Spot]|r " .. msg) end
@@ -29,8 +29,24 @@ local function Slice(t, m) pcall(t.SetTextureSliceMargins, t, m, m, m, m) end
 ----------------------------------------------------------------------
 -- 게임 설정: 상호작용 키가 물건도 고르게
 ----------------------------------------------------------------------
+-- 멀리서도 보이는 반짝이: 테두리 강조를 끄면 게임이 퀘스트 물건에 반짝이를 띄워요
+--   (Forever Loot Sparkles와 같은 방법. 그래픽 프리셋을 바꾸면 게임이 다시 테두리로 돌려서 그때마다 다시 켬)
+local function ApplySparkle()
+    if InCombatLockdown() or not db or db.sparkle == false then return end
+    if GetCVar("outlineModeShowLootEffectWhenDisabled") ~= "1" then pcall(SetCVar, "outlineModeShowLootEffectWhenDisabled", "1") end
+    if GetCVar("graphicsOutlineMode") ~= "0" then pcall(SetCVar, "graphicsOutlineMode", "0") end
+    if GetCVar("raidGraphicsOutlineMode") and GetCVar("raidGraphicsOutlineMode") ~= "0" then pcall(SetCVar, "raidGraphicsOutlineMode", "0") end
+end
+local function SparkleOff()
+    if InCombatLockdown() then return end
+    pcall(SetCVar, "outlineModeShowLootEffectWhenDisabled", "0")
+    pcall(SetCVar, "graphicsOutlineMode", "2")
+    if GetCVar("raidGraphicsOutlineMode") then pcall(SetCVar, "raidGraphicsOutlineMode", "2") end
+end
+
 local function ApplyCVars()
     if InCombatLockdown() then return end
+    ApplySparkle()
     local any = (Enum and Enum.SoftTargetEnableFlags and Enum.SoftTargetEnableFlags.Any) or 3
     pcall(SetCVar, "softTargetInteract", any)
     pcall(SetCVar, "SoftTargetIconGameObject", "1")
@@ -504,6 +520,7 @@ ev:RegisterEvent("UPDATE_BINDINGS")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("LOOT_OPENED")
 ev:RegisterEvent("LOOT_CLOSED")
+ev:RegisterEvent("CVAR_UPDATE")
 
 ev:SetScript("OnEvent", function(_, event, unit)
     if event == "PLAYER_LOGIN" then
@@ -518,6 +535,13 @@ ev:SetScript("OnEvent", function(_, event, unit)
     end
     if not db then return end
     if event == "PLAYER_REGEN_ENABLED" then ApplyCVars(); Refresh() return end
+    if event == "CVAR_UPDATE" then
+        local name = unit
+        if type(name) == "string" and name:lower():find("outlinemode") and db and db.sparkle ~= false then
+            C_Timer.After(1, ApplySparkle)    -- 그래픽 프리셋이 반짝이를 끄면 1초 뒤 다시
+        end
+        return
+    end
     if event == "LOOT_OPENED" then lootOpen = true; HideLoot() return end
     if event == "LOOT_CLOSED" then
         lootOpen = false
@@ -549,6 +573,7 @@ local function Help()
     print("  시체  — 주울 시체 위 반짝 상자 켜고 끄기")
     print("  여러시체  — 다른 주울 시체에도 작은 상자 켜고 끄기")
     print("  시체높이 숫자  — 상자 위아래 (기본 -70, 더 작게 = 더 아래로)")
+    print("  반짝  — 게임 반짝이(테두리 강조 대신) 켜고 끄기")
     print("  점검  — 지금 고른 물건 정보")
 end
 
@@ -586,6 +611,10 @@ local function Slash(msg)
     elseif cmd == "시체높이" or cmd == "looty" then
         local n = tonumber(arg)
         if n and n >= -300 and n <= 100 then db.lootY = n; P("시체 상자 높이 " .. n); Refresh() else P("예: /물건 시체높이 -100  (더 작을수록 아래)") end
+    elseif cmd == "반짝" or cmd == "sparkle" then
+        db.sparkle = not (db.sparkle ~= false)
+        if db.sparkle then ApplySparkle(); P("멀리서도 퀘스트 물건이 반짝여요. (처음엔 게임을 껐다 켜야 보일 수 있어요)")
+        else SparkleOff(); P("반짝이를 끄고 테두리 강조로 돌렸어요. 게임을 껐다 켜야 완전히 돌아가요.") end
     elseif cmd == "키숨김" then db.key = not db.key; P(db.key and "키 칩 보여요." or "키 칩 숨겨요."); Refresh()
     elseif cmd == "점검" or cmd == "debug" then
         ApplyCVars()
