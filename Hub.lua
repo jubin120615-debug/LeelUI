@@ -1085,6 +1085,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.22", "OpenMap 같이 설치", "이어 붙인 세계 지도" },
     { "1.3.21", "Leel Quest 자동 길 · 반납 상자", "허브 정리 · OpenMap 맞춤" },
     { "1.3.20", "전투 중 오류 · 툴팁 수정", "던전 시체 반짝 상자" },
     { "1.3.19", "퀘스트 판 토끼 사용법 안내", "처음 열 때 한 번 저절로" },

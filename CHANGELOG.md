@@ -1,5 +1,9 @@
 > 🎀 질문 · 제보 · 새 소식은 [채채TV](https://www.youtube.com/channel/UCgIMsz7rfmveQr2jCmH2hWg)에서
 
+# 1.3.22
+
+- CurseForge 앱으로 설치 · 업데이트하면 OpenMap(이어 붙인 세계 지도)도 같이 설치돼요. Leel Map이 OpenMap의 겹치는 기능(친구 · 길드 위치, 공유, 설정 단추)은 알아서 숨기고, Leel Quest 길을 이어진 지도 위에 그려요
+
 # 1.3.21
 
 - Leel Quest: 새 퀘를 받으면 알아서 길에 넣어요 (가장 덜 돌아가는 자리, "새 퀘" 꼬리표 1분, 띠의 "빼기"로 취소). 정예 · 던전 · 파티 · 레벨 높은 퀘 · 다른 대륙 퀘만 물어보고, 안 넣으면 "보류"로 남아요
