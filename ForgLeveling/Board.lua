@@ -200,35 +200,47 @@ end
 -- 정예 · 던전 · 공격대 퀘 알아내기 (Questie가 고친 값 → 게임 값)
 local TAG_KIND = { [1] = "elite", [81] = "dungeon", [62] = "raid", [88] = "raid", [89] = "raid", [85] = "dungeon" }
 local TAG_NAME = { elite = "정예", dungeon = "던전", raid = "공격대" }
-local tagCache = {}
-local function QuestTag(id)
-    if not id then return end
-    if tagCache[id] ~= nil then return tagCache[id] or nil end
-    local tagID, tagName
-    local QL = _G.QuestieLoader
-    if QL and QL.ImportModule then
-        local ok, QDB = pcall(QL.ImportModule, QL, "QuestieDB")
-        if ok and type(QDB) == "table" and QDB.GetQuestTagInfo then
-            local ok2, a, b = pcall(QDB.GetQuestTagInfo, id)
-            if ok2 then tagID, tagName = a, b end
+local tagCache, tagMiss = {}, {}
+local function KindFromName(n)
+    if type(n) ~= "string" or n == "" then return end
+    if n:find("던전") or n:find("Dungeon") or n:find("영웅") or n:find("Heroic") then return "dungeon" end
+    if n:find("공격대") or n:find("Raid") then return "raid" end
+    if n:find("정예") or n:find("Elite") or n:find("파티") or n:find("Group") then return "elite" end
+end
+-- 게임 퀘스트 일지에 보이는 표시(던전 · 정예 · 공격대)를 먼저 믿고, 없으면 Questie 자료로
+local function QuestTag(id, logTag)
+    if not id then return KindFromName(logTag) end
+    if tagCache[id] then return tagCache[id] end
+    local kind = KindFromName(logTag)
+    if kind then tagCache[id] = kind; return kind end
+    tagMiss = tagMiss or {}
+    if tagMiss[id] and GetTime() - tagMiss[id] < 20 then return end   -- 못 찾은 퀘는 20초에 한 번만 다시
+    local answered = false
+    if not kind and C_QuestLog and C_QuestLog.GetQuestTagInfo then
+        local ok, info = pcall(C_QuestLog.GetQuestTagInfo, id)
+        if ok and type(info) == "table" then
+            answered = true
+            kind = TAG_KIND[info.tagID] or KindFromName(info.tagName)
         end
     end
-    if not tagID then
-        if C_QuestLog and C_QuestLog.GetQuestTagInfo then
-            local ok, info = pcall(C_QuestLog.GetQuestTagInfo, id)
-            if ok and type(info) == "table" then tagID, tagName = info.tagID, info.tagName end
-        elseif GetQuestTagInfo then
-            local ok, a, b = pcall(GetQuestTagInfo, id)
-            if ok then tagID, tagName = a, b end
+    if not kind and GetQuestTagInfo then
+        local ok, a, b = pcall(GetQuestTagInfo, id)
+        if ok and (a or b) then
+            answered = true
+            kind = TAG_KIND[a] or KindFromName(b)
         end
     end
-    local kind = tagID and TAG_KIND[tagID]
-    if not kind and type(tagName) == "string" then
-        if tagName:find("정예") or tagName:find("Elite") or tagName:find("파티") or tagName:find("Group") then kind = "elite"
-        elseif tagName:find("던전") or tagName:find("Dungeon") then kind = "dungeon"
-        elseif tagName:find("공격대") or tagName:find("Raid") then kind = "raid" end
+    if not kind then
+        local QL = _G.QuestieLoader
+        if QL and QL.ImportModule then
+            local ok, QDB = pcall(QL.ImportModule, QL, "QuestieDB")
+            if ok and type(QDB) == "table" and QDB.GetQuestTagInfo then
+                local ok2, a, b = pcall(QDB.GetQuestTagInfo, id)
+                if ok2 and (a or b) then kind = TAG_KIND[a] or KindFromName(b) end
+            end
+        end
     end
-    if tagID ~= nil or tagName ~= nil then tagCache[id] = kind or false end   -- 아직 모르면 다음에 다시
+    if kind then tagCache[id] = kind else tagMiss[id] = GetTime() end   -- 찾았을 때만 기억
     return kind
 end
 
@@ -263,7 +275,7 @@ local function ReadLog()
                 end
                 local failed = isComplete == -1
                 list[#list + 1] = {
-                    id = id, title = title, key = Norm(title), level = level or 0, group = tonumber(group) or 0, tag = QuestTag(id),
+                    id = id, title = title, key = Norm(title), level = level or 0, group = tonumber(group) or 0, tag = QuestTag(id, type(group) == "string" and group or nil),
                     zone = header, done = done and not failed, failed = failed, objs = objs, xp = RewardXP(id), index = i,
                 }
             end
@@ -306,6 +318,19 @@ local SRC_ICON = { questie = "|cfff1d98a●|r ", learned = "|cffffd6e0●|r ", g
 
 -- Questie가 켜져 있으면: 그 퀘스트의 지도 아이콘(목표 · 반납 NPC) 중 내 위치에서 가장 가까운 곳
 local qieCache = {}
+-- 다른 지도(옆 지역)의 좌표를 지금 지도 좌표로 바꿔요 (지금 지도 밖이면 0~100 밖 값이 나와요)
+local function ToMap(src, x, y, m)
+    if src == m then return x, y end
+    if not (C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D) then return end
+    local ok, c1, w = pcall(C_Map.GetWorldPosFromMapPos, src, CreateVector2D(x / 100, y / 100))
+    local ok0, c0, w00 = pcall(C_Map.GetWorldPosFromMapPos, m, CreateVector2D(0, 0))
+    local ok1, _, w11 = pcall(C_Map.GetWorldPosFromMapPos, m, CreateVector2D(1, 1))
+    if not (ok and ok0 and ok1 and w and w00 and w11) or c1 ~= c0 then return end
+    local dy, dx = w11.y - w00.y, w11.x - w00.x
+    if math.abs(dy) < 1e-6 or math.abs(dx) < 1e-6 then return end
+    return (w.y - w00.y) / dy * 100, (w.x - w00.x) / dx * 100
+end
+
 local function QuestiePos(e, m, px, py)
     if not (e.id and m and _G.QuestieLoader and _G.QuestieLoader.ImportModule) then return end
     local now = GetTime()
@@ -319,8 +344,12 @@ local function QuestiePos(e, m, px, py)
             for _, fname in pairs(frames) do
                 local fr = type(fname) == "string" and _G[fname] or fname
                 local d = type(fr) == "table" and fr.data
-                if type(d) == "table" and fr.x and fr.y and fr.UiMapID and #c.obj < 300 then
-                    local pt = { map = fr.UiMapID, x = fr.x, y = fr.y, idx = d.ObjectiveIndex, npc = d.Name }
+                -- 다른 퀘에 다시 쓰인 아이콘 틀은 건너뛰어요
+                local qid = type(d) == "table" and (d.Id or (type(d.QuestData) == "table" and d.QuestData.Id))
+                if type(d) == "table" and fr.x and fr.y and fr.UiMapID and #c.obj < 300 and (not qid or qid == e.id) then
+                    local od = type(d.ObjectiveData) == "table" and d.ObjectiveData or nil
+                    local pt = { map = fr.UiMapID, x = fr.x, y = fr.y, idx = d.ObjectiveIndex, npc = d.Name,
+                                 qdone = od and od.Completed or nil, desc = od and od.Description or nil }
                     if d.Type == "complete" then c.fin[#c.fin + 1] = pt
                     elseif d.ObjectiveIndex then c.obj[#c.obj + 1] = pt end
                 end
@@ -337,6 +366,11 @@ local function QuestiePos(e, m, px, py)
             end
         end
         if best then return best.x, best.y end
+        -- 반납 NPC가 옆 지역에 있으면 그쪽을 가리켜요
+        for _, p in ipairs(c.fin) do
+            local x, y = ToMap(p.map, p.x, p.y, m)
+            if x then return x, y end
+        end
         return
     end
     -- 하는 중인 퀘: 남은 목표의 몹/물건이 가장 많이 몰린 곳의 가운데 (내 위치와 상관없이 늘 같은 자리)
@@ -349,30 +383,59 @@ local function QuestiePos(e, m, px, py)
         if c.center then return c.center[1], c.center[2] end
         return
     end
-    local pts = {}
+    -- 이 아이콘의 목표가 끝났나: Questie가 아는 완료 → 목표 글자로 맞춰 본 게임 값 → 번호로 맞춘 게임 값
+    --   (Questie의 목표 번호가 게임 순서와 다를 때가 있어서 번호는 마지막에)
+    local function ObjDone(p)
+        if p.qdone ~= nil then return p.qdone and true or false end
+        if type(p.desc) == "string" and p.desc ~= "" then
+            local want = Norm(p.desc)
+            for _, o in ipairs(e.objs) do
+                local t = Norm(o.text or "")
+                if t ~= "" and (t == want or t:find(want, 1, true) or want:find(t, 1, true)) then return o.done end
+            end
+        end
+        local o = p.idx and e.objs[p.idx]
+        return o and o.done or false
+    end
+    local here, other = {}, {}
     for _, p in ipairs(c.obj) do
-        if p.map == m then
-            local o = p.idx and e.objs[p.idx]
-            if not (o and o.done) then pts[#pts + 1] = p end
+        if not ObjDone(p) then
+            if p.map == m then here[#here + 1] = p
+            else other[p.map] = other[p.map] or {}; table.insert(other[p.map], p) end
         end
     end
     c.centerKey = key
-    if #pts == 0 then c.center = false return end
-    local R2 = 6 * 6          -- 지도 % 기준 반경 6
-    local bestI, bestN = 1, -1
-    for i, a in ipairs(pts) do
-        local n = 0
-        for _, b in ipairs(pts) do
-            if (a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 <= R2 then n = n + 1 end
+    -- 몹/물건이 가장 많이 몰린 곳의 가운데
+    local function Center(pts)
+        local R2 = 6 * 6          -- 지도 % 기준 반경 6
+        local bestI, bestN = 1, -1
+        for i, a in ipairs(pts) do
+            local n = 0
+            for _, b in ipairs(pts) do
+                if (a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 <= R2 then n = n + 1 end
+            end
+            if n > bestN then bestI, bestN = i, n end
         end
-        if n > bestN then bestI, bestN = i, n end
+        local a, sx, sy, n = pts[bestI], 0, 0, 0
+        for _, b in ipairs(pts) do
+            if (a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 <= R2 then sx, sy, n = sx + b.x, sy + b.y, n + 1 end
+        end
+        return sx / n, sy / n
     end
-    local a, sx, sy, n = pts[bestI], 0, 0, 0
-    for _, b in ipairs(pts) do
-        if (a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 <= R2 then sx, sy, n = sx + b.x, sy + b.y, n + 1 end
+    if #here > 0 then
+        local x, y = Center(here)
+        c.center = { x, y }
+        return x, y
     end
-    c.center = { sx / n, sy / n }
-    return c.center[1], c.center[2]
+    -- 이 지도엔 남은 목표가 없어요 → 남은 목표가 있는 옆 지역(가장 많은 곳)을 이 지도 좌표로 바꿔서 가리켜요
+    local bestMap, bestN = nil, 0
+    for mp, list in pairs(other) do if #list > bestN then bestMap, bestN = mp, #list end end
+    if bestMap then
+        local ox, oy = Center(other[bestMap])
+        local x, y = ToMap(bestMap, ox, oy, m)
+        if x then c.center = { x, y }; return x, y end
+    end
+    c.center = false
 end
 
 -- 완료한 퀘의 반납 NPC (Questie): { map, x, y, npc } 하나 (지금 지도에 있으면 그것, 아니면 첫 번째)
@@ -431,10 +494,11 @@ local function QuestPos(e, m)
     return nil, nil, "none"
 end
 
+local function OnMap(x, y) return x and y and x >= 0 and x <= 100 and y >= 0 and y <= 100 end
 local function InZone(e, m)
     if e.zone and (e.zone == ZoneText() or e.zone == MapName(m)) then return true end
-    local x = QuestPos(e, m)
-    return x ~= nil
+    local x, y = QuestPos(e, m)
+    return x ~= nil and x >= 0 and x <= 100 and y >= 0 and y <= 100   -- 옆 지역을 가리키는 값은 "여기"가 아니에요
 end
 
 -- 난이도: 글씨는 퀘 레벨, 색이 난이도 (빨강 어려움 · 노랑 보통 · 초록 쉬움 · 회색 너무 쉬움)
@@ -982,7 +1046,7 @@ local function PaintMap()
     local n = 0
     for i, e in ipairs(order) do
         local x, y = QuestPos(e, m)
-        if x then
+        if OnMap(x, y) then
             n = n + 1
             local mk = MapMark(p, n)
             mk.disc:SetVertexColor(e.done and 0.945 or P.acc[1], e.done and 0.851 or P.acc[2], e.done and 0.541 or P.acc[3], 1)
@@ -1274,7 +1338,7 @@ local function FillGuide()
     for _, e in ipairs(log) do
         if e.id and not e.failed then
             local x, y = QuestPos(e, m)
-            if x then
+            if OnMap(x, y) then
                 local it = { e = e, x = x, y = y }
                 if e.done then dones[#dones + 1] = it
                 else
@@ -1553,6 +1617,49 @@ local function ShowQuest(e)
     if ToggleQuestLog then pcall(ToggleQuestLog) end
 end
 
+-- 당근 게이지 링 (G안): 링이 가까워질수록 주황으로 차오르고, 안의 당근이 가야 할 방향을 가리켜요
+--   반쪽 링 두 장을 각각 왼쪽/오른쪽 반만 보이는 틀 안에서 돌려서 시계 방향으로 채워요
+local FLM = "Interface\\AddOns\\ForgLeveling\\media\\"
+local CARROT = { 1, 0.604, 0.235 }
+local function NavRing(parent, size)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(size, size)
+    local edge = f:CreateTexture(nil, "BACKGROUND", nil, 0); edge:SetTexture(MEDIA .. "circle")
+    edge:SetPoint("TOPLEFT", -1.5, 1.5); edge:SetPoint("BOTTOMRIGHT", 1.5, -1.5); edge:SetVertexColor(0, 0, 0, 0.85)
+    local track = f:CreateTexture(nil, "BACKGROUND", nil, 1); track:SetTexture(FLM .. "nav_ring"); track:SetAllPoints()
+    track:SetVertexColor(0.227, 0.169, 0.157, 1)
+    local function Half(right)
+        local c = CreateFrame("Frame", nil, f)
+        if right then c:SetPoint("TOPLEFT", f, "TOP", 0, 0); c:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+        else c:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0); c:SetPoint("BOTTOMRIGHT", f, "BOTTOM", 0, 0) end
+        local okClip = pcall(c.SetClipsChildren, c, true)
+        local t = c:CreateTexture(nil, "ARTWORK"); t:SetTexture(FLM .. "nav_half")
+        t:SetSize(size, size); t:SetPoint("CENTER", f, "CENTER", 0, 0)
+        t:SetVertexColor(CARROT[1], CARROT[2], CARROT[3], 1)
+        return c, t, okClip
+    end
+    f.cR, f.tR, f.clip = Half(true)
+    f.cL, f.tL = Half(false)
+    local inner = CreateFrame("Frame", nil, f); inner:SetAllPoints(); inner:SetFrameLevel(f:GetFrameLevel() + 5)
+    local disc = inner:CreateTexture(nil, "BACKGROUND"); disc:SetTexture(MEDIA .. "circle")
+    disc:SetPoint("TOPLEFT", 3.5, -3.5); disc:SetPoint("BOTTOMRIGHT", -3.5, 3.5); disc:SetVertexColor(0.125, 0.094, 0.086, 1)
+    f.carrot = inner:CreateTexture(nil, "ARTWORK"); f.carrot:SetTexture(FLM .. "nav_carrot")
+    f.carrot:SetSize(size * 0.62, size * 0.62); f.carrot:SetPoint("CENTER", 0, 0)
+    function f:SetProgress(p)
+        p = math.max(0, math.min(1, p or 0))
+        if not self.clip then self.cR:Hide(); self.cL:Hide(); return end   -- 잘라 보이기가 안 되면 빈 링만
+        local tau = math.pi * 2
+        if p <= 0.5 then
+            self.tR:SetRotation(-p * tau); self.cR:SetShown(p > 0); self.cL:Hide()
+        else
+            self.tR:SetRotation(-math.pi); self.cR:Show()
+            self.tL:SetRotation(math.pi - (p - 0.5) * tau); self.cL:Show()
+        end
+    end
+    f:SetProgress(0)
+    return f
+end
+
 local function MakeRow(i)
     local r = CreateFrame("Button", nil, trk)
     r:SetHeight(20)
@@ -1569,11 +1676,25 @@ local function MakeRow(i)
     r.qi = r.n:CreateTexture(nil, "OVERLAY"); r.qi:SetTexture(MEDIA .. "q_turnin"); r.qi:SetAllPoints(); r.qi:Hide()
     r.title = Font(r, 15, P.tx); r.title:SetPoint("TOPLEFT", 28, -1); r.title:SetJustifyH("LEFT"); r.title:SetWordWrap(false)
     r.title:SetShadowColor(0, 0, 0, 1); r.title:SetShadowOffset(1, -1)
-    r.arrow = r:CreateTexture(nil, "OVERLAY"); r.arrow:SetTexture("Interface\\MINIMAP\\MinimapArrow")
+
     -- 난이도 작은 알약 (쉬움 · 보통 · 어려움 · 파티)
     r.diff = MakeChip(r); r.diff:SetHeight(16); r.diff:SetPoint("LEFT", r.title, "RIGHT", 6, 0)
-    r.arrow:SetSize(18, 18); r.arrow:SetPoint("LEFT", r.diff, "RIGHT", 4, 0); r.arrow:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 1)
-    r.dist = Num(r, 14, P.accHi); r.dist:SetPoint("LEFT", r.arrow, "RIGHT", 1, 0)
+    -- 지금 퀘: 줄 오른쪽 끝에 당근 링 + 거리
+    r.dist = Num(r, 16, { 1, 0.945, 0.957 }); r.dist:SetPoint("RIGHT", r, "TOPRIGHT", -2, -10); r.dist:SetJustifyH("LEFT")
+    r.dist:SetWidth(40)       -- 폭 고정: 숫자 길이가 바뀌어도 링이 안 흔들려요
+    r.dist:SetShadowColor(0, 0, 0, 1); r.dist:SetShadowOffset(1, -1)
+    r.ring = NavRing(r, 28); r.ring:SetPoint("RIGHT", r.dist, "LEFT", -5, 0)
+    r.arrow = r.ring.carrot
+    -- 목표 달성 반짝: 왼쪽 초록 띠 + 오른쪽으로 옅어지는 초록 판
+    r.hl = r:CreateTexture(nil, "BACKGROUND"); r.hl:SetTexture(WHITE)
+    r.hl:SetPoint("TOPLEFT", -6, 3); r.hl:SetPoint("BOTTOMRIGHT", 0, 2)
+    if not pcall(function()
+        r.hl:SetGradient("HORIZONTAL", CreateColor(0.227, 0.51, 0.275, 0.45), CreateColor(0.227, 0.51, 0.275, 0))
+    end) then r.hl:SetVertexColor(0.227, 0.51, 0.275, 0.25) end
+    r.hlBar = r:CreateTexture(nil, "BORDER"); r.hlBar:SetTexture(WHITE); r.hlBar:SetWidth(3)
+    r.hlBar:SetPoint("TOPLEFT", r.hl, "TOPLEFT", 0, 0); r.hlBar:SetPoint("BOTTOMLEFT", r.hl, "BOTTOMLEFT", 0, 0)
+    r.hlBar:SetVertexColor(0.56, 0.86, 0.61, 1)
+    r.hl:Hide(); r.hlBar:Hide()
     r.objs = {}
     r:SetScript("OnClick", function(self, btn)
         local e = self.e
@@ -1609,6 +1730,8 @@ local function ObjLine(r, j)
     if not fs then
         fs = Font(r, 12, DIM); fs:SetJustifyH("LEFT"); fs:SetWordWrap(true); fs:SetNonSpaceWrap(true); fs:SetSpacing(2); if fs.SetMaxLines then fs:SetMaxLines(4) end
         fs:SetShadowColor(0, 0, 0, 1); fs:SetShadowOffset(1, -1)
+        fs.strike = r:CreateTexture(nil, "OVERLAY"); fs.strike:SetTexture(WHITE); fs.strike:SetHeight(1.5)
+        fs.strike:SetVertexColor(0.56, 0.86, 0.61, 0.9); fs.strike:Hide()
         r.objs[j] = fs
     end
     return fs
@@ -1686,6 +1809,26 @@ local function MakeTracker()
     line:SetPoint("TOPLEFT", head, "BOTTOMLEFT", 0, -2); line:SetPoint("TOPRIGHT", head, "BOTTOMRIGHT", 0, -2); line:SetHeight(1)
     line:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 0.35)
     trk.head = head
+
+    -- 목표 달성 초록 알약 (머리 오른쪽, 접기 단추 옆): 8초 동안 숨 쉬듯 반짝
+    local gp = CreateFrame("Frame", nil, head)
+    gp:SetSize(90, 20); gp:SetPoint("RIGHT", mini, "LEFT", -6, 0)
+    gp.glow = gp:CreateTexture(nil, "BACKGROUND", nil, -1); gp.glow:SetTexture(MEDIA .. "circle")
+    gp.glow:SetPoint("TOPLEFT", -10, 8); gp.glow:SetPoint("BOTTOMRIGHT", 10, -8)
+    gp.glow:SetVertexColor(0.56, 0.86, 0.61, 0.35); gp.glow:SetBlendMode("ADD")
+    RR(gp, 10, { 0.227, 0.51, 0.275, 1 }, "BACKGROUND", 0, 0)
+    gp.ck = gp:CreateTexture(nil, "ARTWORK"); gp.ck:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+    gp.ck:SetSize(13, 13); gp.ck:SetPoint("LEFT", 7, 0)
+    gp.fs = Font(gp, 12, { 1, 1, 1 }); gp.fs:SetPoint("LEFT", gp.ck, "RIGHT", 4, 0); gp.fs:SetShadowColor(0, 0, 0, 0.6)
+    gp:SetScript("OnUpdate", function(self, el)
+        self.left = (self.left or 0) - el
+        if self.left <= 0 then self:Hide(); return end
+        local a = 0.25 + 0.35 * (0.5 + 0.5 * math.sin(GetTime() * 5))
+        self.glow:SetAlpha(a)
+        if self.left < 0.6 then self:SetAlpha(self.left / 0.6) else self:SetAlpha(1) end
+    end)
+    gp:Hide()
+    trk.goal = gp
 
     -- 알림 띠 (새 지역 도착 · 새 퀘): 제목 바로 아래 분홍 띠, 8초 뒤 접혀요
     local band = CreateFrame("Frame", nil, trk)
@@ -1856,15 +1999,33 @@ local function MakeTracker()
         local m = PlayerMap()
         local px, py = PlayerXY(m)
         local x, y = QuestPos(e, m)
-        if not (px and x) then r.arrow:Hide(); r.dist:SetText("") return end
+        if not (px and x) then r.arrow:Hide(); r.ring:SetProgress(0); r.dist:SetText("") return end
         local yd, dx, dy = Yards(m, px, py, x, y)
         local ang = yd and math.atan2(dy, dx) or math.atan2(-(x - px) * 1.5, -(y - py))
         local f = GetPlayerFacing and GetPlayerFacing()
-        if f then r.arrow:SetRotation(ang - f); r.arrow:Show() else r.arrow:Hide() end
+        if f then
+            -- 당근 방향은 부드럽게 따라가요 (걸을 때 위치 값이 조금씩 튀어도 안 떨리게)
+            local want = ang - f
+            local cur = self.navAng or want
+            local d = (want - cur + math.pi) % (2 * math.pi) - math.pi
+            if math.abs(d) < 0.03 then cur = cur else cur = cur + d * 0.35 end
+            self.navAng = cur
+            r.arrow:SetRotation(cur); r.arrow:Show()
+        else r.arrow:Hide() end
+        -- 링: 이 퀘를 따라가기 시작했을 때(가장 멀었을 때) 거리 대비 얼마나 왔나
         if yd then
-            r.dist:SetText(yd < 15 and "" or (yd >= 1000 and ("%.1fk"):format(yd / 1000) or ("%dm"):format(yd)))
+            if self.navId ~= e.id then self.navId = e.id; self.navMax = yd end
+            if yd > (self.navMax or 0) then self.navMax = yd end
+            local p = (yd < 15) and 1 or (1 - yd / math.max(self.navMax, 1))
+            p = math.floor(p * 40 + 0.5) / 40      -- 2.5% 단위로만 움직여서 링 끝이 덜 떨리게
+            r.ring:SetProgress(p)
+            if yd < 15 then
+                r.dist:SetText("여기"); r.dist:SetTextColor(CARROT[1], CARROT[2], CARROT[3])
+            else
+                r.dist:SetText(yd >= 1000 and ("%.1fk"):format(yd / 1000) or ("%dm"):format(yd)); r.dist:SetTextColor(1, 0.945, 0.957)
+            end
         else
-            r.dist:SetText("")
+            r.ring:SetProgress(0); r.dist:SetText("")
         end
     end)
     trk:Hide()
@@ -1911,11 +2072,84 @@ NearToast = function(g)
     end) end
 end
 
+----------------------------------------------------------------------
+-- 목표 달성 (D안): 목표가 다 차는 순간 판 머리 초록 알약 + 그 퀘 줄 반짝 + 르엘 소리
+----------------------------------------------------------------------
+local goal                -- { id, t, full }
+local GOAL_SEC = 8
+-- 소리: 목표 하나 참 → 짧은 "또롱"(goal1) / 퀘스트 완료 → 깡총깡총깡총 + 오르골(done)
+--   DB.sndOff = true 면 둘 다 꺼요
+local SND_DIR = "Interface\\AddOns\\ForgLeveling\\media\\"
+local sndHandle
+local function PlayOgg(name)
+    if sndHandle and StopSound then pcall(StopSound, sndHandle, 200) end
+    local ok, will, h = pcall(PlaySoundFile, SND_DIR .. name .. ".ogg", "Master")
+    sndHandle = ok and will and h or nil
+end
+local function DoneSound() PlayOgg("done") end
+-- 물어볼 때 (새 퀘 넣을까요? · 근처 반납 들를까요?): 깡총 + "띠링?"
+local function AskSound() if not DB.sndOff then PlayOgg("ask") end end
+local function Voice(kind)
+    if DB.sndOff then return end
+    if kind == "zone" then return end
+    if kind == "goal" then PlayOgg("goal1") else DoneSound() end
+end
+local function GoalLive(e)
+    return goal and e and goal.id == e.id and (GetTime() - goal.t) < GOAL_SEC
+end
+local function Goal(id, full)
+    goal = { id = id, t = GetTime(), full = full }
+    if full then
+        -- "퀘스트를 완료했습니다." + 길에 할 퀘가 남았으면 "다음 퀘스트로", 없으면 "반납하러"
+        local more = false
+        for _, e in ipairs(Route()) do
+            if not e.done and e.id ~= id then more = true; break end
+        end
+        Voice(more and "next" or "done")
+    else
+        Voice("goal")      -- 목표 하나만 찬 건 짧은 효과음
+    end
+    if trk and trk.goal then
+        trk.goal.fs:SetText(full and "퀘스트 완료!" or "목표 달성!")
+        trk.goal:SetWidth((pcall(function() return trk.goal.fs:GetStringWidth() end) and trk.goal.fs:GetStringWidth() or 60) + 34)
+        trk.goal.left = GOAL_SEC
+        trk.goal:Show()
+    end
+    C_Timer.After(GOAL_SEC + 0.1, function() if RefreshTracker then RefreshTracker() end end)
+end
+local prevObj = {}
+local function CheckGoals()
+    local hitId, hitFull
+    local seen = {}
+    for _, e in ipairs(log) do
+        if e.id then
+            seen[e.id] = true
+            local cur = { done = e.done }
+            for j, o in ipairs(e.objs) do cur[j] = o.done end
+            local p = prevObj[e.id]
+            if p then
+                if e.done and p.done == false then hitId, hitFull = e.id, true
+                elseif not hitId then
+                    for j = 1, #e.objs do
+                        if cur[j] and p[j] == false then hitId = e.id; break end
+                    end
+                end
+            end
+            prevObj[e.id] = cur
+        end
+    end
+    for id in pairs(prevObj) do if not seen[id] then prevObj[id] = nil end end
+    if hitId then Goal(hitId, hitFull) end
+end
+
 RefreshTracker = function()
     if not trk then return end
     -- 근처 반납 노란 띠
     local near = NearTurnins()
     trk.nearG = near
+    -- 근처 반납이 새로 생기면 한 번 "띠링?" (같은 NPC면 다시 안 울려요)
+    if near and near.npc ~= trk.nearSnd then trk.nearSnd = near.npc; if AskSound then AskSound() end
+    elseif not near then trk.nearSnd = nil end
     if near and not DB.trkFold then
         trk.near.t:SetText(("여기서 반납 %d개 · %s"):format(#near.list, near.npc))
         trk.near.d:SetText(near.d < 15 and "" or ("%dm"):format(near.d))
@@ -1981,18 +2215,36 @@ RefreshTracker = function()
         if e.done then r.title:SetTextColor(YEL[1], YEL[2], YEL[3]) else r.title:SetTextColor(P.tx[1], P.tx[2], P.tx[3]) end
         local dt, dk, dc = Diff(e)
         r.diff:Set(dt, dc or dk)
-        r.title:SetWidth(math.min(r.title:GetStringWidth() + 2, W - 28 - r.diff:GetWidth() - 8 - (r.cur and 70 or 0)))
-        r.arrow:SetShown(r.cur); r.dist:SetShown(r.cur)
+        r.title:SetWidth(math.min(r.title:GetStringWidth() + 2, W - 28 - r.diff:GetWidth() - 8 - (r.cur and 82 or 0)))
+        r.ring:SetShown(r.cur and true or false); r.dist:SetShown(r.cur and true or false)
         if not r.cur then r.dist:SetText("") end
         -- 목표 줄
+        local live = GoalLive(e)
+        r.hl:SetShown(live and true or false); r.hlBar:SetShown(live and true or false)
         local lines = {}
         if e.done then
             local g = guide[e.key]
-            lines[1] = { "· " .. Progress(e), false }
+            if live then
+                for _, o in ipairs(e.objs) do
+                    local t = (o.have and o.need) and ("%s %d/%d"):format(o.text, o.have, o.need) or o.text
+                    lines[#lines + 1] = { "· " .. t, true, "strike" }
+                end
+                lines[#lines + 1] = { "▶ 이제 반납하러 가요", false, "next" }
+            else
+                lines[1] = { "· " .. Progress(e), false }
+            end
         else
+            local nextMarked = false
             for _, o in ipairs(e.objs) do
                 local t = (o.have and o.need) and ("%s %d/%d"):format(o.text, o.have, o.need) or o.text
-                lines[#lines + 1] = { "· " .. t, o.done }
+                if live and o.done then
+                    lines[#lines + 1] = { "· " .. t, true, "strike" }
+                elseif live and not o.done and not nextMarked then
+                    nextMarked = true
+                    lines[#lines + 1] = { "▶ 이제 이거: " .. t, false, "next" }
+                else
+                    lines[#lines + 1] = { "· " .. t, o.done }
+                end
             end
             if #lines == 0 then lines[1] = { "· " .. Progress(e), false } end
         end
@@ -2002,11 +2254,22 @@ RefreshTracker = function()
             local fs = ObjLine(r, j)
             fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", r, "TOPLEFT", 30, -oy); fs:SetWidth(W - 34)
             fs:SetText(l[1])
-            if l[2] then fs:SetTextColor(0.54, 0.48, 0.46) else fs:SetTextColor(0.9, 0.84, 0.82) end
+            if l[3] == "strike" then fs:SetTextColor(0.56, 0.86, 0.61)
+            elseif l[3] == "next" then fs:SetTextColor(P.accHi[1], P.accHi[2], P.accHi[3])
+            elseif l[2] then fs:SetTextColor(0.54, 0.48, 0.46) else fs:SetTextColor(0.9, 0.84, 0.82) end
             fs:Show()
+            -- 다 찬 목표에 가로줄
+            if l[3] == "strike" then
+                local sw = 60
+                pcall(function() local v = fs:GetStringWidth(); if type(v) == "number" then sw = v end end)
+                fs.strike:ClearAllPoints(); fs.strike:SetPoint("TOPLEFT", fs, "TOPLEFT", 10, -7)
+                fs.strike:SetWidth(math.max(4, math.min(sw, W - 34) - 10)); fs.strike:Show()
+            else
+                fs.strike:Hide()
+            end
             oy = oy + math.max(15, math.ceil(fs:GetStringHeight() or 13) + 3)
         end
-        for j = #lines + 1, #r.objs do r.objs[j]:Hide() end
+        for j = #lines + 1, #r.objs do r.objs[j]:Hide(); r.objs[j].strike:Hide() end
         local h = oy + 8
         -- 실제 높이로 다시 확인: 공간을 넘으면 이 퀘는 "+ N개 더"로
         if shown > 1 and (-y + h + 22) > room then
@@ -2107,7 +2370,10 @@ local function PaintWorldMap()
         for _, bd in ipairs(wmLayer.badges or {}) do bd:Hide() end
         wmLayer:Finish(); return
     end
-    local pts = RoutePoints(m)
+    local pts = {}
+    for _, p in ipairs(RoutePoints(m)) do
+        if p[1] >= 0 and p[1] <= 100 and p[2] >= 0 and p[2] <= 100 then pts[#pts + 1] = p end   -- 옆 지역 목표는 지도 위에 안 그려요
+    end
     local px, py = PlayerXY(m)
     local scale = math.max(0.5, W / 1002)
     local line = {}
@@ -2340,11 +2606,12 @@ local function ZoneToast()
     if IsInInstance and IsInInstance() then return end
     local here, done = 0, 0
     for _, e in ipairs(log) do
-        if e.done then if QuestPos(e, m) then done = done + 1 end
+        if e.done then local x, y = QuestPos(e, m); if x and x >= 0 and x <= 100 and y >= 0 and y <= 100 then done = done + 1 end
         elseif InZone(e, m) then here = here + 1 end
     end
     if here + done == 0 then return end
     seenZone[zone] = true
+    if Voice then Voice("zone") end
     Toast(zone .. " 도착!", ("받아 둔 퀘 중 여기서 할 것 %d개 · 완료 %d개"):format(here, done), "고르기", function()
         MakeBoard(); board:Show()
     end, zone, ("할 것 %d · 완료 %d"):format(here, done))
@@ -2354,6 +2621,7 @@ local function NewQuestToast(id)
     if not (id and CDB.route and #CDB.route > 0) then return end
     local e = byId[id]
     if not e then return end
+    AskSound()
     Toast("새 퀘: " .. e.title, "지금 길에 넣을까요? 가까운 순서로 끼워 넣어요", "넣기", function()
         Sel()[id] = true
         CDB.route = BuildOrder()
@@ -2372,6 +2640,7 @@ local function SoonRefresh()
     C_Timer.After(0.3, function()
         pendingRefresh = false
         ReadLog(); Learn()
+        CheckGoals()
         -- 로그에서 사라진 퀘(반납 · 포기)는 고른 목록에서도 빼요
         for id in pairs(Sel()) do if not byId[id] then Sel()[id] = nil end end
         -- 퀘를 다 하면(보고할 곳이 생기면) 길을 다시 짜요: 할 일 먼저, 보고는 끝에
@@ -2403,6 +2672,7 @@ ev:SetScript("OnEvent", function(_, e, a1, a2)
         DB, CDB = ForgLevelingDB, ForgLevelingCharDB
         MakeTracker()
         ReadLog(); Learn()
+        CheckGoals()      -- 처음엔 지금 상태만 기억 (소리 안 남)
         RefreshTracker()
         C_Timer.After(6, function() ReadLog(); ZoneToast() end)
         return
@@ -2430,6 +2700,19 @@ SlashCmdList.FORGLEVELING = function(msg)
     if not DB then return end
     if msg == "따라" or msg == "창" then
         if trk then trk:SetShown(not trk:IsShown()) end
+    elseif msg:find("^소리") then
+        local a = msg:gsub("^소리%s*", "")
+        if a == "끔" or a == "끄기" then
+            DB.sndOff = true; Print("퀘스트 소리 끔")
+        elseif a == "켬" or a == "켜기" then
+            DB.sndOff = nil; DoneSound(); Print("퀘스트 소리 켬")
+        else
+            Print("퀘스트 소리: " .. (DB.sndOff and "끔" or "켬") .. "  ·  /퀘판 소리 켬 · 끔")
+            if not DB.sndOff then DoneSound() end
+        end
+    elseif msg == "목표" then
+        local e = Route()[1] or log[1]
+        if e then Goal(e.id, false); RefreshTracker() end
     elseif msg == "알림" then
         DB.zoneToast = DB.zoneToast == false
         Print("지역 알림 " .. (DB.zoneToast ~= false and "켬" or "끔"))

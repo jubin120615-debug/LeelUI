@@ -393,6 +393,27 @@ do
         end
     end
 
+    -- 체력바 자리 맞추기: 마지막 글줄 아래로 바가 들어갈 만큼(26) 툴팁을 늘려요
+    --   (게임이 툴팁 높이를 다시 계산해도 매 프레임 다시 맞춰서, 짧은 툴팁 줄이 바에 가리지 않게)
+    local function FitBar()
+        pcall(function()
+            local tt = GameTooltip
+            local n = tt:NumLines()
+            if type(n) ~= "number" or (issecretvalue and issecretvalue(n)) then return end
+            local last
+            for i = n, 1, -1 do
+                local l = _G["GameTooltipTextLeft" .. i]
+                if l and l:IsShown() then last = l; break end
+            end
+            if not last then return end
+            local lb, tb, h = last:GetBottom(), tt:GetBottom(), tt:GetHeight()
+            if not (lb and tb and h) then return end
+            if issecretvalue and (issecretvalue(lb) or issecretvalue(tb) or issecretvalue(h)) then return end
+            local room = lb - tb
+            if room < 25 then tt:SetHeight(h + (26 - room)) end
+        end)
+    end
+
     -- 체력바: 툴팁 아래 얇은 알약
     local function SkinStatusBar()
         local sb = _G.GameTooltipStatusBar
@@ -411,37 +432,33 @@ do
         -- 툴팁 안쪽 아래에 넣어요 (자리는 툴팁에 빈 줄 2개를 더해서 마련)
         local function Place()
             sb:ClearAllPoints()
-            sb:SetPoint("BOTTOMLEFT", GameTooltip, "BOTTOMLEFT", 12, 22)
-            sb:SetPoint("BOTTOMRIGHT", GameTooltip, "BOTTOMRIGHT", -12, 22)
+            sb:SetPoint("BOTTOMLEFT", GameTooltip, "BOTTOMLEFT", 12, 12)
+            sb:SetPoint("BOTTOMRIGHT", GameTooltip, "BOTTOMRIGHT", -52, 12)
             sb:SetHeight(8)
         end
         Place()
         hooksecurefunc(sb, "SetPoint", function() if not sb.leelPlacing then sb.leelPlacing = true; Place(); sb.leelPlacing = false end end)
-        sb.leelL = ns.Font(sb, 11, C.tx2); sb.leelL:SetPoint("TOPLEFT", sb, "BOTTOMLEFT", 0, -3); sb.leelL:SetText("체력")
-        sb.leelR = ns.Num(sb, 12, C.accHi); sb.leelR:SetPoint("TOPRIGHT", sb, "BOTTOMRIGHT", 0, -2)
+        -- "체력" 글씨는 빼고, % 숫자만 바 오른쪽 끝에
+        sb.leelR = ns.Num(sb, 12, C.accHi); sb.leelR:SetPoint("LEFT", sb, "RIGHT", 8, 0)
         local acc = 0
         sb:HookScript("OnUpdate", function(self, el)
+            FitBar()
             acc = acc + el
             if acc < 0.2 then return end
             acc = 0
-            local txt = ""
+            -- 숨겨진 체력 값도 게임 API(UnitHealthPercent)로 % 를 그려요
+            local unit
             pcall(function()
-                local _, unit = GameTooltip:GetUnit()
-                unit = unit or "mouseover"
-                local h, m = UnitHealth(unit), UnitHealthMax(unit)
-                if m and m > 0 then
-                    txt = ("%d%%  ·  %s"):format(math.floor(h / m * 100 + 0.5), BreakUpLargeNumbers and BreakUpLargeNumbers(h) or h)
-                end
+                local _, u = GameTooltip:GetUnit()
+                if type(u) == "string" and not (issecretvalue and issecretvalue(u)) then unit = u end
             end)
-            -- 게임이 체력 숫자를 숨기면: 바가 차 있는 길이로 % 만
-            if txt == "" then
-                pcall(function()
-                    local tex, w = self:GetStatusBarTexture(), self:GetWidth()
-                    local fw = tex and tex:GetWidth()
-                    if w and w > 0 and fw then txt = ("%d%%"):format(math.floor(math.min(1, fw / w) * 100 + 0.5)) end
-                end)
+            if not unit and UnitExists("mouseover") then unit = "mouseover" end
+            if not unit then self.leelR:SetText(""); return end
+            local h, m
+            pcall(function() h = UnitHealth(unit); m = UnitHealthMax(unit) end)
+            if not pcall(ns.HealthPercentText, self.leelR, unit, h, m) then
+                self.leelR:SetText("")
             end
-            self.leelR:SetText(txt)
         end)
         local m = sb:CreateMaskTexture()
         m:SetTexture(ns.MEDIA .. "pill32", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
@@ -604,11 +621,7 @@ do
                 if not (sb and sb:IsShown()) then return end
                 local ok, _, unit = pcall(self.GetUnit, self)
                 if not (ok and unit) then return end
-                pcall(function()
-                    local h = self:GetHeight()
-                    if issecretvalue and issecretvalue(h) then return end
-                    self:SetHeight(h + 26)
-                end)
+                FitBar()
             end)
         end
     end)

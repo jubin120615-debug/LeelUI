@@ -140,6 +140,10 @@ local items = {}      -- [frame] = 기둥 단추
 local unread = {}     -- [frame] = 새 글 수
 local whisper = {}    -- [frame] = 귓말 왔음
 local pending = 0     -- 지금 창에서 위로 올려 볼 때 쌓인 새 글
+-- 작은 기둥 (2안): 창이 낮아 탭이 다 안 들어가면 탭 · 아래 단추를 아이콘만 남은 작은 칸으로
+local small = false
+local FULL_H, SMALL_W, SMALL_H = RAIL - 10, 32, 30
+local bottomBtns = {}
 
 -- 기둥 그림: 탭 이름으로
 local function IconFor(f)
@@ -153,13 +157,24 @@ end
 
 -- 머리줄 채널 칩: 이 탭이 받는 글 종류
 local CHIPS = {
-    { key = "CHANNEL", tex = "cc_general" },
-    { key = "GUILD", tex = "cc_guild" },
-    { key = "PARTY", tex = "cc_party" },
-    { key = "RAID", tex = "cc_raid" },
-    { key = "WHISPER", tex = "cc_whisper" },
+    { key = "CHANNEL", name = "공개", col = { 0.910, 0.725, 0.541 } },
+    { key = "GUILD", name = "길드", col = { 0.561, 0.863, 0.612 } },
+    { key = "PARTY", name = "파티", col = { 0.624, 0.737, 0.957 } },
+    { key = "RAID", name = "공대", col = { 0.957, 0.627, 0.549 } },
+    { key = "WHISPER", name = "귓말", col = { 0.929, 0.627, 0.839 } },
 }
 local chipPool = {}
+local function HeadChip(n)
+    local c = chipPool[n]
+    if c then return c end
+    c = {}
+    c.dot = head:CreateTexture(nil, "ARTWORK")
+    c.dot:SetTexture(ns.MEDIA .. "circle"); c.dot:SetSize(7, 7)
+    c.text = ns.Font(head, 12, C.tx)
+    c.text:SetShadowOffset(1, -1); c.text:SetShadowColor(0, 0, 0, 0.8)
+    chipPool[n] = c
+    return c
+end
 HeadChips = function(f)
     if not head then return end
     local has = {}
@@ -167,20 +182,28 @@ HeadChips = function(f)
         for _, t in ipairs(f.messageTypeList or {}) do has[t] = true end
         if f.channelList and #f.channelList > 0 then has.CHANNEL = true end
     end)
-    local x, n = head.title:GetStringWidth() + 20, 0
-    for _, c in ipairs(CHIPS) do
-        if has[c.key] then
+    local x, n = 0, 0
+    pcall(function() x = head.title:GetStringWidth() end)
+    if type(x) ~= "number" or (issecretvalue and issecretvalue(x)) then x = 30 end
+    x = x + 22
+    for _, d in ipairs(CHIPS) do
+        if has[d.key] then
             n = n + 1
-            local t = chipPool[n] or head:CreateTexture(nil, "ARTWORK")
-            chipPool[n] = t
-            t:SetTexture(ns.MEDIA .. c.tex)
-            t:SetSize(32, 16)
-            t:ClearAllPoints(); t:SetPoint("LEFT", head, "LEFT", x, -1)
-            t:Show()
-            x = x + 35
+            local c = HeadChip(n)
+            c.dot:SetVertexColor(d.col[1], d.col[2], d.col[3], 1)
+            c.dot:ClearAllPoints(); c.dot:SetPoint("LEFT", head, "LEFT", x, -1)
+            c.text:SetText(d.name)
+            c.text:ClearAllPoints(); c.text:SetPoint("LEFT", c.dot, "RIGHT", 4, 0)
+            c.dot:Show(); c.text:Show()
+            local w = 26
+            pcall(function()
+                local tw = c.text:GetStringWidth()
+                if type(tw) == "number" and not (issecretvalue and issecretvalue(tw)) then w = tw end
+            end)
+            x = x + 7 + 4 + w + 11
         end
     end
-    for i = n + 1, #chipPool do chipPool[i]:Hide() end
+    for i = n + 1, #chipPool do chipPool[i].dot:Hide(); chipPool[i].text:Hide() end
 end
 
 local function RailItem(i)
@@ -253,13 +276,35 @@ local function PaintRail()
     if not rail then return end
     local sel = Selected()
     local list = Docked()
+    -- 이 탭 수로 큰 칸이 들어가는지: 내가 정한 창 높이 기준으로 판단
+    do
+        local have = rail:GetHeight() or 0
+        local extra = DB().autoGrow or 0
+        local base = have - extra
+        local fullNeed = PAD + #list * (FULL_H + 8) + 30 + 10 + (RAIL - 12 + 8) * 3 + 8
+        local want = base > 0 and base < fullNeed
+        if want ~= small then
+            small = want
+            for _, btn in ipairs(bottomBtns) do if btn.leelPin then btn.leelPin() end end
+        end
+    end
     local y = -PAD
     for i, f in ipairs(list) do
         local b = RailItem(i)
         b.frame = f
         b:ClearAllPoints()
         b:SetPoint("TOP", rail, "TOP", 2, y)
-        y = y - (RAIL - 10) - 8
+        if small then
+            b:SetSize(SMALL_W, SMALL_H)
+            b.icon:ClearAllPoints(); b.icon:SetPoint("CENTER", 0, 0); b.icon:SetSize(16, 16)
+            b.text:Hide(); b.bar:SetHeight(14)
+            y = y - SMALL_H - 4
+        else
+            b:SetSize(FULL_H, FULL_H)
+            b.icon:ClearAllPoints(); b.icon:SetPoint("TOP", 0, -6); b.icon:SetSize(17, 17)
+            b.text:Show(); b.bar:SetHeight(18)
+            y = y - FULL_H - 8
+        end
         b.text:SetText(Short(TabName(f)))
         b.icon:SetTexture(ns.MEDIA .. IconFor(f))
         local on = f == sel
@@ -286,6 +331,7 @@ local function PaintRail()
     if rail.plus then
         rail.plus:ClearAllPoints()
         rail.plus:SetPoint("TOP", rail, "TOP", 2, y)
+        rail.plus:SetSize(small and SMALL_W or (RAIL - 14), small and 22 or 30)
     end
     -- 탭이 늘어 기둥 아래 단추(친구 · 음성 · 메뉴)와 겹치면 채팅창을 위로 늘리고,
     -- 탭이 줄면 늘렸던 만큼 다시 줄여요 (아래 끝은 그대로, 내가 정한 크기보다 작아지진 않아요)
@@ -297,7 +343,8 @@ local function PaintRail()
             local extra = db.autoGrow or 0
             if extra > H - 60 then extra = 0 end
             local base = H - extra                          -- 내가 정한 크기
-            local need = -y + 30 + 10 + (RAIL - 12 + 8) * 3 + 8
+            local need = small and (-y + 22 + 6 + (SMALL_H + 4) * 3 + 6)
+                                or (-y + 30 + 10 + (RAIL - 12 + 8) * 3 + 8)
             local needH = need - (have - H)                 -- 단추가 안 겹치는 채팅창 높이
             local target = math.max(base, needH)
             db.autoGrow = target - base
@@ -407,8 +454,9 @@ local function Build()
     -- 메뉴·음성 단추는 기둥 아래로
     -- 메뉴·음성·친구 단추: 기둥 단추와 같은 둥근 네모 + 분홍 선 아이콘 (A안). 누르면 하는 일은 그대로
     local SZ = RAIL - 12
-    local function Skin(btn, icon, y, tip)
+    local function Skin(btn, icon, k, tip)
         if not btn then return end
+        bottomBtns[#bottomBtns + 1] = btn
         -- 블리자드가 다시 옮기면(이용 시간 알림 · 토스트 등) 기둥 자리로 돌려놔요
         local function Pin()
             if btn.leelPinning then return end
@@ -416,12 +464,17 @@ local function Build()
             pcall(function()
                 if btn:GetParent() ~= rail then btn:SetParent(rail) end
                 btn:ClearAllPoints()
-                btn:SetPoint("BOTTOM", rail, "BOTTOM", 1, y)
-                btn:SetScale(1)
-                btn:SetSize(SZ, SZ)
+                if small then
+                    btn:SetPoint("BOTTOM", rail, "BOTTOM", 1, 6 + (SMALL_H + 4) * k)
+                    btn:SetScale(1); btn:SetSize(SMALL_W, SMALL_H)
+                else
+                    btn:SetPoint("BOTTOM", rail, "BOTTOM", 1, 8 + (SZ + 8) * k)
+                    btn:SetScale(1); btn:SetSize(SZ, SZ)
+                end
             end)
             btn.leelPinning = false
         end
+        btn.leelPin = Pin
         if not btn.leelPinHooked then
             btn.leelPinHooked = true
             hooksecurefunc(btn, "SetPoint", function() if not btn.leelPinning then C_Timer.After(0, Pin) end end)
@@ -455,10 +508,10 @@ local function Build()
             btn.leelIcon, btn.leelFill = ic, fill
         end)
     end
-    Skin(_G.ChatFrameMenuButton, "ci_emote", 8)
-    Skin(_G.ChatFrameChannelButton, "ci_voice", 8 + SZ + 8)
+    Skin(_G.ChatFrameMenuButton, "ci_emote", 0)
+    Skin(_G.ChatFrameChannelButton, "ci_voice", 1)
     local qj = _G.QuickJoinToastButton
-    Skin(qj, "ci_social", 8 + (SZ + 8) * 2)
+    Skin(qj, "ci_social", 2)
     -- 친구 접속 수: 오른쪽 위 빨간 숫자 알약
     if qj and qj.FriendCount then
         pcall(function()
@@ -614,6 +667,53 @@ local function Apply()
     PaintRail()
 end
 
+----------------------------------------------------------------------
+-- 떨어져 나온 탭 다시 붙이기: 르엘 기둥이 탭을 대신하니까, 밖에 떠 있는 채팅 창은 기둥으로 돌려요
+--   (허브 "탭 따로 띄우기 허용"을 켜면 그대로 둬요)
+----------------------------------------------------------------------
+local function Redock()
+    if DB().allowFloat or InCombatLockdown() or not FCF_DockFrame then return end
+    local dock = _G.GENERAL_CHAT_DOCK
+    for i = 2, (NUM_CHAT_WINDOWS or 10) do
+        local f = _G["ChatFrame" .. i]
+        if f and f:IsShown() and not f.isDocked and not f.isTemporary then
+            local n = (dock and dock.DOCKED_CHAT_FRAMES and #dock.DOCKED_CHAT_FRAMES or 1) + 1
+            pcall(FCF_DockFrame, f, n, false)
+        end
+    end
+end
+ns.ChatRedock = Redock
+
+-- 채팅창 판(왼쪽 기둥 · 머리줄 · 입력줄 포함)이 화면 밖으로 안 나가게
+local function ClampInsets()
+    local f = ChatFrame1
+    if not f or f.leelClamping then return end
+    f.leelClamping = true
+    pcall(f.SetClampRectInsets, f, -(RAIL + PAD + 4), PAD, HEAD + PAD, -(EDIT + PAD + 10))
+    f.leelClamping = false
+end
+local function KeepOnScreen()
+    if not plate or InCombatLockdown() then return end
+    local l, r, t, b = plate:GetLeft(), plate:GetRight(), plate:GetTop(), plate:GetBottom()
+    local W, H = UIParent:GetWidth(), UIParent:GetHeight()
+    if not (l and r and t and b and W and H) then return end
+    local dx, dy = 0, 0
+    if l < 0 then dx = -l elseif r > W then dx = W - r end
+    if b < 0 then dy = -b elseif t > H then dy = H - t end
+    if math.abs(dx) < 0.5 and math.abs(dy) < 0.5 then return end
+    local f = ChatFrame1
+    local fl, fb = f:GetLeft(), f:GetBottom()
+    if not (fl and fb) then return end
+    pcall(function()
+        f:ClearAllPoints()
+        f:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", math.floor(fl + dx + 0.5), math.floor(fb + dy + 0.5))
+        if f.SetUserPlaced then f:SetUserPlaced(true) end
+        FCF_SavePositionAndDimensions(f)
+        if DB().pos then DB().pos[1] = math.floor(fl + dx + 0.5); DB().pos[2] = math.floor(fb + dy + 0.5) end
+    end)
+end
+ns.ChatKeepOnScreen = KeepOnScreen
+
 local function Init()
     if not ns.db or DB().on == false then return end
     if plate then return end
@@ -632,6 +732,15 @@ local function Init()
     DB().placed = true
     Build()
     Apply()
+    ClampInsets()
+    if ChatFrame1.SetClampRectInsets then
+        hooksecurefunc(ChatFrame1, "SetClampRectInsets", function() C_Timer.After(0, ClampInsets) end)
+    end
+    Redock()
+    C_Timer.After(2, function() Redock(); KeepOnScreen() end)
+    -- 탭을 끌다 놓으면(떨어져 나오면) 바로 다시 붙여요
+    if FCF_StopDragging then hooksecurefunc("FCF_StopDragging", function() C_Timer.After(0.1, Redock) end) end
+    if FCF_UndockWindow then hooksecurefunc("FCF_UndockWindow", function() C_Timer.After(0.1, Redock) end) end
     ns:SetChatAlpha(DB().alpha or 0)
     if FCFDock_SelectWindow then hooksecurefunc("FCFDock_SelectWindow", function() pending = 0; PaintRail() end) end
     if FCFDock_UpdateTabs then hooksecurefunc("FCFDock_UpdateTabs", function() C_Timer.After(0, Apply) end) end
@@ -729,6 +838,7 @@ function ns.ChatStartMove()
 end
 function ns.ChatStopMove()
     pcall(ChatFrame1.StopMovingOrSizing, ChatFrame1)
+    if ns.ChatKeepOnScreen then ns.ChatKeepOnScreen() end
     SavePos()
 end
 
@@ -780,6 +890,7 @@ function ns:SetChatMoveMode(on)
             pcall(ChatFrame1.StopMovingOrSizing, ChatFrame1)
             DB().autoGrow = 0          -- 직접 정한 크기를 새 기준으로
             SavePos()
+            C_Timer.After(0, function() pcall(PaintRail) end)   -- 낮아졌으면 작은 기둥으로
         end)
     end
     if mover then mover:SetShown(on and true or false) end
@@ -794,7 +905,7 @@ boot:SetScript("OnEvent", function(_, e)
     if e == "PLAYER_LOGOUT" then pcall(SaveGeo) return end
     if e == "PLAYER_LOGIN" then
         C_Timer.After(1, function() pcall(Init); pcall(ApplyPos) end)
-        C_Timer.After(4, function() pcall(ApplyPos) end)    -- 화면 편집 배치가 늦게 덮어써도 다시
+        C_Timer.After(4, function() pcall(ApplyPos); pcall(KeepOnScreen) end)    -- 화면 편집 배치가 늦게 덮어써도 다시
         return
     end
     if ns.db and DB().on ~= false then C_Timer.After(0.2, function() pcall(ApplyPos) end) end

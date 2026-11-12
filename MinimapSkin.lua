@@ -582,6 +582,26 @@ local function Keep(btn)
     hooksecurefunc(btn, "Show", function(self) if ns.db and ns.db.mmCollect ~= false then self:Hide() end end)
 end
 
+-- 목록에 이미 같은 애드온이 있는지 (애드온이 스스로 넣은 것과 겹치지 않게)
+--   "Leatrix Maps" = "Leatrix_Maps" 처럼 띄어쓰기 · 밑줄 · 색 코드는 무시하고 비교
+local function NormName(t)
+    t = tostring(t or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    return (t:lower():gsub("[%s_%-%.]", ""))
+end
+local function InCompartment(comp, label)
+    local want = NormName(label)
+    if want == "" then return false end
+    local list = comp.registeredAddons
+    if type(list) ~= "table" then return false end
+    for _, d in ipairs(list) do
+        local have = type(d) == "table" and NormName(d.text) or ""
+        if have ~= "" and (have == want or (#want >= 5 and #have >= 5 and (have:find(want, 1, true) or want:find(have, 1, true)))) then
+            return true
+        end
+    end
+    return false
+end
+
 local function Collect()
     if not (ns.db and ns.db.mmCollect ~= false) then return end
     local comp = _G.AddonCompartmentFrame
@@ -593,7 +613,8 @@ local function Collect()
             if not collected[name] then
                 collected[name] = true
                 -- 르엘 UI는 이미 목록에 따로 들어 있음 (겹치지 않게 숨기기만)
-                if name ~= "LeelUI" and Icon.AddButtonToCompartment and not (Icon.IsButtonInCompartment and Icon:IsButtonInCompartment(name)) then
+                if name ~= "LeelUI" and Icon.AddButtonToCompartment and not (Icon.IsButtonInCompartment and Icon:IsButtonInCompartment(name))
+                   and not InCompartment(comp, name) then
                     pcall(Icon.AddButtonToCompartment, Icon, name)
                 end
                 Keep(btn)
@@ -612,7 +633,7 @@ local function Collect()
                 local tex = icon and icon.GetTexture and icon:GetTexture()
                 local label = name:gsub("MinimapButton$", ""):gsub("Minimap$", ""):gsub("Button$", "")
                 if name == "ForgLevelingMinimapButton" then label = "르엘 길잡이" end
-                pcall(comp.RegisterAddon, comp, {
+                if not InCompartment(comp, label) then pcall(comp.RegisterAddon, comp, {
                     text = label, icon = tex or 134400, notCheckable = true, registerForAnyClick = true,
                     func = function(_, data)
                         local f = c:GetScript("OnClick")
@@ -622,7 +643,7 @@ local function Collect()
                         local f = c:GetScript("OnEnter"); if f then pcall(f, c) end
                     end,
                     funcOnLeave = function() GameTooltip:Hide() end,
-                })
+                }) end
                 Keep(c)
             end
         end

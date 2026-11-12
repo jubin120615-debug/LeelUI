@@ -218,6 +218,11 @@ local MODULES = {
             { t = "slider", label = "배경 진하기", min = 0, max = 100,
               get = function() return (ns.ChatDB and ns.ChatDB().alpha) or 0 end,
               set = function(v) if ns.SetChatAlpha then ns:SetChatAlpha(v) end end },
+            { t = "toggle", label = "탭 따로 띄우기 허용", hint = "끄면 채팅창에서 떨어져 나온 탭을 기둥으로 다시 붙여요",
+              get = function() return ns.ChatDB and ns.ChatDB().allowFloat and true or false end,
+              set = function(v) if ns.ChatDB then ns.ChatDB().allowFloat = v and true or nil; if not v and ns.ChatRedock then ns.ChatRedock() end end end },
+            { t = "button", label = "떨어진 탭 다시 붙이기",
+              run = function() if ns.ChatRedock then local a = ns.ChatDB().allowFloat; ns.ChatDB().allowFloat = nil; ns.ChatRedock(); ns.ChatDB().allowFloat = a end end },
         },
     },
     {
@@ -310,6 +315,10 @@ local MODULES = {
             { t = "toggle", label = "지도 · 미니맵에 길 그리기", hint = "따라가는 중일 때 분홍 점선과 번호",
               get = function() return GuideDB().mapLines ~= false end,
               set = function(v) if ForgLevelingDB then ForgLevelingDB.mapLines = v and true or false end end },
+            { t = "toggle", label = "퀘스트 소리", hint = "목표 참 \"또롱\" · 퀘 완료 깡총 오르골 · 새 퀘/근처 반납 \"띠링?\"",
+              get = function() return not GuideDB().sndOff end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.sndOff = (not v) or nil end end },
+            { t = "button", label = "퀘스트 소리 들어 보기", cmd = "소리" },
             { t = "button", label = "창 자리 처음대로", cmd = "초기화" },
         },
     },
@@ -1015,6 +1024,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.17", "퀘스트 목표 달성 알림 · 당근 링", "채팅 탭 많아도 작은 기둥" },
     { "1.3.16", "장비 비교 토끼 (시험 중)", "정예 · 던전 퀘 조심 표시" },
     { "1.3.15", "퀘스트 물건 멀리서도 반짝", "새 지역 알림을 Leel Quest 띠로" },
     { "1.3.14", "르엘 퀘스트 판 · Leel Quest", "퀘템 알림 · 채팅창 직접 옮기기" },
