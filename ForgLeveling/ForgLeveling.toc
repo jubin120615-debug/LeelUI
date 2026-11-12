@@ -1,5 +1,5 @@
 ## Interface: 16001
-## Title: |cfff2b3c2르엘|r 퀘스트 판
+## Title: |cfff2b3c2Leel|r Quest
 ## Notes: 내가 받은 퀘스트로 오늘 할 길을 짜고 따라가요. 다른 애드온 필요 없음. /퀘판 · /forg
 ## Author: 슈엘
 ## Version: 5.0.0

@@ -401,7 +401,11 @@ local function Judge(link, data)
     res.loss = losses[1] and losses[1].k
     res.unused = unused[1] and unused[1].k
     local base = math.max(math.abs(curS), 4)
-    if math.abs(res.diff) < math.max(1.5, base * 0.05) then res.kind = "same"
+    -- 한쪽으로만 바뀌면(늘기만 / 줄기만) 차이가 작아도 결론을 내요
+    --   (낮은 레벨 장비는 방어도만 다른 경우가 많아서 "비슷비슷해"로 나오던 문제)
+    if #gains > 0 and #losses == 0 then res.kind = "up"
+    elseif #losses > 0 and #gains == 0 then res.kind = "down"
+    elseif math.abs(res.diff) < math.max(1.5, base * 0.05) then res.kind = "same"
     elseif res.diff > 0 then res.kind = "up" else res.kind = "down" end
     return res
 end

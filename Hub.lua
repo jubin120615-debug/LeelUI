@@ -79,9 +79,12 @@ local function SetCastStyle(style)
     StaticPopup_Show("LEELUI_HUB_RELOAD")
 end
 
+-- 화면 퀘스트 목록이 Leel Quest 인지 (아니면 Leel Quest 설정은 흐리게)
+local function LQOn() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "guide" end
+
 local MODULES = {
     {
-        key = "LeelUI", title = "|cfff2b3c2르엘|r UI", sub = "위쪽 HUD, 미니맵", icon = "hb_ui",
+        key = "LeelUI", title = "위쪽 HUD", sub = "내 체력 · 대상 창", icon = "hb_ui",
         always = true,
         desc = "내 체력, 대상 창이 있는 위쪽 HUD. 허브도 여기에 들어 있어요.",
         items = {
@@ -210,7 +213,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_Chat", builtin = true, cat = "view",
-        title = "채팅창", sub = "채널 기둥 · 새 글 숫자", icon = "hb_apps",
+        title = "채팅창", sub = "채널 기둥 · 새 글 숫자", icon = "hb_chat",
         desc = "왼쪽 채널 기둥 + 분홍 테 카드. 다른 탭에 새 글이 오면 숫자, 귓말은 분홍 점.\n기둥 오른쪽 클릭 = 탭 메뉴, Shift + 끌기 = 채팅창 옮기기. 스위치는 다시 불러오기 후 적용.",
         onoff = { reload = true, get = function() return ns.ChatDB and ns.ChatDB().on end,
                   set = function(v) ns.ChatDB().on = v and true or false end },
@@ -241,7 +244,7 @@ local MODULES = {
     },
     {
         key = "LeelMap", title = "Leel Map", sub = "세계 지도", icon = "hb_map", slash = "LEELMAP",
-        desc = "작은 지도 창, 걸을 때 흐려짐, 좌표, 지역 레벨.",
+        desc = "작은 지도 창, 걸을 때 흐려짐, 좌표, 지역 레벨.\nOpenMap을 깔면 이어 붙인 지도에 Leel Quest 길이 이어져요.",
         items = {
             { t = "toggle", label = "걸을 때 흐리게", get = function() return MapDB().fade end, cmd = "흐림" },
             { t = "toggle", label = "좌표 줄", get = function() return MapDB().coords end, cmd = "좌표" },
@@ -305,21 +308,44 @@ local MODULES = {
         },
     },
     {
-        key = "ForgLeveling", title = "|cfff2b3c2르엘|r 퀘스트 판", sub = "내 퀘로 길 짜기", icon = "hb_guide", slash = "FORGLEVELING",
-        desc = "내가 받은 퀘스트 중 하고 싶은 것만 골라요.\n가까운 순서로 길을 짜고 작은 창이 방향을 알려줘요.\n/퀘판",
+        key = "ForgLeveling", title = "퀘스트 목록", sub = "Leel Quest · 셋 중 하나", icon = "hb_guide", slash = "FORGLEVELING",
+        always = true,
+        desc = "화면에 띄울 퀘스트 목록을 하나 골라요.\nLeel Quest는 받은 퀘 중 고른 것을 가까운 순서로 길 안내해요. /퀘판",
         items = {
-            { t = "button", label = "고르기 판 열기", cmd = "" },
-            { t = "toggle", label = "새 지역 알림", hint = "지역에 들어가면 할 퀘 수를 한 번 알려줘요",
+            { t = "header", label = "화면에 띄울 목록 (하나만)" },
+            { t = "toggle", label = "블리자드 기본",
+              get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "blizz" end,
+              set = function() ns:SetQuestTrackerMode("blizz") end },
+            { t = "toggle", label = "Questie 추적창  (다시 불러오기)",
+              get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "questie" end,
+              set = function() ns:SetQuestTrackerMode("questie") ; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+            { t = "toggle", label = "Leel Quest", hint = "고른 퀘를 가까운 순서로 길 안내 (당근 방향 · 거리)",
+              get = function() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "guide" end,
+              set = function() ns:SetQuestTrackerMode("guide") end },
+            { t = "header", label = function()
+                  return LQOn() and "Leel Quest" or "Leel Quest  |cff9d8a80· Leel Quest를 고르면 바꿀 수 있어요|r" end,
+              btn = { label = "창 자리 처음대로", dep = function() return LQOn() end,
+                      run = function() Slash("FORGLEVELING", "초기화") end } },
+            { t = "toggle", label = "새 지역 알림", dep = function() return LQOn() end,
               get = function() return GuideDB().zoneToast ~= false end,
               set = function(v) if ForgLevelingDB then ForgLevelingDB.zoneToast = v and true or false end end },
-            { t = "toggle", label = "지도 · 미니맵에 길 그리기", hint = "따라가는 중일 때 분홍 점선과 번호",
+            { t = "toggle", label = "지도 · 미니맵에 길 그리기", dep = function() return LQOn() end,
               get = function() return GuideDB().mapLines ~= false end,
               set = function(v) if ForgLevelingDB then ForgLevelingDB.mapLines = v and true or false end end },
-            { t = "toggle", label = "퀘스트 소리", hint = "목표 참 \"또롱\" · 퀘 완료 깡총 오르골 · 새 퀘/근처 반납 \"띠링?\"",
+            { t = "toggle", label = "퀘스트 소리", dep = function() return LQOn() end,
               get = function() return not GuideDB().sndOff end,
               set = function(v) if ForgLevelingDB then ForgLevelingDB.sndOff = (not v) or nil end end },
-            { t = "button", label = "퀘스트 소리 들어 보기", cmd = "소리" },
-            { t = "button", label = "창 자리 처음대로", cmd = "초기화" },
+            { t = "toggle", label = "완료된 퀘 반납을 길에 자동으로", dep = function() return LQOn() end,
+              get = function() return GuideDB().autoTurnin ~= false end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.autoTurnin = v and true or false end end },
+            { t = "toggle", label = "근처(150m) 반납을 길 앞으로", dep = function() return LQOn() end,
+              get = function() return GuideDB().autoNear ~= false end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.autoNear = v and true or false end end },
+            { t = "toggle", label = "같은 NPC 반납은 한 상자로", dep = function() return LQOn() end,
+              get = function() return GuideDB().groupTurnin ~= false end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.groupTurnin = v and true or false end end },
+            { t = "button", label = "고르기 판 열기", cmd = "", dep = function() return LQOn() end },
+            { t = "button", label = "소리 들어 보기", cmd = "소리", dep = function() return LQOn() end },
         },
     },
     {
@@ -341,7 +367,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_Quest", builtin = true, cat = "util",
-        title = "퀘스트 자동", sub = "받기, 완료", icon = "hb_quest",
+        title = "퀘스트 자동", sub = "받기, 완료", icon = "hb_bolt",
         desc = "말만 걸면 받고, 고를 보상이 없으면 완료까지. 보상 고르기는 직접.\nShift 누른 채 말 걸면 그때만 쉬어요.",
         onoff = { get = function() return ns.QuestDB().on end, set = function(v) ns.QuestDB().on = v end },
         items = {
@@ -368,7 +394,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_QTracker", builtin = true, always = true, cat = "util",
-        title = "퀘스트 목록", sub = "셋 중 하나만", icon = "hb_guide",
+        title = "퀘스트 목록", sub = "셋 중 하나만", icon = "hb_quest",
         desc = "화면에 띄울 퀘스트 목록을 하나만 골라요.\n고르지 않은 둘은 자동으로 숨겨요.",
         items = {
             { t = "toggle", label = "블리자드 기본", hint = "미니맵 아래 기본 퀘스트 목록",
@@ -384,7 +410,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_QItem", builtin = true, cat = "util",
-        title = "퀘템 알림", sub = "이 몹엔 이 템", icon = "hb_quest",
+        title = "퀘템 알림", sub = "이 몹엔 이 템", icon = "hb_bell",
         desc = "퀘스트에 써야 하는 템이 가방에 있고 지금 대상이 그 몹이면\n이름표 위와 대상 창 옆에 템이 떠요. 누르면 바로 써요.\n한 번 쓴 몹은 기억해서 다음부터 바로 알려줘요.",
         onoff = { get = function() return ns.QItemDB and ns.QItemDB().on end,
                   set = function(v) if ns.QItemDB then ns.QItemDB().on = v; if ns.QuestItemRefresh then ns.QuestItemRefresh() end end end },
@@ -394,7 +420,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_Gear", builtin = true, cat = "util",
-        title = "장비 비교", sub = "시험 중 · 바꿀까 말까", icon = "hb_bag",
+        title = "장비 비교", sub = "시험 중 · 바꿀까 말까", icon = "hb_scale",
         desc = "장비 툴팁 위에 토끼가 말풍선으로 '끼자 / 그대로 쓰자'를 알려줘요.\n못 끼는 장비(사슬 · 판금 · 레벨)는 바로 알려줘요.\n판정은 대략이에요. 비슷하면 '비슷비슷해'로 말해요.",
         onoff = { get = function() return ns.GearDB and ns.GearDB().on end,
                   set = function(v) if ns.GearDB then ns.GearDB().on = v end end },
@@ -429,7 +455,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_LootWin", builtin = true, cat = "util",
-        title = "줍기 창", sub = "분홍 줍기 창", icon = "hb_bag",
+        title = "줍기 창", sub = "분홍 줍기 창", icon = "hb_loot",
         desc = "루팅 창을 르엘 모양으로. 마우스 근처에 떠요.\n왼쪽 스위치를 끄면 게임 기본 창 (다시 불러오기 후 적용).",
         onoff = { reload = true, get = function() return ns.LootDB().win end,
                   set = function(v) ns.LootDB().win = v end },
@@ -441,7 +467,7 @@ local MODULES = {
     },
     {
         key = "LeelUI_Loot", builtin = true, cat = "util",
-        title = "르엘 줍기", sub = "시체 반짝 상자", icon = "hb_loot",
+        title = "르엘 줍기", sub = "시체 반짝 상자", icon = "hb_gift",
         needs = "LeelSpot", needsText = "상자는 Leel Spot이 그려요.\n애드온 목록에서 Leel Spot을 켜고 다시 불러오면 설정할 수 있어요.",
         desc = "주울 게 남은 가장 가까운 시체 하나에 반짝 상자.\n높이는 '미리보기'를 누르고 시체 앞에서 맞추면 쉬워요.",
         onoff = { get = function() return Loaded("LeelSpot") and SpotDB().loot ~= false end,
@@ -476,14 +502,33 @@ local MODULES = {
 ns.HUB_MODULES = MODULES
 
 -- 대분류 (알약). 애드온이 하나도 없는 분류는 안 보여요
+-- 하는 일 기준 5개. "설정 나누기"는 목록 대신 아래 줄 단추로 (cat = "none")
 local CATS = {
-    { key = "view",  label = "화면",       icon = "hb_c_view" },
-    { key = "map",   label = "지도/길",  icon = "hb_c_map" },
-    { key = "party", label = "파티/전투", icon = "hb_c_party" },
-    { key = "util",  label = "편의",       icon = "hb_c_util" },
+    { key = "view",  label = "화면",        icon = "hb_c_view" },
+    { key = "quest", label = "퀘스트",      icon = "hb_guide" },
+    { key = "map",   label = "지도",        icon = "hb_c_map" },
+    { key = "party", label = "파티·전투",   icon = "hb_c_party" },
+    { key = "item",  label = "가방·아이템", icon = "hb_c_util" },
 }
-local MOD_CAT = { LeelUI = "view", LeelMap = "map", LeelSpot = "map", ForgLeveling = "map", LeelMark = "party" }
-for _, m in ipairs(MODULES) do m.cat = m.cat or MOD_CAT[m.key] or "util" end
+local MOD_CAT = {
+    LeelUI = "view", LeelUI_ABar = "view", LeelUI_Cast = "view", LeelUI_Plates = "view", LeelUI_Tip = "view",
+    LeelUI_Chat = "view", LeelUI_Font = "view",
+    ForgLeveling = "quest", LeelUI_QTracker = "none", LeelUI_Quest = "quest", LeelUI_QItem = "quest", LeelSpot = "quest",
+    LeelMap = "map", LeelUI_Minimap = "map",
+    LeelUI_Party = "party", LeelMark = "party",
+    LeelUI_Bags = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
+    LeelUI_Profile = "none",
+}
+local MOD_ORDER = {}
+do
+    local order = { "LeelUI", "LeelUI_ABar", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Chat", "LeelUI_Font",
+        "ForgLeveling", "LeelUI_QTracker", "LeelUI_Quest", "LeelUI_QItem", "LeelSpot",
+        "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelMark",
+        "LeelUI_Bags", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
+    for i, k in ipairs(order) do MOD_ORDER[k] = i end
+end
+for i, m in ipairs(MODULES) do m.cat = MOD_CAT[m.key] or m.cat or "item"; m.ord = MOD_ORDER[m.key] or (100 + i) end
+table.sort(MODULES, function(a, b) return a.ord < b.ord end)
 local curCat = "view"
 
 ----------------------------------------------------------------------
@@ -800,9 +845,18 @@ ShowPane = function()
         return
     end
     if not MLoaded(m) then
-        pane.note:SetText(MEnabled(m)
-            and "켜 두었어요. 다시 불러오면 설정이 나타나요."
-            or "꺼져 있어요. 왼쪽 스위치로 켜고 다시 불러오면 설정할 수 있어요.")
+        local en = MEnabled(m)
+        pane.note:SetText(en and "켜 두었어요. 다시 불러오면 설정이 나타나요."
+            or (m.always and "애드온 목록에서 꺼져 있어요. 아래 단추로 켜고 다시 불러오세요."
+                or "꺼져 있어요. 왼쪽 스위치로 켜고 다시 불러오면 설정할 수 있어요."))
+        -- 왼쪽 스위치가 없는 줄(퀘스트 목록 = Leel Quest)은 여기서 켜고 다시 불러오기
+        if m.always and not m.builtin then
+            local b = PaneButton(pane, 1)
+            b:SetLabel(en and "다시 불러오기" or "켜고 다시 불러오기")
+            b:SetScript("OnClick", function() if not en then SetEnabled(m.key, true) end; ReloadUI() end)
+            b:ClearAllPoints(); b:SetPoint("TOPLEFT", pane.note, "BOTTOMLEFT", 0, -12)
+            b:Show()
+        end
         return
     end
 
@@ -820,8 +874,8 @@ ShowPane = function()
             local h = HeaderRow(pane, hi)
             h:ClearAllPoints()
             h:SetPoint("TOPLEFT", 18, y - 4); h:SetPoint("TOPRIGHT", -18, y - 4)
-            h.label:SetText(it.label)
-            if it.btn then
+            h.label:SetText(type(it.label) == "function" and it.label() or it.label)
+            if it.btn and not (it.btn.dep and not it.btn.dep()) then
                 h.btn.fs:SetText(it.btn.label)
                 h.btn:SetWidth(h.btn.fs:GetStringWidth() + 4)
                 h.btn:SetScript("OnClick", function() it.btn.run(); C_Timer.After(0.05, ShowPane) end)
@@ -939,6 +993,8 @@ ShowPane = function()
             bi = bi + 1
             local b = PaneButton(pane, bi)
             b:SetLabel(type(it.label) == "function" and it.label() or it.label)
+            local bon = not (it.dep and not it.dep())
+            b:SetEnabled(bon); b:SetAlpha(bon and 1 or 0.4)
             b:SetScript("OnClick", function()
                 if it.run then it.run() elseif it.cmd then Slash(m.slash, it.cmd) end
                 C_Timer.After(0.05, function() if hub:IsShown() then ShowPane() end end)
@@ -999,14 +1055,19 @@ local function PaintRail()
             row.tag:Hide(); row.sw:Show()
             row.sw:Set(m.onoff.get() and true or false, on)
         elseif m.always then
-            row.sw:Hide(); row.tag:SetText(on and "|cff3a1c24항상|r" or "항상"); row.tag:Show()
+            row.sw:Hide(); row.tag:Hide()          -- 끌 수 없는 기능: 스위치 자리를 비워 둬요
         elseif not exists then
             row.sw:Hide(); row.tag:SetText("없음"); row.tag:Show()
         else
             row.tag:Hide(); row.sw:Show()
             row.sw:Set(Enabled(m.key), on)
         end
-        row:SetAlpha(exists and 1 or 0.5)
+        -- 꺼 둔 기능은 아이콘 · 글씨를 흐리게 (고른 줄은 그대로)
+        local off = exists and not m.always and (
+            (m.onoff and not m.onoff.get()) or (not m.onoff and not m.builtin and not Enabled(m.key)))
+        row:SetAlpha(not exists and 0.5 or 1)
+        local dim = (off and not on) and 0.42 or 1
+        row.disc:SetAlpha(dim); row.name:SetAlpha(dim); row.sub:SetAlpha(dim)
     end
 end
 
@@ -1024,6 +1085,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.21", "Leel Quest 자동 길 · 반납 상자", "허브 정리 · OpenMap 맞춤" },
     { "1.3.20", "전투 중 오류 · 툴팁 수정", "던전 시체 반짝 상자" },
     { "1.3.19", "퀘스트 판 토끼 사용법 안내", "처음 열 때 한 번 저절로" },
     { "1.3.18", "채팅 탭 많으면 ··· 더보기", "미니맵 목록 중복 정리" },
@@ -1367,6 +1429,12 @@ local function Build()
     f.talkBtn:SetPoint("LEFT", hint, "RIGHT", 10, 0)
     f.moveBtn = ns.MakeButton(f, "이동 모드", true, function() ns:ToggleMoveMode(); Refresh() end, 96)
     f.moveBtn:SetPoint("BOTTOMRIGHT", -14, 11)
+    -- 설정 나누기: 기능이 아니라 허브 관리라서 아래 줄 단추로
+    f.shareBtn = ns.MakeButton(f, "설정 나누기", false, function()
+        for i, m in ipairs(MODULES) do if m.key == "LeelUI_Profile" then sel = i end end
+        Refresh()
+    end, 96)
+    f.shareBtn:SetPoint("RIGHT", f.moveBtn, "LEFT", -8, 0)
 
     f:SetScript("OnShow", function(self)
         local p = ns.db.hub.pos
@@ -1384,7 +1452,7 @@ function ns:ToggleHub(key)
     ns.db.hub = ns.db.hub or {}
     hub = hub or Build()
     if key then
-        for i, m in ipairs(MODULES) do if m.key == key then sel = i; curCat = m.cat end end
+        for i, m in ipairs(MODULES) do if m.key == key then sel = i; if m.cat ~= "none" then curCat = m.cat end end end
         hub:Show(); Refresh()
         return
     end

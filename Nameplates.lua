@@ -84,9 +84,14 @@ end
 
 -- 바·이름 색: 하찮음 회색 / 비선공 크림 / 선공 루비 레드
 local function PaintPlate(f)
+    if f.aura then f.aura:SetShown(f.trivial and true or false) end
     if f.trivial then
         ns.PaintFlat(f.hp, C.grey)
         f.name:SetTextColor(0.78, 0.80, 0.83)
+        if f.aura then
+            if f.calm then f.aura:SetVertexColor(1.00, 0.84, 0.36, 0.85)      -- 비선공: 노랑
+            else f.aura:SetVertexColor(1.00, 0.26, 0.32, 1.00) end           -- 선공: 빨강
+        end
     elseif f.calm then
         PaintCream(f.hp)
         f.name:SetTextColor(CREAM_NAME[1], CREAM_NAME[2], CREAM_NAME[3])
@@ -126,6 +131,12 @@ local function Build(plate)
     f.glow:SetBlendMode("ADD")
     f.glow:SetPoint("TOPLEFT", -6, 6); f.glow:SetPoint("BOTTOMRIGHT", 6, -6)
     f.glow:Hide()
+    -- 회색(레벨 낮은) 몹 아우라: 바는 회색, 둘레 빛으로 선공(빨강) · 비선공(노랑)
+    f.aura = f.hp:CreateTexture(nil, "BACKGROUND", nil, -3)
+    f.aura:SetTexture(ns.MEDIA .. "np_glow")          -- 가장자리가 흐려지는 빛 (부드럽게 번져요)
+    f.aura:SetBlendMode("ADD")
+    f.aura:SetPoint("TOPLEFT", -11, 11); f.aura:SetPoint("BOTTOMRIGHT", 11, -11)
+    f.aura:Hide()
     ns.PaintHealthRed(f.hp)
 
     f.pct = Outline(f.hp.over:CreateFontString(nil, "OVERLAY"), 13, ns.NUM)

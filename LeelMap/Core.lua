@@ -196,6 +196,7 @@ local function Skin()
     hooksecurefunc(wm, "OnMapChanged", UpdateHeader)
     UpdateHeader()
 
+
     -- 지도 그림 네 귀퉁이를 둥글게 (판 색 귀퉁이를 덮음) + 안쪽 얇은 테
     local sc = wm.ScrollContainer
     if sc then
@@ -591,6 +592,8 @@ local function CreateCoords()
 
     local t = 0
     coords:SetScript("OnUpdate", function(self, el)
+        -- OpenMap이 있으면 그쪽 좌표 줄을 써요 (이어 붙인 지도에서 우리 좌표는 맞지 않음)
+        if _G.OpenMapAPI then self:Hide() return end
         t = t + el
         if t < 0.05 then return end
         t = 0
@@ -783,6 +786,53 @@ local function WriteLeatrix()
     db.leatrixV = LEATRIX_V
 end
 
+----------------------------------------------------------------------
+-- OpenMap(이어 붙인 세계 지도, 따로 설치)을 같이 쓰면: 지도 기능만 쓰고 겹치는 것은 끔 (처음 한 번)
+--   친구·길드 위치(르엘 길드원 위치와 겹침), 내 위치 공유, 핀 공유, 처음 묻는 창들
+----------------------------------------------------------------------
+local OPENMAP_V = 2
+local OPENMAP_SET = {
+    friends = false, guild = false, friendsShare = false, shareAsked = true,
+    pinsShared = false, presetAsked = true, minimapButton = false,
+    mapButtons = false,   -- 지도 위 OpenMap 단추·즐겨찾기 줄 (설정 창 여는 곳)
+}
+local function OpenMapInstalled()
+    return C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("OpenMap")
+end
+-- 접속할 때마다 맞춰 두고(설정이 안 보이게), 처음 한 번만 "다시 불러오기"를 물어요
+local function TuneOpenMap()
+    if not OpenMapInstalled() then return false end
+    local w = type(OpenMapDB) == "table" and OpenMapDB.worldmap
+    if type(w) ~= "table" then return false end
+    for k, v in pairs(OPENMAP_SET) do w[k] = v end
+    if (db.openmapV or 0) >= OPENMAP_V then return false end
+    db.openmapV = OPENMAP_V
+    return true
+end
+
+-- 미니맵 애드온 목록(나침반 단추)에서 OpenMap 칸을 빼요 (설정 창 여는 곳이라)
+local function HideOpenMapEntry()
+    if not OpenMapInstalled() then return end
+    local comp = _G.AddonCompartmentFrame
+    local list = comp and comp.registeredAddons
+    if type(list) ~= "table" then return end
+    local changed = false
+    for i = #list, 1, -1 do
+        local d = list[i]
+        local t = type(d) == "table" and tostring(d.text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):lower() or ""
+        if t:find("openmap", 1, true) then table.remove(list, i); changed = true end
+    end
+    if changed and comp.UpdateDisplay then pcall(comp.UpdateDisplay, comp) end
+end
+
+StaticPopupDialogs["LEELMAP_OPENMAP"] = {
+    text = "|cfff2b3c2Leel Map|r\n\nOpenMap을 찾았어요.\n이어 붙인 지도는 그대로 쓰고, OpenMap 설정 단추와 르엘 UI와 겹치는 기능(친구·길드 위치, 위치 공유, 핀 공유)은 숨겼어요.\n\n지금 다시 불러올까요?",
+    button1 = "다시 불러오기",
+    button2 = "나중에",
+    OnAccept = function() ReloadUI() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
 StaticPopupDialogs["LEELMAP_LEATRIX"] = {
     text = "|cfff2b3c2Leel Map|r\n\nLeatrix Maps를 찾았어요.\n안 가 본 곳 밝히기(연분홍)를 켜고, 겹치는 기능은 Leel Map 쪽으로 맞출게요.\n\n지금 다시 불러올까요?",
     button1 = "다시 불러오기",
@@ -815,7 +865,9 @@ ev:SetScript("OnEvent", function(_, event, arg1)
     elseif event == "PLAYER_LOGIN" then
         ApplyCVars()
         Setup()
-        if LeatrixPending() then C_Timer.After(3, function() StaticPopup_Show("LEELMAP_LEATRIX") end) end
+        if LeatrixPending() then C_Timer.After(3, function() StaticPopup_Show("LEELMAP_LEATRIX") end)
+        elseif TuneOpenMap() then C_Timer.After(3, function() StaticPopup_Show("LEELMAP_OPENMAP") end) end
+        for _, t in ipairs({ 1, 4, 10 }) do C_Timer.After(t, HideOpenMapEntry) end
     elseif event == "PLAYER_LOGOUT" then
         WriteLeatrix()
     elseif event == "PLAYER_LEVEL_UP" then
@@ -848,6 +900,12 @@ SlashCmdList.LEELMAP = function(msg)
         db.levels = not db.levels
         UpdateHeader()
         Print("지역 레벨 표시 " .. (db.levels and "켬" or "끔"))
+    elseif cmd == "길드" or cmd == "guild" then
+        local G = _G.LeelMapGuild
+        if arg == "끔" or arg == "off" then LeelMapDB.gShare = false; if G then G.Send() end; Print("내 위치 길드에 알리기 끔")
+        elseif arg == "켬" or arg == "on" then LeelMapDB.gShare = true; if G then G.Send() end; Print("내 위치 길드에 알리기 켬")
+        elseif (arg == "시험" or arg == "test") and G then G.Test()
+        elseif G then G.List() end
     elseif cmd == "위치" or cmd == "reset" then
         db.pos = nil
         if WorldMapFrame and WorldMapFrame:IsShown() then HideUIPanel(WorldMapFrame) end
