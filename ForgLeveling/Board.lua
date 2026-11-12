@@ -1424,6 +1424,7 @@ local function FillGuide()
     RefreshBoard(); RefreshTracker()
 end
 
+local StartTour     -- 사용법 안내 (아래에서 만들어요)
 local function MakeBoard()
     if board then return board end
     board = CreateFrame("Frame", "LeelQuestBoard", UIParent)
@@ -1469,7 +1470,8 @@ local function MakeBoard()
     -- 가운데 위: 거르기 + 정렬
     local fx = 232
     local function place(b) b:SetPoint("TOPLEFT", board, "TOPLEFT", fx, -56); fx = fx + b:GetWidth() + 6 end
-    place(Toggle(nil, "쉬움만", function() return onlyEasy end, function() onlyEasy = not onlyEasy end))
+    board.fFirst = Toggle(nil, "쉬움만", function() return onlyEasy end, function() onlyEasy = not onlyEasy end)
+    place(board.fFirst)
     place(Toggle(nil, "혼자 가능", function() return onlySolo end, function() onlySolo = not onlySolo end))
     -- 토끼 추천: 고른 지역에서 forg.gg 레벨링 길에 나오는 퀘만 체크
     local rec = Toggle(nil, "토끼 추천", function() return false end, FillGuide)
@@ -1485,6 +1487,7 @@ local function MakeBoard()
     end)
     rec:HookScript("OnLeave", function() GameTooltip:Hide() end)
     place(rec)
+    board.fRec = rec
     local sx = -18
     local s2 = Toggle(nil, "경험치 순", function() return sortBy == "xp" end, function() sortBy = "xp" end)
     s2:SetPoint("TOPRIGHT", board, "TOPRIGHT", sx, -56); sx = sx - s2:GetWidth() - 6
@@ -1543,6 +1546,7 @@ local function MakeBoard()
     hov:SetScript("OnLeave", function() GameTooltip:Hide() end)
     board.order = Font(sum, 12, P.tx); board.order:SetPoint("TOPLEFT", 14, -66); board.order:SetPoint("RIGHT", -14, 0)
     board.order:SetJustifyH("LEFT"); board.order:SetSpacing(4)
+    board.sum = sum
     board.go = Button(sum, "이 길로 출발", true, Start, 120)
     board.go:SetPoint("BOTTOMLEFT", 14, 14)
     local clear = Button(sum, "모두 빼기", false, function()
@@ -1552,6 +1556,31 @@ local function MakeBoard()
     local legend = Font(sum, 10.5, DIM); legend:SetPoint("BOTTOMLEFT", 14, 50); legend:SetJustifyH("LEFT")
     legend:SetText(SRC_ICON.questie .. "Questie  " .. SRC_ICON.learned .. "잡던 곳  " .. SRC_ICON.game .. "게임 표시  " .. SRC_ICON.guide .. "길잡이 자료")
 
+    -- "?" 사용법 (C안): 토끼가 말풍선으로 하나씩 알려줘요. 처음 열면 한 번 저절로
+    local help = CreateFrame("Button", nil, board); help:SetSize(26, 26); help:SetPoint("RIGHT", board.cLog, "LEFT", -12, 0)
+    -- E안: 토끼 동그라미 + 노란 "?" 뱃지
+    local ho = help:CreateTexture(nil, "BACKGROUND"); ho:SetTexture(MEDIA .. "circle"); ho:SetPoint("TOPLEFT", -1.5, 1.5); ho:SetPoint("BOTTOMRIGHT", 1.5, -1.5); ho:SetVertexColor(0, 0, 0, 0.9)
+    local hb = help:CreateTexture(nil, "BORDER"); hb:SetTexture(MEDIA .. "circle"); hb:SetAllPoints(); hb:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 1)
+    local hi = help:CreateTexture(nil, "ARTWORK"); hi:SetTexture(MEDIA .. "bunny"); hi:SetAllPoints()
+    local badge = CreateFrame("Frame", nil, help); badge:SetSize(14, 14); badge:SetPoint("CENTER", help, "TOPRIGHT", -1, -1)
+    badge:SetFrameLevel(help:GetFrameLevel() + 2)
+    local bo2 = badge:CreateTexture(nil, "BACKGROUND"); bo2:SetTexture(MEDIA .. "circle"); bo2:SetPoint("TOPLEFT", -1.5, 1.5); bo2:SetPoint("BOTTOMRIGHT", 1.5, -1.5); bo2:SetVertexColor(0, 0, 0, 0.9)
+    local by = badge:CreateTexture(nil, "BORDER"); by:SetTexture(MEDIA .. "circle"); by:SetAllPoints(); by:SetVertexColor(1, 0.824, 0.478, 1)
+    help.fs = Font(badge, 11, P.ink); help.fs:SetPoint("CENTER", 0, 0); help.fs:SetText("?"); help.fs:SetShadowColor(0, 0, 0, 0)
+    local hh = help:CreateTexture(nil, "HIGHLIGHT"); hh:SetTexture(MEDIA .. "circle"); hh:SetAllPoints(); hh:SetVertexColor(1, 1, 1, 0.25); hh:SetBlendMode("ADD")
+    help:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetText("사용법"); GameTooltip:AddLine("토끼가 하나씩 알려줘요", 0.85, 0.85, 0.85); GameTooltip:Show()
+    end)
+    help:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    board.StartTour = function() if StartTour then StartTour() end end
+    help:SetScript("OnClick", function() board.StartTour() end)
+    board.help = help
+    board:HookScript("OnShow", function()
+        if not DB.helpSeen then
+            DB.helpSeen = true
+            C_Timer.After(0.4, function() if board:IsShown() then board.StartTour() end end)
+        end
+    end)
     board:SetScript("OnShow", function() board.map.mapID = nil; zoneSel = nil; board.offset = 0; ReadLog(); RefreshBoard() end)
     local acc = 0
     board:SetScript("OnUpdate", function(_, el)
@@ -1560,6 +1589,131 @@ local function MakeBoard()
     end)
     board:Hide()
     return board
+end
+
+----------------------------------------------------------------------
+-- 사용법 안내 (C안): 판을 어둡게 하고 한 곳만 밝혀서, 토끼가 말풍선으로 하나씩
+----------------------------------------------------------------------
+local TOUR = {
+    { "zones", "지역 고르기", "왼쪽에서 퀘를 할 지역을 눌러요.\n지금 있는 곳이 맨 위에 있어요. 숫자는 할 일 · 완료 수예요." },
+    { "list", "하고 싶은 퀘 체크", "네모를 눌러 체크하면 길에 들어가요.\n빨간 Lv은 어려운 퀘, \"정예\" · \"던전\"은 혼자 하기 힘들어요. X는 퀘 포기." },
+    { "filter", "고르기 힘들면 토끼 추천!", "\"토끼 추천\"을 누르면 쉬운 퀘부터, 가까운 것끼리 제가 골라 줄게요.\n\"쉬움만\" · \"혼자 가능\"으로 걸러 볼 수도 있어요." },
+    { "map", "지도에서 확인", "고른 퀘가 번호로 찍히고, 분홍 점선이 가는 순서예요.\n오른쪽 아래 \"조심할 퀘\"에 마우스를 올리면 위험한 퀘가 보여요." },
+    { "go", "출발!", "\"이 길로 출발\"을 누르면 Leel Quest 창이 당근으로 길을 알려줘요.\n목표를 다 채우면 소리로 알려 줄게요. 언제든 \"?\"로 다시 볼 수 있어요." },
+}
+local function MakeTour()
+    if board.tour then return board.tour end
+    local t = CreateFrame("Frame", nil, board)
+    t:SetAllPoints(board); t:SetFrameLevel(board:GetFrameLevel() + 60); t:EnableMouse(true)
+    t.dim = {}
+    for i = 1, 4 do
+        local d = t:CreateTexture(nil, "BACKGROUND"); d:SetTexture(WHITE); d:SetVertexColor(0.047, 0.031, 0.027, 0.78)
+        t.dim[i] = d
+    end
+    t.edge = {}
+    for i = 1, 4 do
+        local e = t:CreateTexture(nil, "BORDER"); e:SetTexture(WHITE); e:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 1)
+        t.edge[i] = e
+    end
+    -- 토끼
+    t.bun = CreateFrame("Frame", nil, t); t.bun:SetSize(74, 74)
+    local bo = t.bun:CreateTexture(nil, "BACKGROUND"); bo:SetTexture(MEDIA .. "circle"); bo:SetPoint("TOPLEFT", -2.5, 2.5); bo:SetPoint("BOTTOMRIGHT", 2.5, -2.5); bo:SetVertexColor(0, 0, 0, 0.9)
+    local bc = t.bun:CreateTexture(nil, "BORDER"); bc:SetTexture(MEDIA .. "circle"); bc:SetAllPoints(); bc:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 1)
+    local bi = t.bun:CreateTexture(nil, "ARTWORK"); bi:SetTexture(MEDIA .. "bunny"); bi:SetPoint("TOPLEFT", 6, -6); bi:SetPoint("BOTTOMRIGHT", -6, 6)
+    local ag = t.bun:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+    local tr = ag:CreateAnimation("Translation"); tr:SetOffset(0, 5); tr:SetDuration(0.7); tr:SetSmoothing("IN_OUT")
+    t.bunAnim = ag
+    -- 말풍선
+    local b = CreateFrame("Frame", nil, t); b:SetSize(360, 120)
+    Plate(b, 14, { 0.125, 0.094, 0.086, 0.98 }, { P.acc[1], P.acc[2], P.acc[3], 1 })
+    b.title = Font(b, 16, P.accHi); b.title:SetPoint("TOPLEFT", 16, -14); b.title:SetPoint("RIGHT", -16, 0); b.title:SetJustifyH("LEFT")
+    b.body = Font(b, 12.5, P.tx); b.body:SetPoint("TOPLEFT", b.title, "BOTTOMLEFT", 0, -7); b.body:SetPoint("RIGHT", -16, 0)
+    b.body:SetJustifyH("LEFT"); b.body:SetSpacing(3); b.body:SetWordWrap(true)
+    b.dots = {}
+    for i = 1, #TOUR do
+        local d = b:CreateTexture(nil, "ARTWORK"); d:SetTexture(MEDIA .. "circle"); d:SetSize(8, 8)
+        d:SetPoint("BOTTOMLEFT", 16 + (i - 1) * 13, 16)
+        b.dots[i] = d
+    end
+    b.next = Button(b, "다음", true, function() t.Go(t.step + 1) end, 56)
+    b.next:SetPoint("BOTTOMRIGHT", -12, 10)
+    b.prev = Button(b, "이전", false, function() t.Go(t.step - 1) end, 56)
+    b.prev:SetPoint("RIGHT", b.next, "LEFT", -6, 0)
+    b.skip = CreateFrame("Button", nil, b); b.skip:SetSize(60, 20); b.skip:SetPoint("RIGHT", b.prev, "LEFT", -6, 0)
+    b.skip.fs = Font(b.skip, 11.5, DIM); b.skip.fs:SetPoint("RIGHT", 0, 0); b.skip.fs:SetText("건너뛰기")
+    b.skip:SetScript("OnClick", function() t:Hide() end)
+    t.bub = b
+    t:SetScript("OnMouseUp", function(_, btn) if btn == "RightButton" then t:Hide() end end)
+    t:SetScript("OnHide", function() t.bunAnim:Stop() end)
+
+    local function Target(key)
+        if key == "zones" then return board.zones
+        elseif key == "list" then return board.list
+        elseif key == "filter" then return board.fFirst, board.fRec
+        elseif key == "map" then return board.map
+        elseif key == "go" then return board.sum end
+    end
+    function t.Go(i)
+        if i < 1 then i = 1 end
+        if i > #TOUR then t:Hide(); return end
+        t.step = i
+        local st = TOUR[i]
+        local a, a2 = Target(st[1])
+        local L0, T0 = board:GetLeft(), board:GetTop()
+        local W, H = board:GetWidth(), board:GetHeight()
+        local l, r, top, bot = 20, 200, 60, 200
+        if a and a:GetLeft() and L0 then
+            l, r = a:GetLeft() - L0, a:GetRight() - L0
+            top, bot = T0 - a:GetTop(), T0 - a:GetBottom()
+            if a2 and a2:GetLeft() then
+                r = math.max(r, a2:GetRight() - L0); bot = math.max(bot, T0 - a2:GetBottom())
+            end
+        end
+        local pad = 5
+        l, r, top, bot = math.max(0, l - pad), math.min(W, r + pad), math.max(0, top - pad), math.min(H, bot + pad)
+        local d = t.dim
+        d[1]:ClearAllPoints(); d[1]:SetPoint("TOPLEFT", t, "TOPLEFT", 0, 0); d[1]:SetPoint("BOTTOMRIGHT", t, "TOPRIGHT", 0, -top)
+        d[2]:ClearAllPoints(); d[2]:SetPoint("TOPLEFT", t, "TOPLEFT", 0, -bot); d[2]:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", 0, 0)
+        d[3]:ClearAllPoints(); d[3]:SetPoint("TOPLEFT", t, "TOPLEFT", 0, -top); d[3]:SetPoint("BOTTOMRIGHT", t, "TOPLEFT", l, -bot)
+        d[4]:ClearAllPoints(); d[4]:SetPoint("TOPLEFT", t, "TOPLEFT", r, -top); d[4]:SetPoint("BOTTOMRIGHT", t, "TOPRIGHT", 0, -bot)
+        local e = t.edge
+        e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", t, "TOPLEFT", l, -top); e[1]:SetSize(r - l, 2)
+        e[2]:ClearAllPoints(); e[2]:SetPoint("TOPLEFT", t, "TOPLEFT", l, -bot + 2); e[2]:SetSize(r - l, 2)
+        e[3]:ClearAllPoints(); e[3]:SetPoint("TOPLEFT", t, "TOPLEFT", l, -top); e[3]:SetSize(2, bot - top)
+        e[4]:ClearAllPoints(); e[4]:SetPoint("TOPLEFT", t, "TOPLEFT", r - 2, -top); e[4]:SetSize(2, bot - top)
+        -- 말풍선 글
+        b.title:SetText(st[2]); b.body:SetText(st[3])
+        local bh = 14 + 20 + 7 + math.ceil(b.body:GetStringHeight() or 40) + 48
+        b:SetHeight(math.max(118, bh))
+        for k, dt in ipairs(b.dots) do
+            if k == i then dt:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 1) else dt:SetVertexColor(0.35, 0.27, 0.26, 1) end
+        end
+        b.prev:SetShown(i > 1)
+        if b.next.SetLabel then b.next:SetLabel(i == #TOUR and "알겠어!" or "다음") end
+        -- 자리: 길쭉한 곳(왼쪽 지역 · 퀘 목록)은 옆에, 나머지는 아래(자리 없으면 위)에. 토끼는 말풍선 왼쪽
+        b:ClearAllPoints(); t.bun:ClearAllPoints()
+        local bw = b:GetWidth()
+        if bot - top > 300 then
+            local x = r + 96
+            if x + bw > W - 10 then x = l - bw - 20 end
+            b:SetPoint("TOPLEFT", t, "TOPLEFT", x, -(top + 60))
+        elseif H - bot > b:GetHeight() + 24 then
+            b:SetPoint("TOPLEFT", t, "TOPLEFT", math.max(96, math.min(W - bw - 16, l + 40)), -(bot + 16))
+        else
+            b:SetPoint("BOTTOMLEFT", t, "TOPLEFT", math.max(96, math.min(W - bw - 16, l + 40)), -(top - 16))
+        end
+        t.bun:SetPoint("RIGHT", b, "LEFT", -12, -10)
+        t.bunAnim:Play()
+    end
+    board.tour = t
+    t:Hide()
+    return t
+end
+StartTour = function()
+    if not board then return end
+    MakeTour()
+    board.tour:Show()
+    board.tour.Go(1)
 end
 
 local function ToggleBoard()
