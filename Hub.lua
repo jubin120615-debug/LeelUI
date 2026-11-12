@@ -384,6 +384,22 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_Gear", builtin = true, cat = "util",
+        title = "장비 비교", sub = "시험 중 · 바꿀까 말까", icon = "hb_bag",
+        desc = "장비 툴팁 위에 토끼가 말풍선으로 '끼자 / 그대로 쓰자'를 알려줘요.\n못 끼는 장비(사슬 · 판금 · 레벨)는 바로 알려줘요.\n판정은 대략이에요. 비슷하면 '비슷비슷해'로 말해요.",
+        onoff = { get = function() return ns.GearDB and ns.GearDB().on end,
+                  set = function(v) if ns.GearDB then ns.GearDB().on = v end end },
+        items = {
+            { t = "header", label = "비교 기준 역할" },
+            { t = "button", label = "자동 (특성 보고 짐작)", run = function() if ns.GearSetRole then ns.GearSetRole(nil) end end },
+            { t = "button", label = "탱커", run = function() if ns.GearSetRole then ns.GearSetRole("tank") end end },
+            { t = "button", label = "근접 딜", run = function() if ns.GearSetRole then ns.GearSetRole("melee") end end },
+            { t = "button", label = "원거리 딜", run = function() if ns.GearSetRole then ns.GearSetRole("ranged") end end },
+            { t = "button", label = "주문 딜", run = function() if ns.GearSetRole then ns.GearSetRole("caster") end end },
+            { t = "button", label = "힐러", run = function() if ns.GearSetRole then ns.GearSetRole("healer") end end },
+        },
+    },
+    {
         key = "LeelUI_Bags", builtin = true, cat = "util",
         title = "르엘 가방", sub = "통합 가방, 남은 칸", icon = "hb_bag",
         desc = "가방 5개를 분홍 창 하나로. 창 머리를 끌면 옮겨져요.",
@@ -999,6 +1015,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.16", "장비 비교 토끼 (시험 중)", "정예 · 던전 퀘 조심 표시" },
     { "1.3.15", "퀘스트 물건 멀리서도 반짝", "새 지역 알림을 Leel Quest 띠로" },
     { "1.3.14", "르엘 퀘스트 판 · Leel Quest", "퀘템 알림 · 채팅창 직접 옮기기" },
     { "1.3.13", "르엘 채팅창 · 새 글 숫자", "남의 몹 자물쇠 · 자동 징 무리만" },

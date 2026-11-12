@@ -197,6 +197,41 @@ local function RewardXP(id)
     if ok and type(xp) == "number" and xp > 0 then return xp end
 end
 
+-- 정예 · 던전 · 공격대 퀘 알아내기 (Questie가 고친 값 → 게임 값)
+local TAG_KIND = { [1] = "elite", [81] = "dungeon", [62] = "raid", [88] = "raid", [89] = "raid", [85] = "dungeon" }
+local TAG_NAME = { elite = "정예", dungeon = "던전", raid = "공격대" }
+local tagCache = {}
+local function QuestTag(id)
+    if not id then return end
+    if tagCache[id] ~= nil then return tagCache[id] or nil end
+    local tagID, tagName
+    local QL = _G.QuestieLoader
+    if QL and QL.ImportModule then
+        local ok, QDB = pcall(QL.ImportModule, QL, "QuestieDB")
+        if ok and type(QDB) == "table" and QDB.GetQuestTagInfo then
+            local ok2, a, b = pcall(QDB.GetQuestTagInfo, id)
+            if ok2 then tagID, tagName = a, b end
+        end
+    end
+    if not tagID then
+        if C_QuestLog and C_QuestLog.GetQuestTagInfo then
+            local ok, info = pcall(C_QuestLog.GetQuestTagInfo, id)
+            if ok and type(info) == "table" then tagID, tagName = info.tagID, info.tagName end
+        elseif GetQuestTagInfo then
+            local ok, a, b = pcall(GetQuestTagInfo, id)
+            if ok then tagID, tagName = a, b end
+        end
+    end
+    local kind = tagID and TAG_KIND[tagID]
+    if not kind and type(tagName) == "string" then
+        if tagName:find("정예") or tagName:find("Elite") or tagName:find("파티") or tagName:find("Group") then kind = "elite"
+        elseif tagName:find("던전") or tagName:find("Dungeon") then kind = "dungeon"
+        elseif tagName:find("공격대") or tagName:find("Raid") then kind = "raid" end
+    end
+    if tagID ~= nil or tagName ~= nil then tagCache[id] = kind or false end   -- 아직 모르면 다음에 다시
+    return kind
+end
+
 local function ReadLog()
     local list, header = {}, nil
     local n = GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
@@ -228,7 +263,7 @@ local function ReadLog()
                 end
                 local failed = isComplete == -1
                 list[#list + 1] = {
-                    id = id, title = title, key = Norm(title), level = level or 0, group = tonumber(group) or 0,
+                    id = id, title = title, key = Norm(title), level = level or 0, group = tonumber(group) or 0, tag = QuestTag(id),
                     zone = header, done = done and not failed, failed = failed, objs = objs, xp = RewardXP(id), index = i,
                 }
             end
@@ -409,6 +444,7 @@ local function Diff(e)
     local me = UnitLevel("player") or 1
     local d = lv - me
     local txt = lv > 0 and ("Lv " .. lv) or "Lv ?"
+    if e.tag then return txt .. " · " .. (TAG_NAME[e.tag] or "정예"), "hard" end
     if e.group and e.group > 1 then return txt .. " · 파티", "hard" end
     if d >= 3 then return txt, "hard" end
     if d >= 1 then return txt, "mid" end
@@ -440,7 +476,21 @@ local function Sel() CDB.sel = CDB.sel or {}; return CDB.sel end
 
 local NEAR = 4      -- 지도 % : 이만큼 가까운 보고는 가는 길에 들러요
 local BuildOrderNN
-local function BuildOrder()
+-- 정예 · 던전 · 파티 퀘(아직 안 한 것)는 길 맨 뒤로: 혼자 가다 죽지 않게
+local function PartyLast(order)
+    local solo, party = {}, {}
+    for _, id in ipairs(order) do
+        local e = byId[id]
+        if e and not e.done and (e.tag or (e.group and e.group > 1)) then party[#party + 1] = id
+        else solo[#solo + 1] = id end
+    end
+    for _, id in ipairs(party) do solo[#solo + 1] = id end
+    return solo
+end
+
+local BuildOrderRaw
+local function BuildOrder() return PartyLast(BuildOrderRaw()) end
+BuildOrderRaw = function()
     -- 토끼 추천으로 짠 순서가 있으면 그 순서(묶음 순서)를 지켜요
     local rec = CDB and CDB.rec
     if rec and rec.order then
@@ -674,7 +724,7 @@ local sortBy = "near"          -- near / xp
 local function Visible(e, m)
     if e.failed then return false end
     if onlyEasy then local _, k = Diff(e); if k ~= "easy" then return false end end
-    if onlySolo and e.group and e.group > 1 then return false end
+    if onlySolo and ((e.group and e.group > 1) or e.tag) then return false end
     return true
 end
 
@@ -959,11 +1009,58 @@ local function PaintSummary(order)
     for i, e in ipairs(order) do
         mins = mins + (e.done and 2 or 6)
         if e.xp then xp = xp + e.xp else unknownXP = true end
-        if i <= 6 then names[#names + 1] = ("|cfff2b3c2%d|r %s"):format(i, e.done and ("반납 " .. e.title) or e.title) end
+        local warnTag = ""
+        if not e.done then
+            if e.tag then warnTag = " |cffff8f8f[" .. (TAG_NAME[e.tag] or "정예") .. "]|r"
+            elseif e.group and e.group > 1 then warnTag = " |cffff8f8f[파티]|r" end
+        end
+        if i <= 6 then names[#names + 1] = ("|cfff2b3c2%d|r %s"):format(i, e.done and ("반납 " .. e.title) or e.title) .. warnTag end
     end
-    if #order > 6 then names[#names + 1] = ("… +%d"):format(#order - 6) end
+    if #order > 6 then
+        -- 맨 끝이 정예 · 던전이면 그것까지 보여 줘요 (뒤로 보낸 걸 알 수 있게)
+        local last = order[#order]
+        if last and not last.done and (last.tag or (last.group and last.group > 1)) and #order > 7 then
+            names[#names + 1] = "…"
+            names[#names + 1] = ("|cfff2b3c2%d|r %s |cffff8f8f[%s]|r"):format(#order, last.title, last.tag and (TAG_NAME[last.tag] or "정예") or "파티")
+        else
+            names[#names + 1] = ("… +%d"):format(#order - 6)
+        end
+    end
     board.sCount:SetText(cnt .. "개")
-    board.sTime:SetText(cnt > 0 and ("약 " .. mins .. "분") or "-")
+    -- 조심할 퀘: 정예 · 던전 · 공격대 · 파티, 그리고 내 레벨보다 3 이상 높은 퀘 (아직 안 한 것만)
+    local warn, kinds, party = {}, {}, false
+    for _, e in ipairs(order) do
+        if not e.done then
+            local why
+            if e.tag then why = TAG_NAME[e.tag] or "정예"; party = true
+            elseif e.group and e.group > 1 then why = "파티"; party = true
+            else
+                local _, k = Diff(e)
+                if k == "hard" then why = "어려움" end
+            end
+            if why then
+                warn[#warn + 1] = { e = e, why = why }
+                kinds[why] = (kinds[why] or 0) + 1
+            end
+        end
+    end
+    board.warnList, board.warnParty = warn, party
+    if cnt == 0 then
+        board.sTime:SetText("-"); board.sTime:SetTextColor(P.tx[1], P.tx[2], P.tx[3]); board.sWarnSub:SetText("")
+    elseif #warn == 0 then
+        board.sTime:SetText("없음"); board.sTime:SetTextColor(0.62, 0.88, 0.56)
+        board.sWarnSub:SetText("혼자 해도 돼요")
+    else
+        local parts = {}
+        for _, k in ipairs({ "정예", "던전", "공격대", "파티", "어려움" }) do
+            if kinds[k] then parts[#parts + 1] = k .. " " .. kinds[k] end
+        end
+        board.sTime:SetText(parts[1]); board.sTime:SetTextColor(1, 0.56, 0.56)
+        local rest = {}
+        for i = 2, #parts do rest[#rest + 1] = parts[i] end
+        if party then rest[#rest + 1] = "길 맨 뒤" end
+        board.sWarnSub:SetText(#rest > 0 and table.concat(rest, " · ") or "조심해서 가요")
+    end
     board.sXP:SetText(xp > 0 and ("+" .. (BreakUpLargeNumbers and BreakUpLargeNumbers(xp) or xp) .. (unknownXP and "+" or "")) or "-")
     local lv = UnitLevel("player") or 1
     local cur, max = UnitXP("player") or 0, UnitXPMax("player") or 1
@@ -1357,7 +1454,29 @@ local function MakeBoard()
         local v = Font(sum, 20, P.tx); v:SetPoint("TOPLEFT", l, "BOTTOMLEFT", 0, -4)
         return v
     end
-    board.sCount = stat(14, "고른 퀘"); board.sTime = stat(90, "예상 시간"); board.sXP = stat(196, "경험치"); board.sLv = stat(300, "레벨")
+    board.sCount = stat(14, "고른 퀘"); board.sTime = stat(90, "조심할 퀘"); board.sXP = stat(196, "경험치"); board.sLv = stat(300, "레벨")
+    -- 조심할 퀘: 아래 작은 글 + 마우스를 올리면 목록
+    board.sWarnSub = Font(sum, 10.5, DIM); board.sWarnSub:SetPoint("TOPLEFT", board.sTime, "BOTTOMLEFT", 0, -2)
+    board.sWarnSub:SetWidth(104); board.sWarnSub:SetJustifyH("LEFT"); board.sWarnSub:SetWordWrap(false)
+    local hov = CreateFrame("Frame", nil, sum); hov:SetPoint("TOPLEFT", 86, -8); hov:SetSize(108, 56)
+    hov:EnableMouse(true)
+    hov:SetScript("OnEnter", function(self)
+        local list = board.warnList
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if not list or #list == 0 then
+            GameTooltip:SetText("조심할 퀘 없음", 0.62, 0.88, 0.56)
+            GameTooltip:AddLine("정예 · 던전 퀘나 내 레벨보다 3 이상 높은 퀘가 없어요.", 0.8, 0.8, 0.8, true)
+        else
+            GameTooltip:SetText(("조심할 퀘 %d개"):format(#list), 1, 0.56, 0.56)
+            for _, w in ipairs(list) do
+                GameTooltip:AddDoubleLine(w.e.title, "|cffff8f8f" .. w.why .. "|r  Lv " .. (w.e.level or "?"), 1, 1, 1, 1, 1, 1)
+            end
+            if board.warnParty then GameTooltip:AddLine("정예 · 던전 퀘는 길 맨 뒤로 보냈어요. 파티를 구해서 가요.", 0.8, 0.8, 0.8, true)
+            else GameTooltip:AddLine("혼자 하면 위험할 수 있어요. 레벨을 조금 올리고 가요.", 0.8, 0.8, 0.8, true) end
+        end
+        GameTooltip:Show()
+    end)
+    hov:SetScript("OnLeave", function() GameTooltip:Hide() end)
     board.order = Font(sum, 12, P.tx); board.order:SetPoint("TOPLEFT", 14, -66); board.order:SetPoint("RIGHT", -14, 0)
     board.order:SetJustifyH("LEFT"); board.order:SetSpacing(4)
     board.go = Button(sum, "이 길로 출발", true, Start, 120)
@@ -1392,11 +1511,46 @@ local NearTurnins, Toast, NearToast   -- 아래에서 채워요
 local MAXQ = 8                 -- 한 번에 보이는 퀘 수 (손잡이로 길이를 정하면 그만큼)
 local YEL = { 0.945, 0.851, 0.541 }
 
+-- 퀘스트 일지에서 그 퀘 열기 (게임 판마다 창이 달라서 되는 방법을 차례로)
 local function ShowQuest(e)
-    if QuestLogFrame and e.index and SelectQuestLogEntry then
-        pcall(SelectQuestLogEntry, e.index); ShowUIPanel(QuestLogFrame)
-        if QuestLog_UpdateQuestDetails then pcall(QuestLog_UpdateQuestDetails) end
+    if not e or InCombatLockdown() then return end
+    local id = e.id
+    -- 1) 지도 옆 퀘스트 일지 (최신 창)
+    if id and QuestMapFrame_OpenToQuestDetails then
+        if pcall(QuestMapFrame_OpenToQuestDetails, id) then return end
     end
+    -- 2) 클래식 퀘스트 일지: 줄 번호를 지금 다시 찾아서 (퀘가 늘거나 줄면 번호가 바뀜)
+    local idx = e.index
+    if id then
+        if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+            local ok, i = pcall(C_QuestLog.GetLogIndexForQuestID, id); if ok and i then idx = i end
+        elseif GetQuestLogIndexByID then
+            local ok, i = pcall(GetQuestLogIndexByID, id); if ok and i and i > 0 then idx = i end
+        end
+    end
+    local frame = _G.QuestLogFrame
+    if frame and idx then
+        if not frame:IsShown() then
+            if ShowUIPanel then pcall(ShowUIPanel, frame) else frame:Show() end
+            if not frame:IsShown() and ToggleQuestLog then pcall(ToggleQuestLog) end
+        end
+        if QuestLog_SetSelection then pcall(QuestLog_SetSelection, idx)
+        elseif SelectQuestLogEntry then pcall(SelectQuestLogEntry, idx) end
+        if QuestLog_Update then pcall(QuestLog_Update) end
+        if QuestLog_UpdateQuestDetails then pcall(QuestLog_UpdateQuestDetails) end
+        -- 목록에서 그 줄이 보이게 스크롤
+        local sf = _G.QuestLogListScrollFrame
+        if sf and FauxScrollFrame_SetOffset and QUESTS_DISPLAYED then
+            local off = math.max(0, idx - math.floor(QUESTS_DISPLAYED / 2))
+            pcall(FauxScrollFrame_SetOffset, sf, off)
+            if sf.ScrollBar then pcall(sf.ScrollBar.SetValue, sf.ScrollBar, off * (QUESTLOG_QUEST_HEIGHT or 16)) end
+            if QuestLog_Update then pcall(QuestLog_Update) end
+        end
+        return
+    end
+    -- 3) 마지막: 그냥 퀘스트 일지 열기
+    if id and C_QuestLog and C_QuestLog.SetSelectedQuest then pcall(C_QuestLog.SetSelectedQuest, id) end
+    if ToggleQuestLog then pcall(ToggleQuestLog) end
 end
 
 local function MakeRow(i)
