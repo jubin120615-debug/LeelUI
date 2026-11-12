@@ -1024,6 +1024,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.20", "전투 중 오류 · 툴팁 수정", "던전 시체 반짝 상자" },
     { "1.3.19", "퀘스트 판 토끼 사용법 안내", "처음 열 때 한 번 저절로" },
     { "1.3.18", "채팅 탭 많으면 ··· 더보기", "미니맵 목록 중복 정리" },
     { "1.3.17", "퀘스트 목표 달성 알림 · 당근 링", "채팅 떨어진 탭 다시 붙이기" },

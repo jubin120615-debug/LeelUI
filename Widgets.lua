@@ -407,8 +407,16 @@ do
             end
             if not last then return end
             local lb, tb, h = last:GetBottom(), tt:GetBottom(), tt:GetHeight()
-            if not (lb and tb and h) then return end
-            if issecretvalue and (issecretvalue(lb) or issecretvalue(tb) or issecretvalue(h)) then return end
+            local hidden = not (lb and tb and h) or (issecretvalue and (issecretvalue(lb) or issecretvalue(tb) or issecretvalue(h)))
+            if hidden then
+                -- 전투 중엔 툴팁 크기를 숨겨서 못 재요 → 맨 아래에 빈 줄을 하나 넣어 바 자리를 만들어요 (한 번만)
+                if not tt.leelSpacer then
+                    tt.leelSpacer = true
+                    tt:AddLine(" ")
+                    tt:Show()
+                end
+                return
+            end
             local room = lb - tb
             if room < 25 then tt:SetHeight(h + (26 - room)) end
         end)
@@ -419,6 +427,8 @@ do
         local sb = _G.GameTooltipStatusBar
         if not sb or sb.leelSkinned then return end
         sb.leelSkinned = true
+        GameTooltip:HookScript("OnTooltipCleared", function(self) self.leelSpacer = nil end)
+        GameTooltip:HookScript("OnHide", function(self) self.leelSpacer = nil end)
         -- 블리자드가 체력에 따라 초록/노랑으로 다시 칠해도 우리 색으로
         local painting = false
         local RED = ns.HP_RED or { 0.722, 0.118, 0.208 }

@@ -51,6 +51,11 @@ end
 -- 최근에 쓰러뜨린 몹 / 뒤진 시체
 ----------------------------------------------------------------------
 local kills, loots = {}, {}     -- { name, guid, t }
+-- 게임이 숨긴 값(비밀 값)은 글자처럼 보여도 쓸 수 없어서 nil 로
+local function Plain(v)
+    if v == nil or (issecretvalue and issecretvalue(v)) then return nil end
+    return v
+end
 local function Push(list, name, guid)
     if type(name) ~= "string" or name == "" then return end
     for _, k in ipairs(list) do if guid and k.guid == guid then return end end
@@ -63,12 +68,16 @@ local alive = {}                  -- guid → name (살아 있을 때 본 적 �
 local function Watch()
     for _, u in ipairs(watchUnits) do
         local ok, can = pcall(UnitCanAttack, "player", u)
-        if ok and can then
+        can = ok and Plain(can) or nil
+        if can then
             local okG, guid = pcall(UnitGUID, u)
             local okN, name = pcall(UnitName, u)
-            if okG and okN and type(guid) == "string" and type(name) == "string" and guid:find("^Creature") then
+            -- 전투 중 등에 게임이 값을 숨기면(비밀 값) 건너뛰어요
+            local secret = issecretvalue and (issecretvalue(guid) or issecretvalue(name))
+            if okG and okN and not secret and type(guid) == "string" and type(name) == "string" and guid:find("^Creature") then
                 local okD, dead = pcall(UnitIsDead, u)
-                if okD and dead then
+                dead = okD and Plain(dead) or nil
+                if dead then
                     if alive[guid] then Push(kills, name, guid); alive[guid] = nil end
                 else
                     alive[guid] = name
@@ -140,6 +149,7 @@ end
 
 function ns.QuestMobInfo(unit)
     local okN, name = pcall(UnitName, unit)
+    name = okN and Plain(name) or nil
     if not okN or type(name) ~= "string" then return end
     local list = {}
     FromTooltip(unit, list)
@@ -180,6 +190,7 @@ end
 -- 이 몹이 걸린 퀘스트 제목들 (퀘템 알림용)
 function ns.QuestMobTitles(unit)
     local okN, name = pcall(UnitName, unit)
+    name = okN and Plain(name) or nil
     local out = {}
     if okN and type(name) == "string" and DB()[name] then
         for title in pairs(DB()[name]) do out[title] = true end
@@ -222,8 +233,10 @@ ev:SetScript("OnEvent", function(self, e)
         -- 시체를 뒤졌으면 그 몹 이름 (대상이 죽은 적이면 그 이름, 아니면 방금 쓰러뜨린 몹)
         local ok, dead = pcall(UnitIsDead, "target")
         local okC, can = pcall(UnitCanAttack, "player", "target")
+        dead = ok and Plain(dead) or nil; can = okC and Plain(can) or nil
         local okN, name = pcall(UnitName, "target")
         local okG, guid = pcall(UnitGUID, "target")
+        name = okN and Plain(name) or nil; guid = okG and Plain(guid) or nil
         if ok and dead and okN and type(name) == "string" and (okC and can or true) then
             Push(loots, name, okG and guid or nil)
         elseif kills[1] then

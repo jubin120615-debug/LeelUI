@@ -152,18 +152,30 @@ local la = lg:CreateAnimation("Alpha"); la:SetFromAlpha(0.15); la:SetToAlpha(0.4
 local lootOpen = false
 local previewUntil = 0
 local function Previewing() return GetTime() < previewUntil end
-local function LootableCorpse()
-    local ok, res = pcall(function()
-        local g = UnitGUID("softinteract")
-        if type(g) ~= "string" then return false end
-        if not (g:find("^Creature") or g:find("^Vehicle")) then return false end
-        if not UnitIsDead("softinteract") then return false end
-        if not CanLootUnit then return true end
-        local has = CanLootUnit(g)
-        return has and true or false
-    end)
-    return ok and res
+-- 던전 · 전투 중엔 게임이 몹 정보를 "숨긴 값"으로 줘요. 숨긴 값은 글자/참거짓처럼 쓸 수 없어서,
+-- 숨겨졌으면 그 확인은 건너뛰고 CanLootUnit(주울 수 있나)에 그대로 넘겨서 물어봐요
+local function Hid(v) return issecretvalue and issecretvalue(v) end
+local function CanLootGUID(g)
+    if g == nil or not CanLootUnit then return false end
+    local okL, has = pcall(CanLootUnit, g)
+    if not okL or Hid(has) then return false end
+    return has and true or false
 end
+local function CorpseLootable(u)
+    local ok, res = pcall(function()
+        local g = UnitGUID(u)
+        if g == nil then return false end
+        if not Hid(g) then
+            if type(g) ~= "string" or not (g:find("^Creature") or g:find("^Vehicle")) then return false end
+        end
+        local okD, dead = pcall(UnitIsDead, u)
+        if okD and not Hid(dead) and not dead then return false end
+        if not CanLootUnit then return not Hid(g) end
+        return CanLootGUID(g)
+    end)
+    return ok and res or false
+end
+local function LootableCorpse() return CorpseLootable("softinteract") end
 
 local function HideLoot()
     lb:Stop(); lg:Stop()
@@ -204,14 +216,8 @@ local function Mini(i)
 end
 
 local function CanLoot(u)
-    local ok, res = pcall(function()
-        if not UnitIsDead(u) then return false end
-        local g = UnitGUID(u)
-        if type(g) ~= "string" or not (g:find("^Creature") or g:find("^Vehicle")) then return false end
-        if not CanLootUnit then return false end
-        return CanLootUnit(g) and true or false
-    end)
-    return ok and res
+    if not CanLootUnit then return false end
+    return CorpseLootable(u)
 end
 
 local function SameAsSoft(u)
