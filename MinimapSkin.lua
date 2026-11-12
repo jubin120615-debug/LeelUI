@@ -588,18 +588,84 @@ local function NormName(t)
     t = tostring(t or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
     return (t:lower():gsub("[%s_%-%.]", ""))
 end
+-- 애드온이 .toc 파일로 직접 목록에 들어오는 경우 (registeredAddons에 늦게 들어오거나 안 보일 때가 있어요)
+local tocNames
+local function TocCompartment()
+    if tocNames then return tocNames end
+    tocNames = {}
+    local A = C_AddOns
+    local n = (A and A.GetNumAddOns and A.GetNumAddOns()) or (GetNumAddOns and GetNumAddOns()) or 0
+    for i = 1, n do
+        local meta = (A and A.GetAddOnMetadata) or GetAddOnMetadata
+        local ok, f = pcall(meta, i, "AddonCompartmentFunc")
+        if ok and f and f ~= "" then
+            local okI, name, title = pcall((A and A.GetAddOnInfo) or GetAddOnInfo, i)
+            if okI then
+                if name then tocNames[NormName(name)] = true end
+                if title then tocNames[NormName(title)] = true end
+            end
+        end
+    end
+    return tocNames
+end
+local function Same(a, b)
+    return a ~= "" and b ~= "" and (a == b or (#a >= 5 and #b >= 5 and (a:find(b, 1, true) or b:find(a, 1, true))))
+end
 local function InCompartment(comp, label)
     local want = NormName(label)
     if want == "" then return false end
+    for k in pairs(TocCompartment()) do if Same(k, want) then return true end end
     local list = comp.registeredAddons
     if type(list) ~= "table" then return false end
     for _, d in ipairs(list) do
-        local have = type(d) == "table" and NormName(d.text) or ""
-        if have ~= "" and (have == want or (#want >= 5 and #have >= 5 and (have:find(want, 1, true) or want:find(have, 1, true)))) then
-            return true
-        end
+        local have = type(d) == "table" and not d.leelOurs and NormName(d.text) or ""
+        if Same(have, want) then return true end
     end
     return false
+end
+
+-- 이미 들어간 것 중 겹치는 게 있으면(애드온이 늦게 스스로 넣은 경우) 우리가 넣은 쪽을 빼요
+local addedByUs = {}
+local function Dedupe(comp)
+    local list = comp and comp.registeredAddons
+    if type(list) ~= "table" then return end
+    local Icon = LibStub and LibStub("LibDBIcon-1.0", true)
+    local changed = false
+    for i = #list, 1, -1 do
+        local d = list[i]
+        local mine = type(d) == "table" and (d.leelOurs or addedByUs[NormName(d.text)])
+        if mine then
+            local me = NormName(d.text)
+            local dup = false
+            for k in pairs(TocCompartment()) do if Same(k, me) then dup = true end end
+            for j, o in ipairs(list) do
+                if j ~= i and type(o) == "table" and not o.leelOurs and not addedByUs[NormName(o.text)] and Same(NormName(o.text), me) then dup = true end
+            end
+            if dup then
+                local lname = addedByUs[me]
+                if type(lname) == "string" and Icon and Icon.RemoveButtonFromCompartment then
+                    pcall(Icon.RemoveButtonFromCompartment, Icon, lname)
+                else
+                    table.remove(list, i)
+                end
+                changed = true
+            end
+        end
+    end
+    -- 예전에 우리가 LibDBIcon으로 넣어 둔 게 애드온 설정에 남아 매번 다시 들어오는 경우:
+    --   그 애드온이 .toc로 스스로 목록에 들어오면 LibDBIcon 쪽 칸은 빼요 (애드온 설정의 "목록에 넣기"도 꺼져요)
+    if Icon and Icon.objects and Icon.IsButtonInCompartment and Icon.RemoveButtonFromCompartment then
+        local toc = TocCompartment()
+        for lname in pairs(Icon.objects) do
+            if lname ~= "LeelUI" and Icon:IsButtonInCompartment(lname) then
+                local me = NormName(lname)
+                for k in pairs(toc) do
+                    if Same(k, me) then pcall(Icon.RemoveButtonFromCompartment, Icon, lname); changed = true; break end
+                end
+            end
+        end
+    end
+    if changed and comp.UpdateDisplay then pcall(comp.UpdateDisplay, comp) end
 end
 
 local function Collect()
@@ -615,7 +681,7 @@ local function Collect()
                 -- 르엘 UI는 이미 목록에 따로 들어 있음 (겹치지 않게 숨기기만)
                 if name ~= "LeelUI" and Icon.AddButtonToCompartment and not (Icon.IsButtonInCompartment and Icon:IsButtonInCompartment(name))
                    and not InCompartment(comp, name) then
-                    pcall(Icon.AddButtonToCompartment, Icon, name)
+                    if pcall(Icon.AddButtonToCompartment, Icon, name) then addedByUs[NormName(name)] = name end
                 end
                 Keep(btn)
             end
@@ -633,7 +699,7 @@ local function Collect()
                 local tex = icon and icon.GetTexture and icon:GetTexture()
                 local label = name:gsub("MinimapButton$", ""):gsub("Minimap$", ""):gsub("Button$", "")
                 if name == "ForgLevelingMinimapButton" then label = "르엘 길잡이" end
-                if not InCompartment(comp, label) then pcall(comp.RegisterAddon, comp, {
+                if not InCompartment(comp, label) then pcall(comp.RegisterAddon, comp, { leelOurs = true,
                     text = label, icon = tex or 134400, notCheckable = true, registerForAnyClick = true,
                     func = function(_, data)
                         local f = c:GetScript("OnClick")
@@ -648,6 +714,7 @@ local function Collect()
             end
         end
     end
+    Dedupe(comp)
 end
 
 -- 테 둘레에서 끌어서 자리 옮기기 (A, C 모양). 각도는 모양마다 따로 저장

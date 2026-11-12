@@ -141,7 +141,7 @@ local unread = {}     -- [frame] = 새 글 수
 local whisper = {}    -- [frame] = 귓말 왔음
 local pending = 0     -- 지금 창에서 위로 올려 볼 때 쌓인 새 글
 -- 작은 기둥 (2안): 창이 낮아 탭이 다 안 들어가면 탭 · 아래 단추를 아이콘만 남은 작은 칸으로
-local small = false
+local small = false   -- (작은 기둥 모드는 안 써요: 넘치는 탭은 더보기로)
 local FULL_H, SMALL_W, SMALL_H = RAIL - 10, 32, 30
 local bottomBtns = {}
 
@@ -276,35 +276,37 @@ local function PaintRail()
     if not rail then return end
     local sel = Selected()
     local list = Docked()
-    -- 이 탭 수로 큰 칸이 들어가는지: 내가 정한 창 높이 기준으로 판단
+    -- 넘치는 탭은 "···" 더보기로 (1안): 내가 정한 창 높이에 들어가는 만큼만 기둥에 보여요
+    --   지금 탭 · 새 글 온 탭 · 귓말 온 탭이 먼저 보이고, 나머지는 원래 순서대로
+    local show, hidden = {}, {}
     do
         local have = rail:GetHeight() or 0
         local extra = DB().autoGrow or 0
         local base = have - extra
-        local fullNeed = PAD + #list * (FULL_H + 8) + 30 + 10 + (RAIL - 12 + 8) * 3 + 8
-        local want = base > 0 and base < fullNeed
-        if want ~= small then
-            small = want
-            for _, btn in ipairs(bottomBtns) do if btn.leelPin then btn.leelPin() end end
+        local avail = base - PAD - (30 + 10) - ((RAIL - 12 + 8) * 3 + 8)
+        local maxN = math.floor(avail / (FULL_H + 8))
+        if base <= 0 or #list <= maxN then
+            for _, f in ipairs(list) do show[#show + 1] = f end
+        else
+            local room = math.max(1, maxN - 1)          -- 한 칸은 "···" 자리
+            local pick = {}
+            local function Take(f) if not pick[f] and room > 0 then pick[f] = true; room = room - 1 end end
+            Take(sel)
+            for _, f in ipairs(list) do if whisper[f] then Take(f) end end
+            for _, f in ipairs(list) do if (unread[f] or 0) > 0 then Take(f) end end
+            for _, f in ipairs(list) do Take(f) end
+            for _, f in ipairs(list) do
+                if pick[f] then show[#show + 1] = f else hidden[#hidden + 1] = f end
+            end
         end
     end
     local y = -PAD
-    for i, f in ipairs(list) do
+    for i, f in ipairs(show) do
         local b = RailItem(i)
         b.frame = f
         b:ClearAllPoints()
         b:SetPoint("TOP", rail, "TOP", 2, y)
-        if small then
-            b:SetSize(SMALL_W, SMALL_H)
-            b.icon:ClearAllPoints(); b.icon:SetPoint("CENTER", 0, 0); b.icon:SetSize(16, 16)
-            b.text:Hide(); b.bar:SetHeight(14)
-            y = y - SMALL_H - 4
-        else
-            b:SetSize(FULL_H, FULL_H)
-            b.icon:ClearAllPoints(); b.icon:SetPoint("TOP", 0, -6); b.icon:SetSize(17, 17)
-            b.text:Show(); b.bar:SetHeight(18)
-            y = y - FULL_H - 8
-        end
+        y = y - FULL_H - 8
         b.text:SetText(Short(TabName(f)))
         b.icon:SetTexture(ns.MEDIA .. IconFor(f))
         local on = f == sel
@@ -327,11 +329,30 @@ local function PaintRail()
         end
         b:Show()
     end
-    for i = #list + 1, #items do items[i]:Hide() end
+    for i = #show + 1, #items do items[i]:Hide() end
+    -- "···" 더보기 단추 + 펼침 목록
+    if rail.more then
+        local mb = rail.more
+        mb.hidden = hidden
+        if #hidden > 0 then
+            mb:ClearAllPoints(); mb:SetPoint("TOP", rail, "TOP", 2, y)
+            y = y - 30 - 8
+            local sum, wh = 0, false
+            for _, f in ipairs(hidden) do sum = sum + (unread[f] or 0); if whisper[f] then wh = true end end
+            mb.dot:SetShown(wh)
+            if sum > 0 and not wh then
+                mb.badgeText:SetText(sum > 99 and "99" or sum)
+                mb.badge:SetWidth(math.max(16, mb.badgeText:GetStringWidth() + 8)); mb.badge:Show()
+            else mb.badge:Hide() end
+            mb:Show()
+            if mb.pop:IsShown() then mb.Fill() end
+        else
+            mb:Hide(); mb.pop:Hide()
+        end
+    end
     if rail.plus then
         rail.plus:ClearAllPoints()
         rail.plus:SetPoint("TOP", rail, "TOP", 2, y)
-        rail.plus:SetSize(small and SMALL_W or (RAIL - 14), small and 22 or 30)
     end
     -- 탭이 늘어 기둥 아래 단추(친구 · 음성 · 메뉴)와 겹치면 채팅창을 위로 늘리고,
     -- 탭이 줄면 늘렸던 만큼 다시 줄여요 (아래 끝은 그대로, 내가 정한 크기보다 작아지진 않아요)
@@ -343,8 +364,7 @@ local function PaintRail()
             local extra = db.autoGrow or 0
             if extra > H - 60 then extra = 0 end
             local base = H - extra                          -- 내가 정한 크기
-            local need = small and (-y + 22 + 6 + (SMALL_H + 4) * 3 + 6)
-                                or (-y + 30 + 10 + (RAIL - 12 + 8) * 3 + 8)
+            local need = -y + 30 + 10 + (RAIL - 12 + 8) * 3 + 8
             local needH = need - (have - H)                 -- 단추가 안 겹치는 채팅창 높이
             local target = math.max(base, needH)
             db.autoGrow = target - base
@@ -403,6 +423,82 @@ local function Build()
     end)
     plus:SetScript("OnLeave", function() GameTooltip:Hide() end)
     rail.plus = plus
+
+    -- "···" 더보기: 기둥에 못 들어간 탭 모음
+    local mb = CreateFrame("Button", nil, rail)
+    mb:SetSize(RAIL - 10, 30)
+    mb.fill = ns.RoundRect(mb, 11, { 0.173, 0.133, 0.125 }, "BACKGROUND", 0, 0)
+    mb.t = ns.Font(mb, 16, C.acc); mb.t:SetPoint("CENTER", 0, 2); mb.t:SetText("···")
+    mb.badge = CreateFrame("Frame", nil, mb)
+    mb.badge:SetSize(18, 16); mb.badge:SetPoint("CENTER", mb, "TOPRIGHT", -3, -3)
+    mb.badge:SetFrameLevel(mb:GetFrameLevel() + 3)
+    ns.RoundRect(mb.badge, 8, { 0.13, 0.09, 0.085 }, "BACKGROUND", 0, -1)
+    ns.RoundRect(mb.badge, 8, CORAL, "BACKGROUND", 1, 0)
+    mb.badgeText = mb.badge:CreateFontString(nil, "OVERLAY")
+    mb.badgeText:SetFont(ns.NUM, 11, ""); mb.badgeText:SetPoint("CENTER", 0, 0); mb.badgeText:SetTextColor(1, 1, 1)
+    mb.badge:Hide()
+    mb.dot = mb:CreateTexture(nil, "OVERLAY"); mb.dot:SetTexture(ns.MEDIA .. "circle"); mb.dot:SetSize(10, 10)
+    mb.dot:SetPoint("CENTER", mb, "TOPRIGHT", -3, -3); mb.dot:SetVertexColor(1, 0.62, 0.82, 1); mb.dot:Hide()
+    -- 펼침 목록
+    local pop = CreateFrame("Frame", nil, mb)
+    pop:SetFrameStrata("DIALOG")
+    pop:SetPoint("TOPLEFT", mb, "TOPRIGHT", 10, 4)
+    pop:SetWidth(130)
+    ns.RoundPlate(pop, 10, { 0.125, 0.094, 0.086, 0.97 }, { 0.949, 0.702, 0.761, 0.7 })
+    pop:EnableMouse(true)
+    pop:Hide()
+    pop.rows = {}
+    mb.pop = pop
+    function mb.Fill()
+        local list = mb.hidden or {}
+        for i, f in ipairs(list) do
+            local r = pop.rows[i]
+            if not r then
+                r = CreateFrame("Button", nil, pop)
+                r:SetHeight(24)
+                r.hl = r:CreateTexture(nil, "BACKGROUND"); r.hl:SetAllPoints(); r.hl:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.15); r.hl:Hide()
+                r.icon = r:CreateTexture(nil, "ARTWORK"); r.icon:SetSize(15, 15); r.icon:SetPoint("LEFT", 8, 0)
+                r.icon:SetVertexColor(C.tx2[1], C.tx2[2], C.tx2[3], 1)
+                r.text = ns.Font(r, 12, C.tx); r.text:SetPoint("LEFT", r.icon, "RIGHT", 7, 0); r.text:SetJustifyH("LEFT")
+                r.n = ns.Font(r, 11, CORAL); r.n:SetPoint("RIGHT", -8, 0)
+                r:SetScript("OnEnter", function(self) self.hl:Show() end)
+                r:SetScript("OnLeave", function(self) self.hl:Hide() end)
+                r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                r:SetScript("OnClick", function(self, btn)
+                    local tab = self.frame and TabOf(self.frame)
+                    if btn == "RightButton" and tab then
+                        tab:EnableMouse(true); pcall(tab.Click, tab, "RightButton"); tab:EnableMouse(false)
+                    elseif self.frame then
+                        pcall(FCFDock_SelectWindow, GENERAL_CHAT_DOCK, self.frame)
+                    end
+                    pop:Hide()
+                end)
+                pop.rows[i] = r
+            end
+            r.frame = f
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", pop, "TOPLEFT", 4, -5 - (i - 1) * 25)
+            r:SetPoint("RIGHT", pop, "RIGHT", -4, 0)
+            r.icon:SetTexture(ns.MEDIA .. IconFor(f))
+            r.text:SetText(TabName(f))
+            local n = unread[f] or 0
+            r.n:SetText(whisper[f] and "귓말" or (n > 0 and (n > 99 and "99+" or tostring(n)) or ""))
+            r:Show()
+        end
+        for i = #list + 1, #pop.rows do pop.rows[i]:Hide() end
+        pop:SetHeight(10 + #list * 25)
+    end
+    mb:SetScript("OnClick", function()
+        if pop:IsShown() then pop:Hide() else mb.Fill(); pop:Show() end
+    end)
+    mb:SetScript("OnEnter", function(self)
+        self.fill:SetColor({ 0.26, 0.19, 0.18 })
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("다른 탭 " .. #(self.hidden or {}) .. "개")
+        GameTooltip:AddLine("누르면 목록이 열려요", 0.8, 0.8, 0.8); GameTooltip:Show()
+    end)
+    mb:SetScript("OnLeave", function(self) self.fill:SetColor({ 0.173, 0.133, 0.125 }); GameTooltip:Hide() end)
+    mb:Hide()
+    rail.more = mb
 
     head = CreateFrame("Frame", nil, plate)
     head:SetFrameStrata("LOW")
