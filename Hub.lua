@@ -264,12 +264,21 @@ local MODULES = {
     },
     {
         key = "LeelMap", title = "Leel Map", sub = "세계 지도", icon = "hb_map", slash = "LEELMAP",
-        desc = "작은 지도 창, 걸을 때 흐려짐, 좌표, 지역 레벨.\nOpenMap을 깔면 이어 붙인 지도에 Leel Quest 길이 이어져요.",
+        desc = "작은 지도 창, 걸을 때 흐려짐, 좌표, 지역 레벨.\n르엘 UI 쓰는 길드원 위치 (/lmap 길드).",
         items = {
             { t = "toggle", label = "걸을 때 흐리게", get = function() return MapDB().fade end, cmd = "흐림" },
             { t = "toggle", label = "좌표 줄", get = function() return MapDB().coords end, cmd = "좌표" },
             { t = "toggle", label = "지역 레벨", get = function() return MapDB().levels end, cmd = "레벨" },
             { t = "toggle", label = "작은 창 지도", hint = "지도를 다시 열면 적용", get = function() return MapDB().mini end, cmd = "작게" },
+            { t = "toggle", label = "길드원 위치 보기", hint = "르엘 UI 쓰는 길드원이 지도 · 미니맵에 토끼 점으로",
+              get = function() return MapDB().gShow ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.gShow = v and true or false end end },
+            { t = "toggle", label = "내 위치 길드에 알리기", hint = "끄면 내 위치는 보내지 않아요",
+              get = function() return MapDB().gShare ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.gShare = v and true or false; if LeelMapGuild then LeelMapGuild.Send() end end end },
+            { t = "toggle", label = "던전 · 전장에선 숨기기",
+              get = function() return MapDB().gHideInst ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.gHideInst = v and true or false; if LeelMapGuild then LeelMapGuild.Send() end end end },
             { t = "button", label = "지도 위치 초기화", cmd = "위치" },
         },
     },
@@ -1223,6 +1232,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.25", "전문기술 재료 클릭 → 제작식", "Leel Map 길드원 위치" },
     { "1.3.24", "버리기 창 잠금 · 휴지통 슝", "몹 등급 아이콘 알약" },
     { "1.3.23", "마우스 효과 · 몹 등급 알약", "던전 안 Leel Quest · 글씨 강조" },
     { "1.3.22", "OpenMap 같이 설치", "이어 붙인 세계 지도" },
