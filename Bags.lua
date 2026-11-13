@@ -164,6 +164,11 @@ local GetCooldown = CC.GetContainerItemCooldown or GetContainerItemCooldown
 
 local win, holders, buttons = nil, {}, {}
 local curTab, query = "all", ""
+-- 새로 들어온 아이템 (C안): 아이템 번호별 개수가 늘면 "새로", 가방 맨 위 따로 한 줄에 모아요
+local baseCount        -- itemID → 개수 (마지막으로 본 것)
+local newIDs = {}      -- itemID → true (새로 들어옴)
+local seenIDs = {}     -- itemID → true (마우스를 올려서 분홍 점은 지움)
+local Layout
 local openedBy
 
 local TABS_DEF = {
@@ -213,6 +218,22 @@ local function MakeButton(bag, slot)
     slotBg:SetFrameLevel(math.max(0, b:GetFrameLevel() - 1))
     b.leelBg = ns.RoundRect(slotBg, 7, { 0.24, 0.19, 0.18 }, "BACKGROUND", 0, 0)
     b.leelEdge = slotBg
+    -- 새 아이템 분홍 점 (마우스를 올리면 지워져요)
+    local dotF = CreateFrame("Frame", nil, b)
+    dotF:SetSize(11, 11); dotF:SetPoint("CENTER", b, "TOPRIGHT", -2, -2)
+    dotF:SetFrameLevel(b:GetFrameLevel() + 6)
+    local ring = dotF:CreateTexture(nil, "ARTWORK"); ring:SetTexture(ns.MEDIA .. "circle"); ring:SetAllPoints(); ring:SetVertexColor(0.125, 0.094, 0.086, 1)
+    local dot = dotF:CreateTexture(nil, "OVERLAY"); dot:SetTexture(ns.MEDIA .. "circle"); dot:SetPoint("TOPLEFT", 2, -2); dot:SetPoint("BOTTOMRIGHT", -2, 2)
+    dot:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+    dotF:Hide()
+    b.leelNew = dotF
+    b:HookScript("OnEnter", function(self)
+        local id = self.leelItemID
+        if id and newIDs[id] and not seenIDs[id] then
+            seenIDs[id] = true
+            for _, bb in pairs(buttons) do for _, x in pairs(bb) do if x.leelItemID == id then x.leelNew:Hide() end end end
+        end
+    end)
     buttons[bag] = buttons[bag] or {}
     buttons[bag][slot] = b
     return b
@@ -323,6 +344,8 @@ local function UpdateButton(b, bag, slot)
         if CooldownFrame_Set then CooldownFrame_Set(cd, s or 0, d or 0, e) end
     end
     b.hasItem = info and true or nil
+    b.leelItemID = info and info.itemID or nil
+    if b.leelNew then b.leelNew:SetShown(b.leelItemID and newIDs[b.leelItemID] and not seenIDs[b.leelItemID] and true or false) end
     UpdateQuest(b, bag, slot, info)
     -- 게임 가방이 평소에 꺼 주는 표시들: 우리가 안 끄면 처음부터 파랗게 빛남 (새 아이템 빛, 상점 빛 등)
     for _, k in ipairs({ "NewItemTexture", "BattlepayItemTexture", "ExtendedSlot", "JunkIcon", "UpgradeIcon", "BagIndicator" }) do
@@ -347,25 +370,75 @@ local function UpdateButton(b, bag, slot)
     b:SetAlpha(Matches(info) and 1 or 0.22)
 end
 
-local function Layout()
+Layout = function()
     if not win then return end
     if InCombatLockdown() then win.needLayout = true return end
-    local i = 0
+    local fresh, rest = {}, {}
     for bag = 0, (NUM_BAG_SLOTS or 4) do
         local n = NumSlots(bag) or 0
         for slot = 1, n do
             local b = (buttons[bag] and buttons[bag][slot]) or MakeButton(bag, slot)
-            local col, row = i % COLS, math.floor(i / COLS)
-            b:ClearAllPoints()
-            b:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + 2 + col * (SZ + GAP), -(HEAD + TABS + 6 + row * (SZ + GAP)))
+            local info = GetInfo(bag, slot)
+            local id = info and info.itemID
+            if id and newIDs[id] then fresh[#fresh + 1] = b else rest[#rest + 1] = b end
             b:Show()
-            i = i + 1
         end
         for slot = n + 1, #(buttons[bag] or {}) do buttons[bag][slot]:Hide() end
     end
-    local rows = math.max(1, math.ceil(i / COLS))
-    win:SetSize(PAD * 2 + 4 + COLS * (SZ + GAP) - GAP, HEAD + TABS + 6 + rows * (SZ + GAP) - GAP + 10 + FOOT)
+    local y = HEAD + TABS + 6
+    local function Place(list)
+        for i, b in ipairs(list) do
+            local col, row = (i - 1) % COLS, math.floor((i - 1) / COLS)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + 2 + col * (SZ + GAP), -(y + row * (SZ + GAP)))
+        end
+        y = y + math.max(1, math.ceil(#list / COLS)) * (SZ + GAP) - GAP
+    end
+    if #fresh > 0 then
+        win.newLabel:ClearAllPoints(); win.newLabel:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + 2, -y); win.newLabel:Show()
+        win.newHint:Show()
+        y = y + 18
+        Place(fresh)
+        y = y + 8
+        win.restLabel:ClearAllPoints(); win.restLabel:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + 2, -y); win.restLabel:Show()
+        y = y + 18
+    else
+        win.newLabel:Hide(); win.newHint:Hide(); win.restLabel:Hide()
+    end
+    Place(rest)
+    win:SetSize(PAD * 2 + 4 + COLS * (SZ + GAP) - GAP, y + 10 + FOOT)
     win.needLayout = false
+end
+
+-- 아이템 번호별 개수를 세서, 늘어난 것을 "새로"로
+local function CountItems()
+    local t = {}
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        for slot = 1, (NumSlots(bag) or 0) do
+            local info = GetInfo(bag, slot)
+            if info and info.itemID then t[info.itemID] = (t[info.itemID] or 0) + (info.stackCount or 1) end
+        end
+    end
+    return t
+end
+local function CheckNew()
+    local now = CountItems()
+    local changed = false
+    if baseCount then
+        for id, n in pairs(now) do
+            if n > (baseCount[id] or 0) and not newIDs[id] then newIDs[id] = true; seenIDs[id] = nil; changed = true end
+        end
+    end
+    -- 다 쓰거나 판 것은 새 목록에서도 빼요
+    for id in pairs(newIDs) do if not now[id] then newIDs[id] = nil; seenIDs[id] = nil; changed = true end end
+    baseCount = now
+    if changed and win and win:IsShown() then Layout() end
+    if changed and win and not win:IsShown() then win.needLayout = true end
+end
+local function ClearNew()
+    if not next(newIDs) then return end
+    newIDs, seenIDs = {}, {}
+    if win then Layout() end
 end
 
 local function Refresh()
@@ -459,6 +532,13 @@ local function BuildWindow()
         win.tabs[#win.tabs + 1] = p
     end
 
+    -- 새로 들어온 것 줄 머리
+    win.newLabel = ns.Font(win, 12, C.acc); win.newLabel:SetText("새로 들어온 것")
+    win.newHint = ns.Font(win, 10.5, { 0.62, 0.54, 0.52 }); win.newHint:SetText("가방을 닫으면 제자리로")
+    win.newHint:SetPoint("LEFT", win.newLabel, "RIGHT", 8, -1)
+    win.restLabel = ns.Font(win, 12, { 0.81, 0.635, 0.616 }); win.restLabel:SetText("가방")
+    win.newLabel:Hide(); win.newHint:Hide(); win.restLabel:Hide()
+
     -- 아래: 정리, 찾기, 돈
     local Sort = CC.SortBags or SortBags
     local sort = Pill(win, "정리", true, 58)
@@ -523,6 +603,7 @@ local function BuildWindow()
     win:SetScript("OnShow", function() if win.needLayout then Layout() end; Refresh(); PlaySound(SOUNDKIT and SOUNDKIT.IG_BACKPACK_OPEN or 862) end)
     win:SetScript("OnHide", function()
         openedBy = nil
+        if not DB().keepNew then ClearNew() end
         win.box:SetText(""); win.box:ClearFocus()
         PlaySound(SOUNDKIT and SOUNDKIT.IG_BACKPACK_CLOSE or 863)
     end)
@@ -616,6 +697,7 @@ local function Update()
     wasLow = low
     ready = true
 
+    CheckNew()
     Refresh()
 end
 ns.UpdateBags = Update

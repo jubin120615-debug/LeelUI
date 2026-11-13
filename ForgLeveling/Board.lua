@@ -439,6 +439,12 @@ local function QuestiePos(e, m, px, py)
 end
 
 -- 완료한 퀘의 반납 NPC (Questie): { map, x, y, npc } 하나 (지금 지도에 있으면 그것, 아니면 첫 번째)
+-- Questie 자료에 한글 이름이 없는 NPC(영어로 나옴)는, 그 NPC에게 반납 창을 한 번 열면 한글 이름을 배워 둬요
+local function NpcKo(name)
+    if type(name) ~= "string" then return name end
+    local ko = DB and DB.npcKo and DB.npcKo[name]
+    return ko or name
+end
 local function TurnInInfo(e)
     if not (e.done and e.id) then return end
     QuestiePos(e, PlayerMap(), nil, nil)        -- 캐시 채우기
@@ -454,7 +460,7 @@ local function TurnNpc(e)
     if not (e and e.done) then return end
     local t = TurnInInfo(e)
     local g = guide[e.key]
-    return (t and t.npc) or (g and g.npc) or nil
+    return NpcKo((t and t.npc) or (g and g.npc)) or nil
 end
 
 -- 완료한 퀘는 반납 NPC가 있는 지역으로, 하는 중인 퀘는 퀘스트 일지 지역으로
@@ -529,7 +535,7 @@ local function Progress(e)
     if e.done then
         local t = TurnInInfo(e)
         local g = guide[e.key]
-        local npc = (t and t.npc) or (g and g.npc)
+        local npc = NpcKo((t and t.npc) or (g and g.npc))
         return "완료 · " .. (npc and ("반납: " .. npc) or "반납하러 가기")
     end
     for _, o in ipairs(e.objs) do
@@ -740,6 +746,16 @@ local function MakeMapPanel(parent, w, h)
     local shade = p.art:CreateTexture(nil, "BORDER")
     shade:SetTexture(WHITE); shade:SetAllPoints(); shade:SetVertexColor(0.07, 0.05, 0.05, 0.12)
     p.layer = CreateFrame("Frame", nil, p); p.layer:SetAllPoints(); p.layer:SetFrameLevel(p:GetFrameLevel() + 3)
+    -- 던전 층 넘기기 (층이 여럿인 던전만)
+    p.floorBtn = CreateFrame("Button", nil, p)
+    p.floorBtn:SetSize(70, 22); p.floorBtn:SetPoint("BOTTOMRIGHT", -8, 8)
+    p.floorBtn:SetFrameLevel(p:GetFrameLevel() + 8)
+    p.floorBtn.bg = RR(p.floorBtn, 9, CHIP, "BACKGROUND", 0, 0)
+    p.floorBtn.fs = Font(p.floorBtn, 12, P.tx); p.floorBtn.fs:SetPoint("CENTER")
+    p.floorBtn:SetScript("OnClick", function()
+        p.dunFloor = (p.dunFloor or 1) + 1; p.dunArt = nil      -- 다음 지도 갱신(0.25초)에 다시 그려요
+    end)
+    p.floorBtn:Hide()
     p.dots, p.marks = {}, {}
     p.me = p.layer:CreateTexture(nil, "OVERLAY", nil, 3)
     p.me:SetTexture("Interface\\MINIMAP\\MinimapArrow"); p.me:SetSize(22, 22)
@@ -993,6 +1009,12 @@ local function PaintRow(r, it, w)
     r.title:SetText(e.title)
     local prog = Progress(e)
     local where = SRC_ICON[e._src or "none"] .. SRC[e._src or "none"]
+    if (e._src or "none") == "none" then
+        -- 던전 안 퀘는 "위치 모름" 대신 "던전 안"
+        local ok, ii = pcall(IsInInstance)
+        local okN, iname = pcall(GetInstanceInfo)
+        if ok and ii and okN and iname and e.zone == iname then where = "던전 안" end
+    end
     if CurZone() == "all" or CurZone() == "turnin" then where = ZoneKey(e) end
     r.sub:SetText((prog ~= "" and (prog .. " · ") or "") .. where)
     r.xp:SetText("")       -- 목록이 좁아서 경험치는 마우스를 올리면 (툴팁)
@@ -1051,6 +1073,95 @@ local function ZoneIdByName(name)
     end
     zoneIdCache[name] = found
     return found or nil
+end
+
+-- 던전 · 공격대 안이면 그 이름 (아니면 nil)
+local function DungeonName()
+    local ok, inInst, itype = pcall(IsInInstance)
+    if not (ok and inInst and (itype == "party" or itype == "raid")) then return end
+    local ok2, name = pcall(GetInstanceInfo)
+    if ok2 and name and name ~= "" then return name end
+    return ZoneText()
+end
+-- 이 퀘가 지금 들어와 있는 던전 퀘인지
+local function InThisDungeon(e, dn)
+    dn = dn or DungeonName()
+    if not (dn and e) then return false end
+    return e.zone == dn or ZoneKey(e) == dn
+end
+-- 던전 지도 번호: 내 위치가 안 잡히면 던전 이름으로 찾아요
+local dunMapCache = {}
+local function DungeonMap(dn)
+    if not dn then return end
+    if dunMapCache[dn] ~= nil then return dunMapCache[dn] or nil end
+    local found = false
+    for _, t in ipairs({ Enum.UIMapType.Dungeon, Enum.UIMapType.Micro, Enum.UIMapType.Orphan }) do
+        local ok, kids = pcall(C_Map.GetMapChildrenInfo, 947, t, true)
+        for _, k in ipairs(ok and kids or {}) do
+            if k.name == dn then found = k.mapID; break end
+        end
+        if found then break end
+    end
+    dunMapCache[dn] = found
+    return found or nil
+end
+
+-- 던전 지도 그림 (게임 안 Interface\\WorldMap 그림 경로 · 층마다 4 x 3 조각)
+-- [인스턴스 번호] = { "폴더\\이름(층)", ... }  →  ..._1 ~ _12
+local DUN_ART = {
+    [33] = { "shadowfangkeep\\shadowfangkeep1", "shadowfangkeep\\shadowfangkeep2", "shadowfangkeep\\shadowfangkeep3", "shadowfangkeep\\shadowfangkeep4", "shadowfangkeep\\shadowfangkeep5", "shadowfangkeep\\shadowfangkeep6", "shadowfangkeep\\shadowfangkeep7" }, -- Shadowfang Keep
+    [34] = { "thestockade\\thestockade1" }, -- Stormwind Stockade
+    [36] = { "thedeadmines\\thedeadmines1", "thedeadmines\\thedeadmines2" }, -- Deadmines
+    [43] = { "wailingcaverns\\wailingcaverns1" }, -- Wailing Caverns
+    [47] = { "razorfenkraul\\razorfenkraul1" }, -- Razorfen Kraul
+    [48] = { "blackfathomdeeps\\blackfathomdeeps1", "blackfathomdeeps\\blackfathomdeeps2", "blackfathomdeeps\\blackfathomdeeps3" }, -- Blackfathom Deeps
+    [70] = { "uldaman\\uldaman1", "uldaman\\uldaman2" }, -- Uldaman
+    [90] = { "gnomeregan\\gnomeregan1", "gnomeregan\\gnomeregan2", "gnomeregan\\gnomeregan3", "gnomeregan\\gnomeregan4" }, -- Gnomeregan
+    [109] = { "thetempleofatalhakkar\\thetempleofatalhakkar1" }, -- Sunken Temple
+    [129] = { "razorfendowns\\razorfendowns1" }, -- Razorfen Downs
+    [189] = { "scarletmonastery\\scarletmonastery1", "scarletmonastery\\scarletmonastery2", "scarletmonastery\\scarletmonastery3", "scarletmonastery\\scarletmonastery4" }, -- Scarlet Monastery
+    [229] = { "blackrockspire\\blackrockspire1", "blackrockspire\\blackrockspire2", "blackrockspire\\blackrockspire3", "blackrockspire\\blackrockspire4", "blackrockspire\\blackrockspire5", "blackrockspire\\blackrockspire6", "blackrockspire\\blackrockspire7" }, -- Blackrock Spire
+    [230] = { "blackrockdepths\\blackrockdepths1", "blackrockdepths\\blackrockdepths2" }, -- Blackrock Depths
+    [249] = { "onyxiaslair\\onyxiaslair1" }, -- Onyxia's Lair
+    [289] = { "scholomance\\scholomance1", "scholomance\\scholomance2", "scholomance\\scholomance3", "scholomance\\scholomance4" }, -- Scholomance
+    [329] = { "stratholme\\stratholme1", "stratholme\\stratholme2" }, -- Stratholme
+    [349] = { "maraudon\\maraudon1", "maraudon\\maraudon2" }, -- Maraudon
+    [389] = { "ragefire\\ragefire1" }, -- Ragefire Chasm
+    [409] = { "moltencore\\moltencore1" }, -- Molten Core
+    [429] = { "diremaul\\diremaul1", "diremaul\\diremaul2", "diremaul\\diremaul3", "diremaul\\diremaul4", "diremaul\\diremaul5", "diremaul\\diremaul6" }, -- Dire Maul
+    [469] = { "blackwinglair\\blackwinglair1", "blackwinglair\\blackwinglair2", "blackwinglair\\blackwinglair3", "blackwinglair\\blackwinglair4" }, -- Blackwing Lair
+    [531] = { "ahnqiraj\\ahnqiraj1", "ahnqiraj\\ahnqiraj2", "ahnqiraj\\ahnqiraj3" }, -- Ahn'Qiraj Temple
+}
+
+-- 던전 안: 게임 지도(C_Map)가 그림을 안 주면 던전 그림 파일을 직접 깔아요 (층은 지도를 누르면 넘김)
+local function PaintDungeonArt(panel)
+    local ok, _, _, _, _, _, _, _, iid = pcall(GetInstanceInfo)
+    local floors = ok and iid and DUN_ART[iid]
+    if not floors then return false end
+    panel.dunFloor = panel.dunFloor or 1
+    if panel.dunIid ~= iid then panel.dunIid = iid; panel.dunFloor = 1 end
+    local f = ((panel.dunFloor - 1) % #floors) + 1
+    local base = "Interface\\WorldMap\\" .. floors[f] .. "_"
+    panel.tiles = panel.tiles or {}
+    for _, t in ipairs(panel.tiles) do t:Hide() end
+    for _, t in ipairs(panel.ov or {}) do t:Hide() end
+    local W, H = panel:GetWidth(), panel:GetHeight()
+    local sx, sy = W / 1002, H / 668          -- 그림 1024 x 768 중 쓰는 부분
+    for i = 1, 12 do
+        local t = panel.tiles[i]
+        if not t then t = panel.art:CreateTexture(nil, "BACKGROUND", nil, 1); panel.tiles[i] = t end
+        local c, r = (i - 1) % 4, math.floor((i - 1) / 4)
+        t:SetTexture(base .. i)
+        t:SetTexCoord(0, 1, 0, 1)
+        t:SetSize(256 * sx, 256 * sy)
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", panel.art, "TOPLEFT", c * 256 * sx, -r * 256 * sy)
+        t:SetVertexColor(0.86, 0.82, 0.78, 1)
+        t:Show()
+    end
+    panel.noArt:Hide()
+    panel.dunFloors = #floors
+    return true
 end
 
 local function ContinentOf(m)
@@ -1319,11 +1430,24 @@ local function PaintMap()
         order = {}
         for _, id in ipairs(BuildOrder()) do if byId[id] then order[#order + 1] = byId[id] end end
     end
+    -- 던전 안: 던전 지도(내 위치가 안 잡히면 이름으로 찾아서) + 그 던전 퀘만, 넓은 지도는 안 써요
+    local dn = DungeonName()
+    if dn then
+        local hasArt = false
+        if m then
+            local ok, files = pcall(C_Map.GetMapArtLayerTextures, m, 1)
+            hasArt = ok and files and #files > 0
+        end
+        if not hasArt then m = DungeonMap(dn) or m end
+        local only = {}
+        for _, e in ipairs(order) do if InThisDungeon(e, dn) then only[#only + 1] = e end end
+        if #only > 0 then order = only end
+    end
 
     -- 넓은 지도: 다음 번호가 다른 지역이고, 이 지역에 남은 게 없을 때
     local first = order[1]
     local wideOn = false
-    if m and first and not HereEntry(first, m) then
+    if m and first and not dn and not HereEntry(first, m) then
         local zid = ZoneIdByName(ZoneKey(first))
         if zid and zid ~= m then
             for _, mk in ipairs(p.marks) do mk:Hide() end
@@ -1355,7 +1479,23 @@ local function PaintMap()
     end
     if p.ban and p.ban:IsShown() and not (p.arriveUntil and GetTime() < p.arriveUntil) then p.ban:Hide() end
 
-    if p.mapID ~= m then p.mapID = m; PaintMapArt(p, m) end
+    if dn then
+        if p.mapID ~= m or not p.dunArt then
+            p.mapID = m; PaintMapArt(p, m)
+            p.dunArt = p.noArt:IsShown() and PaintDungeonArt(p) or false
+        end
+        if p.dunArt and (p.dunFloors or 1) > 1 then
+            p.floorBtn.fs:SetText(("%d / %d층 ▸"):format(((p.dunFloor or 1) - 1) % p.dunFloors + 1, p.dunFloors))
+            p.floorBtn:SetWidth(p.floorBtn.fs:GetStringWidth() + 20)
+            p.floorBtn:Show()
+        else
+            p.floorBtn:Hide()
+        end
+    else
+        if p.dunArt then p.dunArt = nil; p.mapID = nil end
+        if p.floorBtn then p.floorBtn:Hide() end
+        if p.mapID ~= m then p.mapID = m; PaintMapArt(p, m) end
+    end
     local px, py = PlayerXY(m)
     if px then
         p.me:ClearAllPoints(); p.me:SetPoint("CENTER", p.layer, "TOPLEFT", MapPoint(p, px, py))
@@ -2208,10 +2348,21 @@ local function MakeRow(i)
     r.hlBar:SetVertexColor(0.56, 0.86, 0.61, 1)
     r.hl:Hide(); r.hlBar:Hide()
     -- 반납 상자 (같은 NPC 반납을 한 줄로 묶을 때): 노란 둥근 판
+    -- (A안) 테두리 없이 왼쪽 노란 줄 + 오른쪽으로 옅어지는 어두운 판 (목표 달성 반짝과 같은 모양)
     r.boxF = CreateFrame("Frame", nil, r)
-    r.boxF:SetPoint("TOPLEFT", -6, 4); r.boxF:SetPoint("BOTTOMRIGHT", 2, 0)
+    r.boxF:SetPoint("TOPLEFT", -6, 3); r.boxF:SetPoint("BOTTOMRIGHT", 0, 2)
     r.boxF:SetFrameLevel(math.max(0, r:GetFrameLevel() - 1))
-    r.boxFill, r.boxEdge = Plate(r.boxF, 10, { 0.945, 0.851, 0.541, 0.1 }, { 0.945, 0.851, 0.541, 0.45 })
+    r.boxFill = r.boxF:CreateTexture(nil, "BACKGROUND"); r.boxFill:SetTexture(WHITE); r.boxFill:SetAllPoints()
+    function r.boxF:Paint(hot)
+        local a1, a2 = hot and 0.88 or 0.78, hot and 0.3 or 0.18
+        local c = hot and { 0.235, 0.172, 0.078 } or { 0.11, 0.08, 0.063 }
+        if not pcall(function()
+            r.boxFill:SetGradient("HORIZONTAL", CreateColor(c[1], c[2], c[3], a1), CreateColor(c[1], c[2], c[3], a2))
+        end) then r.boxFill:SetVertexColor(c[1], c[2], c[3], (a1 + a2) / 2) end
+        r.boxBar:SetVertexColor(0.945, 0.851, 0.541, hot and 1 or 0.75)
+    end
+    r.boxBar = r.boxF:CreateTexture(nil, "BORDER"); r.boxBar:SetTexture(WHITE); r.boxBar:SetWidth(3)
+    r.boxBar:SetPoint("TOPLEFT"); r.boxBar:SetPoint("BOTTOMLEFT")
     r.boxF:Hide()
     -- 완료 토끼 도장 (작게, 반납할 때까지 이름 옆에)
     r.stamp = r:CreateTexture(nil, "OVERLAY", nil, 2)
@@ -2620,7 +2771,7 @@ NearTurnins = function()
                 local d = yd or (math.sqrt((x - px) ^ 2 + (y - py) ^ 2) * 15)
                 if d <= NEAR_YD then
                     local t = TurnInInfo(e)
-                    local npc = (t and t.npc) or (guide[e.key] and guide[e.key].npc) or "반납 NPC"
+                    local npc = NpcKo((t and t.npc) or (guide[e.key] and guide[e.key].npc)) or "반납 NPC"
                     local g = groups[npc]
                     if not g then g = { npc = npc, list = {}, d = d, x = x, y = y }; groups[npc] = g end
                     g.list[#g.list + 1] = e
@@ -2840,6 +2991,17 @@ RefreshTracker = function()
         nearH = nearH + 32
     end
     local route = Route()
+    -- 던전 안이면 그 던전 퀘만 (밖의 퀘는 나오면 다시)
+    trk.dunHidden, trk.dunName = 0, nil
+    local dn = DungeonName()
+    if dn then
+        local only = {}
+        for _, e in ipairs(route) do if InThisDungeon(e, dn) then only[#only + 1] = e end end
+        if #only > 0 then
+            trk.dunHidden, trk.dunName = #route - #only, dn
+            route = only
+        end
+    end
     local total = math.max(CDB.total or #route, #route)
     for _, r in ipairs(trk.rows) do r:Hide(); r.e = nil; r.cur = nil end
     trk.more:Hide()
@@ -2921,8 +3083,7 @@ RefreshTracker = function()
         r.boxF:SetShown(it.group and true or false)
         if it.group then
             local hot = r.cur or (nearG and nearG.npc == it.npc)
-            if r.boxFill.SetColor then r.boxFill:SetColor({ 0.945, 0.851, 0.541, hot and 0.2 or 0.1 }) end
-            if r.boxEdge.SetColor then r.boxEdge:SetColor({ 0.945, 0.851, 0.541, hot and 0.95 or 0.45 }) end
+            r.boxF:Paint(hot)
             r.boxF:SetAlpha((hot or k <= 2) and 1 or 0.75)
         end
         r.stamp:SetShown(e.done and not it.group and not (stampFx and stampFx.id == e.id and stampFx.big) and true or false)
@@ -2933,7 +3094,8 @@ RefreshTracker = function()
         if not r.cur then r.dist:SetText("") end
         -- 목표 줄
         local live = GoalLive(e)
-        r.hl:SetShown(live and true or false); r.hlBar:SetShown(live and true or false)
+        -- 반납 상자 안에서는 초록 반짝을 안 써요 (노란 상자와 색이 섞여서)
+        r.hl:SetShown(live and not it.group and true or false); r.hlBar:SetShown(live and not it.group and true or false)
         local lines = {}
         if it.group then
             -- 상자: 퀘 이름들 한 줄 + NPC 앞이면 안내
@@ -3001,7 +3163,7 @@ RefreshTracker = function()
         end
         r:SetHeight(h)
         r:Show()
-        y = y - h
+        y = y - h - (it.group and 6 or 0)     -- 반납 줄끼리 붙지 않게 조금 띄워요
     end
     local rest = 0
     for k = shown + 1, #items do rest = rest + (items[k].group and #items[k].group or 1) end
@@ -3012,6 +3174,10 @@ RefreshTracker = function()
         if he and not Sel()[id] then held = held + 1; heldName = heldName or he.title else CDB.held[id] = nil end
     end
     local moreTxt = rest > 0 and ("+ %d개 더"):format(rest) or nil
+    if (trk.dunHidden or 0) > 0 then
+        local h = ("|cff9a8a86던전 밖 퀘 %d개는 나오면 다시 보여요|r"):format(trk.dunHidden)
+        moreTxt = moreTxt and (moreTxt .. "   " .. h) or h
+    end
     if held > 0 then
         local h = ("|cff9a8a86보류 %d · %s%s (퀘판에서 넣기)|r"):format(held, heldName or "", held > 1 and " 외" or "")
         moreTxt = moreTxt and (moreTxt .. "   " .. h) or h
@@ -3175,22 +3341,51 @@ local function PaintWorldMap()
     wmLayer.badges = wmLayer.badges or {}
     local nb = 0
     local h = 20 * scale
-    for _, g in ipairs(groups) do
+    -- 지도를 덜 가리게: 다음 목표(첫 무리)만 번호 원, 나머지는 길 위 작은 점 (마우스 → 번호 + 퀘 이름)
+    for gi, g in ipairs(groups) do
         local n = #g.ns
-        local mk = wmLayer:Mark(g.ns[1], g.done, h)
-        mk.n:SetFont(mk.n:GetFont(), math.floor(12 * scale), "")
+        local first = gi == 1
+        -- 크기는 화면 기준 고정값, 지도 확대 비율은 프레임 SetScale로 (글자 크기가 0이 되지 않게)
+        local mk = wmLayer:Mark(first and g.ns[1] or "", g.done, first and 23 or 9)
+        mk:SetScale(scale)
+        mk.n:SetFont(mk.n:GetFont(), first and 16 or 13, "")
         mk.disc:SetTexture(MEDIA .. "circle"); mk.glow:SetTexture(MEDIA .. "circle")
-        mk:SetFrameLevel(wmLayer:GetFrameLevel() + 2)
-        mk:ClearAllPoints(); mk:SetPoint("CENTER", wmLayer, "TOPLEFT", g.x, g.y)
+        if first then
+            mk.glow:SetTexture(MEDIA .. "mring")                        -- 속이 비치게 얇은 테만
+            mk.glow:SetVertexColor(1, 1, 1, 0.95)                       -- 흰 테
+            mk.glow:SetPoint("TOPLEFT", -1, 1); mk.glow:SetPoint("BOTTOMRIGHT", 1, -1)
+        else
+            mk.glow:SetVertexColor(0.23, 0.11, 0.14, 0.9)               -- 진한 테
+            mk.glow:SetPoint("TOPLEFT", -1.5, 1.5); mk.glow:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+        end
+        -- 다음 목표 원은 반투명 (속 40%) + 흰 번호, 마우스를 올리면 잠깐 꽉 찬 원
+        mk.leelFirst = first
+        local dc = g.done and { 0.945, 0.851, 0.541 } or P.acc
+        mk.leelC = dc
+        if first then
+            mk.disc:SetVertexColor(dc[1], dc[2], dc[3], 0.4)
+            mk.n:SetTextColor(1, 1, 1, 1)
+            mk.n:SetShadowColor(0.23, 0.11, 0.14, 1); mk.n:SetShadowOffset(1, -1)
+        else
+            mk.n:SetShadowColor(0, 0, 0, 0)
+        end
+        mk:SetHitRectInsets(-6, -6, -6, -6)
+        mk:SetFrameLevel(wmLayer:GetFrameLevel() + (first and 3 or 2))
+        mk:ClearAllPoints(); mk:SetPoint("CENTER", wmLayer, "TOPLEFT", g.x / scale, g.y / scale)
         mk.leelG = g
         if not mk.leelHover then
             mk.leelHover = true
             mk:EnableMouse(true)
             mk:SetScript("OnEnter", function(self)
+                if self.leelFirst and self.leelC then
+                    local c = self.leelC
+                    self.disc:SetVertexColor(c[1], c[2], c[3], 1)
+                    self.n:SetTextColor(P.ink[1], P.ink[2], P.ink[3], 1); self.n:SetShadowColor(0, 0, 0, 0)
+                end
                 local gg = self.leelG
-                if not (gg and #gg.ns > 1) then return end
+                if not gg then return end
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText("이 자리 퀘 " .. #gg.ns .. "개", 1, 0.84, 0.88)
+                GameTooltip:SetText(#gg.ns > 1 and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
                 for i, num in ipairs(gg.ns) do
                     local e = gg.es[i]
                     local t = e and e.title or "?"
@@ -3199,9 +3394,16 @@ local function PaintWorldMap()
                 end
                 GameTooltip:Show()
             end)
-            mk:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            mk:SetScript("OnLeave", function(self)
+                GameTooltip:Hide()
+                if self.leelFirst and self.leelC then
+                    local c = self.leelC
+                    self.disc:SetVertexColor(c[1], c[2], c[3], 0.4)
+                    self.n:SetTextColor(1, 1, 1, 1); self.n:SetShadowColor(0.23, 0.11, 0.14, 1)
+                end
+            end)
         end
-        if n > 1 then
+        if n > 1 and first then
             nb = nb + 1
             local bd = wmLayer.badges[nb]
             if not bd then
@@ -3214,12 +3416,12 @@ local function PaintWorldMap()
                 bd.n = Num(bd, 10, P.accHi or P.acc); bd.n:SetPoint("CENTER", 0, 0); bd.n:SetShadowColor(0, 0, 0, 0)
                 wmLayer.badges[nb] = bd
             end
-            local bs = 15 * scale
-            bd:SetSize(bs + (n > 9 and 6 * scale or 0), bs)
-            bd.n:SetFont(bd.n:GetFont(), math.floor(10 * scale), "")
+            bd:SetScale(scale)
+            bd:SetSize(15 + (n > 9 and 6 or 0), 15)
+            bd.n:SetFont(bd.n:GetFont(), 10, "")
             bd.n:SetText("+" .. (n - 1))
             bd:SetFrameLevel(wmLayer:GetFrameLevel() + 4)
-            bd:ClearAllPoints(); bd:SetPoint("CENTER", wmLayer, "TOPLEFT", g.x + h * 0.45, g.y + h * 0.45)
+            bd:ClearAllPoints(); bd:SetPoint("CENTER", wmLayer, "TOPLEFT", g.x / scale + 20 * 0.55, g.y / scale + 20 * 0.55)
             bd:Show()
         end
     end
@@ -3400,30 +3602,67 @@ local function RiskOf(e)
 end
 -- 토끼 추천 순서가 있으면 새 퀘를 그 순서 안의 가장 덜 돌아가는 자리에 끼워요
 --   (그냥 두면 추천 밖 퀘로 맨 뒤에 붙어서, 바로 옆 퀘가 반납들 뒤로 밀렸어요)
-local function InsertIntoRec(id)
+local function InsertIntoRec(id, retry)
     local rec = CDB.rec
     if not (rec and rec.order) then return end
-    for _, rid in ipairs(rec.order) do if rid == id then return end end
+    for i, rid in ipairs(rec.order) do
+        if rid == id then
+            if not retry then return end
+            table.remove(rec.order, i)       -- 다시 넣기 (처음엔 위치를 몰라서 맨 뒤에 붙였던 것)
+            break
+        end
+    end
     local m = PlayerMap()
     local e = byId[id]
     local nx, ny
     if e then nx, ny = QuestPos(e, m) end      -- ("e and QuestPos()"는 값 하나만 돌려줘서 y가 빠졌어요)
-    if not (nx and ny) then table.insert(rec.order, id) return end
+    if not (nx and ny) then
+        table.insert(rec.order, id)
+        -- 막 받은 퀘는 Questie 아이콘이 늦게 생겨 위치를 모를 때가 있어요: 3초 뒤 한 번 더 자리 잡기
+        if not retry then
+            C_Timer.After(3, function()
+                if not (byId[id] and Sel()[id] and CDB.rec) then return end
+                InsertIntoRec(id, true)
+                CDB.route = BuildOrder()
+                if RefreshTracker then RefreshTracker() end
+                if RefreshBoard then RefreshBoard() end
+            end)
+        end
+        return
+    end
+    -- 토끼 추천과 같은 기준: 거리(야드) + 레벨 1 차이 = 300m
+    --   낮은 레벨 퀘가 높은 레벨 묶음 뒤로, 높은 레벨 퀘가 낮은 레벨 묶음 앞으로 가지 않게
+    local function dist(a, b)
+        local yd = Yards(m, a[1], a[2], b[1], b[2])
+        return yd or (math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2) * 15)
+    end
+    local function lv(x) return (x and not x.done and x.level) or nil end
+    local newLv = lv(e)
     local px, py = PlayerXY(m)
-    local pts = { { px or nx, py or ny } }          -- 0번 = 내 자리
+    local pts = { { px or nx, py or ny } }          -- 1번 = 내 자리
     local idx = { 0 }
+    local lvs = { false }
     for i, rid in ipairs(rec.order) do
         local re = byId[rid]
         local x, y
         if re then x, y = QuestPos(re, m) end
-        if x and y then pts[#pts + 1] = { x, y }; idx[#idx + 1] = i end
+        if x and y then pts[#pts + 1] = { x, y }; idx[#idx + 1] = i; lvs[#lvs + 1] = lv(re) or false end
     end
-    local function d(a, b) return math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2) end
-    local new = { nx, ny }
+    local p = { nx, ny }
     local bestAt, bestCost = #rec.order + 1, math.huge
     for k = 1, #pts do
         local a, b = pts[k], pts[k + 1]
-        local cost = b and (d(a, new) + d(new, b) - d(a, b)) or d(a, new)
+        local cost = b and (dist(a, p) + dist(p, b) - dist(a, b)) or dist(a, p)
+        if newLv then
+            -- 앞에 있는 할 일 중 나보다 레벨 높은 것, 뒤에 있는 할 일 중 나보다 레벨 낮은 것만큼 벌점
+            for j = 2, #pts do
+                local L = lvs[j]
+                if L then
+                    if j <= k and L > newLv then cost = cost + (L - newLv) * 300 end
+                    if j > k and L < newLv then cost = cost + (newLv - L) * 300 end
+                end
+            end
+        end
         if cost < bestCost then
             bestCost = cost
             bestAt = b and idx[k + 1] or (#rec.order + 1)
@@ -3531,6 +3770,8 @@ ev:RegisterEvent("QUEST_LOG_UPDATE")
 ev:RegisterEvent("QUEST_ACCEPTED")
 ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
+ev:RegisterEvent("QUEST_PROGRESS")
+ev:RegisterEvent("QUEST_COMPLETE")
 ev:SetScript("OnEvent", function(_, e, a1, a2)
     if e == "PLAYER_LOGIN" then
         ForgLevelingDB = ForgLevelingDB or {}
@@ -3544,6 +3785,23 @@ ev:SetScript("OnEvent", function(_, e, a1, a2)
         return
     end
     if not DB then return end
+    if e == "QUEST_PROGRESS" or e == "QUEST_COMPLETE" then
+        -- 반납 창: Questie의 영어 NPC 이름 → 게임의 한글 이름을 배워요
+        local okQ, id = pcall(GetQuestID)
+        local q = okQ and byId[id]
+        local okN, ko = pcall(UnitName, "npc")
+        if q and okN and type(ko) == "string" and not (issecretvalue and issecretvalue(ko)) and ko ~= "" then
+            QuestiePos(q, PlayerMap(), nil, nil)
+            local c = qieCache[q.id]
+            for _, pt in ipairs(c and c.fin or {}) do
+                if type(pt.npc) == "string" and pt.npc ~= ko and not pt.npc:find("[\128-\255]") then
+                    DB.npcKo = DB.npcKo or {}
+                    DB.npcKo[pt.npc] = ko
+                end
+            end
+        end
+        return
+    end
     if e == "QUEST_ACCEPTED" then
         local id = a2 or a1
         if type(id) == "number" and id < 100 and a2 == nil then id = nil end

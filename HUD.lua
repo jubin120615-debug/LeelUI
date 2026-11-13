@@ -65,6 +65,7 @@ local function CreateSide(hud, unit, mirrored)
         local hb = CreateFrame("StatusBar", nil, f.hp)
         hb:SetFrameLevel(sb:GetFrameLevel() + 1)
         hb:SetSize(BAR_W - 4, BAR_H - 4)
+        f.hp.heal = hb
         if mirrored then
             hb:SetPoint("TOPRIGHT", f.hp.fill, "TOPLEFT", 0, 0)
             hb:SetReverseFill(true)
@@ -113,13 +114,17 @@ local function CreateSide(hud, unit, mirrored)
     f.hpValue:SetShadowColor(0.35, 0.06, 0.1, 0.8); f.hpValue:SetShadowOffset(1, -1)
     f.hpPct = ns.Num(f.hp.over, 15, { 1, 0.86, 0.86 })
     f.hpPct:SetShadowColor(0.35, 0.06, 0.1, 0.8); f.hpPct:SetShadowOffset(1, -1)
+    -- 숫자는 초상화 쪽 끝, %는 바깥쪽 끝 (대상은 거울처럼)
     if mirrored then
         f.hpValue:SetPoint("RIGHT", f.hp, "RIGHT", -20, 0)
-        f.hpPct:SetPoint("BOTTOMRIGHT", f.hpValue, "BOTTOMLEFT", -6, 2)
+        f.hpPct:SetPoint("LEFT", f.hp, "LEFT", 14, 0)
     else
         f.hpValue:SetPoint("LEFT", f.hp, "LEFT", 20, 0)
-        f.hpPct:SetPoint("BOTTOMLEFT", f.hpValue, "BOTTOMRIGHT", 6, 2)
+        f.hpPct:SetPoint("RIGHT", f.hp, "RIGHT", -14, 0)
     end
+    f.hpBase = { 23, 15 }
+    f.nameBase, f.lvBase, f.lvLabelBase = 18, 18, 13
+    if ns.ApplyHpTextSize then ns.ApplyHpTextSize(f) end
 
     -- 쓰러졌을 때 바 가운데 조용한 상태 글씨 ("쓰러짐" / "다 주웠어요")
     f.state = ns.Font(f, 13, { 0.78, 0.74, 0.74 })
@@ -317,6 +322,75 @@ local function UpdateHealth(f)
 end
 
 -- 체력 숫자: 직업 캡이 있으면 캡에 안 가리게 안쪽으로
+-- 체력 숫자 · % 글씨 크기 (허브 > 위쪽 HUD > 체력 글씨 크기: +0 ~ +8)
+function ns.ApplyHpTextSize(f)
+    if not (f and f.hpValue and f.hpBase) then return end
+    local add = tonumber(ns.db and ns.db.hpTextAdd) or 0
+    local file = ns.NUM
+    -- 글씨 강조만큼 체력바도 두껍게 (위아래로 반씩 늘려서 이름 · 아래 줄과 안 겹치게)
+    if f.hp and f.nameA then
+        f.hp:SetHeight(BAR_H + add)
+        f.hp:ClearAllPoints()
+        f.hp:SetPoint(f.nameA, f, f.nameA, BAR_X * (f.nameSx or 1), -34 + math.floor(add / 2 + 0.5))
+        if f.hp.heal then f.hp.heal:SetHeight(BAR_H - 4 + add) end
+    end
+    if not f.hpValue:SetFont(file, f.hpBase[1] + add, "") then f.hpValue:SetFont(ns.FONT, f.hpBase[1] + add, "") end
+    -- %는 숫자보다 덜 커지게 (바 안에 들어가도록)
+    local pa = math.floor(add * 0.75 + 0.5)
+    if not f.hpPct:SetFont(file, f.hpBase[2] + pa, "") then f.hpPct:SetFont(ns.FONT, f.hpBase[2] + pa, "") end
+    -- 이름 · 레벨도 같이 (이름은 글꼴을 바꿔도 이 크기를 지키게 TrackText에 새 크기로 다시 알려요)
+    if f.name and f.nameBase then
+        local ns_ = f.nameBase + add
+        f.name:SetFont(ns.FONT, ns_, "")
+        -- 커진 만큼 이름 줄을 위로 올려서 체력바와 안 겹치게
+        if f.nameA then
+            f.name:ClearAllPoints()
+            f.name:SetPoint(f.nameA, f, f.nameA, (POR_W + 6) * (f.nameSx or 1), -6 + math.floor(add * 0.8 + 0.5))
+        end
+        if ns.TrackText then ns.TrackText(f.name, ns_, "") end
+    end
+    if f.lv and f.lvBase then
+        local lvFile = ns.NUM_B or ns.NUM
+        if not f.lv:SetFont(lvFile, f.lvBase + add, "") then f.lv:SetFont(ns.FONT, f.lvBase + add, "") end
+    end
+    if f.lvLabel and f.lvLabelBase then
+        local la = f.lvLabelBase + pa
+        f.lvLabel:SetFont(ns.FONT, la, "")
+        if ns.TrackText then ns.TrackText(f.lvLabel, la, "") end
+    end
+    -- 아래 줄 (자원 숫자 · 마나/기력/분노 글씨)도 같이
+    local half = math.floor(add / 2 + 0.5)
+    if f.power then
+        f.power:ClearAllPoints()
+        f.power:SetPoint("TOPLEFT", f, "TOPLEFT", BAR_X + 14, -73 - half)
+    end
+    if f.manaLine then
+        f.manaLine:ClearAllPoints()
+        f.manaLine:SetPoint("TOPLEFT", f, "TOPLEFT", BAR_X + 12, -90 - half - pa)
+    end
+    for _, k in ipairs({ "powerText", "manaText", "tpowerText", "manaLabel", "tpowerLabel" }) do
+        local fs = f[k]
+        if fs then
+            f.subBase = f.subBase or {}
+            if not f.subBase[k] then
+                local file, size = fs:GetFont()
+                f.subBase[k] = { file = file, size = size or 12 }
+            end
+            local b = f.subBase[k]
+            local sz = b.size + pa
+            if not (b.file and fs:SetFont(b.file, sz, "")) then fs:SetFont(ns.FONT, sz, "") end
+            if (k == "manaLabel" or k == "tpowerLabel") and ns.TrackText then ns.TrackText(fs, sz, "") end
+        end
+    end
+end
+function ns.SetHpTextAdd(v)
+    ns.db.hpTextAdd = v
+    local fr = ns.hudFrames
+    if fr then
+        for _, k in ipairs({ "player", "target" }) do if fr[k] then ns.ApplyHpTextSize(fr[k]) end end
+    end
+end
+
 local function PlaceHpValue(f, capShown)
     local side = f.mirrored and "RIGHT" or "LEFT"
     f.hpValue:ClearAllPoints()
@@ -907,6 +981,8 @@ function ns:CreateHUD()
     local target = CreateSide(hud, "target", true)
     AddTargetExtras(target)
     AddTargetPower(target)
+    -- 아래 줄 글씨가 만들어진 뒤라 글씨 강조를 한 번 더 (자원 · 마나 글씨까지)
+    ns.ApplyHpTextSize(player); ns.ApplyHpTextSize(target)
     RegisterUnitWatch(target)
     local center = CreateCenter(hud)
     local pet = CreatePet(hud)

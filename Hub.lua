@@ -94,6 +94,10 @@ local MODULES = {
                   ns:SetHudScale(v / 100)
                   if InCombatLockdown() then Print("전투가 끝나면 HUD 크기가 바뀌어요.") end
               end },
+            { t = "seg", label = "글씨 강조", hint = "이름 · 체력 · 바",
+              options = { { "보통", 0 }, { "크게", 4 }, { "아주 크게", 8 } },
+              get = function() return tonumber(ns.db.hpTextAdd) or 0 end,
+              set = function(v) if ns.SetHpTextAdd then ns.SetHpTextAdd(v) end end },
             { t = "toggle", label = "기본 플레이어/대상 창 숨기기", hint = "다시 불러오기 후 적용",
               get = function() return ns.db.hideBlizzard end,
               set = function(v) ns.db.hideBlizzard = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
@@ -209,6 +213,22 @@ local MODULES = {
             { t = "toggle", label = "마우스 따라다니기", hint = "끄면 블리자드 기본 자리(오른쪽 아래)",
               get = function() return ns.db.tipCursor ~= false end,
               set = function(v) ns.db.tipCursor = v and true or false end },
+        },
+    },
+    {
+        key = "LeelUI_Mouse", builtin = true, always = true, cat = "view",
+        title = "마우스", sub = "클릭 퐁 · 반응 · 꼬리", icon = "hb_mouse",
+        desc = "커서 그림은 게임이 정해서 못 바꾸지만, 커서 둘레에 르엘 효과를 그려요.",
+        items = {
+            { t = "toggle", label = "클릭 퐁", hint = "짧게 누르면 분홍 링 + 하트 (오른클릭은 크림)",
+              get = function() return ns.db.cfxClick ~= false end,
+              set = function(v) ns.db.cfxClick = v and true or false end },
+            { t = "toggle", label = "가리키면 반응", hint = "적 빨간 점선 · NPC 하트 · 주울 시체 별",
+              get = function() return ns.db.cfxReact ~= false end,
+              set = function(v) ns.db.cfxReact = v and true or false; if ns.CursorFxRefresh then ns.CursorFxRefresh() end end },
+            { t = "toggle", label = "반짝 꼬리", hint = "빠르게 움직일 때만 분홍 점 · 별",
+              get = function() return ns.db.cfxTrail ~= false end,
+              set = function(v) ns.db.cfxTrail = v and true or false end },
         },
     },
     {
@@ -451,6 +471,9 @@ local MODULES = {
             { t = "toggle", label = "버릴 템 고르기 창", hint = "제일 싼 템 3개 + 각각 버리기 버튼 (전투가 끝나면 떠요)",
               get = function() return ns.BagsDB().full ~= false end,
               set = function(v) ns.BagsDB().full = v; if not v and ns.HideBagFull then ns.HideBagFull() end end },
+            { t = "toggle", label = "새로 들어온 것, 가방을 닫아도 남기기", hint = "끄면 가방을 닫을 때 제자리로 돌아가요",
+              get = function() return ns.BagsDB().keepNew end,
+              set = function(v) ns.BagsDB().keepNew = v end },
         },
     },
     {
@@ -511,7 +534,7 @@ local CATS = {
     { key = "item",  label = "가방·아이템", icon = "hb_c_util" },
 }
 local MOD_CAT = {
-    LeelUI = "view", LeelUI_ABar = "view", LeelUI_Cast = "view", LeelUI_Plates = "view", LeelUI_Tip = "view",
+    LeelUI = "view", LeelUI_ABar = "view", LeelUI_Cast = "view", LeelUI_Plates = "view", LeelUI_Tip = "view", LeelUI_Mouse = "view",
     LeelUI_Chat = "view", LeelUI_Font = "view",
     ForgLeveling = "quest", LeelUI_QTracker = "none", LeelUI_Quest = "quest", LeelUI_QItem = "quest", LeelSpot = "quest",
     LeelMap = "map", LeelUI_Minimap = "map",
@@ -521,7 +544,7 @@ local MOD_CAT = {
 }
 local MOD_ORDER = {}
 do
-    local order = { "LeelUI", "LeelUI_ABar", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Chat", "LeelUI_Font",
+    local order = { "LeelUI", "LeelUI_ABar", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font",
         "ForgLeveling", "LeelUI_QTracker", "LeelUI_Quest", "LeelUI_QItem", "LeelSpot",
         "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelMark",
         "LeelUI_Bags", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
@@ -575,9 +598,50 @@ local sel = 1
 local function Refresh() end -- 아래에서 다시 정의
 
 local function BuildPane(f)
-    local pane = CreateFrame("Frame", nil, f)
-    pane:SetPoint("TOPLEFT", RAIL + 1, -TOP)
-    pane:SetPoint("BOTTOMRIGHT", 0, FOOT)
+    -- 줄이 많으면 넘치지 않게 휠로 내려 보는 칸 (안쪽 pane이 실제 내용)
+    local sf = CreateFrame("ScrollFrame", nil, f)
+    sf:SetPoint("TOPLEFT", RAIL + 1, -TOP)
+    sf:SetPoint("BOTTOMRIGHT", 0, FOOT)
+    local pane = CreateFrame("Frame", nil, sf)
+    pane:SetSize(1, 1)
+    sf:SetScrollChild(pane)
+    pane.sf = sf
+    local thumb = sf:CreateTexture(nil, "OVERLAY")
+    thumb:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.55)
+    thumb:SetWidth(3)
+    thumb:Hide()
+    local function PaintThumb()
+        local vh, ch = sf:GetHeight(), pane:GetHeight()
+        if not vh or vh <= 0 or ch <= vh + 1 then thumb:Hide(); return end
+        local th = math.max(24, vh * vh / ch)
+        local off = (sf:GetVerticalScroll() / (ch - vh)) * (vh - th)
+        thumb:ClearAllPoints()
+        thumb:SetPoint("TOPRIGHT", sf, "TOPRIGHT", -3, -off)
+        thumb:SetHeight(th)
+        thumb:Show()
+    end
+    pane.PaintThumb = PaintThumb
+    sf:SetScript("OnSizeChanged", function(_, w, h)
+        pane:SetWidth(w)
+        if pane:GetHeight() < h then pane:SetHeight(h) end
+        PaintThumb()
+    end)
+    sf:EnableMouseWheel(true)
+    sf:SetScript("OnMouseWheel", function(_, d)
+        local max = math.max(0, pane:GetHeight() - sf:GetHeight())
+        sf:SetVerticalScroll(math.min(max, math.max(0, sf:GetVerticalScroll() - d * 40)))
+        PaintThumb()
+    end)
+    -- 내용 높이 정하기 (ShowPane 끝에서 부름)
+    function pane:SetContentHeight(h)
+        local vh = sf:GetHeight() or 0
+        local w = sf:GetWidth() or 0
+        if w > 0 then self:SetWidth(w) end
+        self:SetHeight(math.max(h, vh))
+        local max = math.max(0, self:GetHeight() - vh)
+        if sf:GetVerticalScroll() > max then sf:SetVerticalScroll(max) end
+        PaintThumb()
+    end
     pane.title = ns.Font(pane, 15)
     pane.title:SetPoint("TOPLEFT", 18, -16)
     pane.ver = ns.Num(pane, 12, C.tx2, false)
@@ -598,6 +662,7 @@ local function ClearPane(pane)
     for _, r in ipairs(pane.rows) do r:Hide() end
     for _, r in ipairs(pane.choices or {}) do r:Hide() end
     for _, r in ipairs(pane.sliders or {}) do r:Hide() end
+    for _, r in ipairs(pane.segs or {}) do r:Hide() end
     if pane.input then pane.input:Hide() end
     if dd then dd:Hide() end
     for _, b in ipairs(pane.btns) do b:Hide() end
@@ -649,6 +714,33 @@ local function ToggleRow(pane, i)
 end
 
 -- 고르기 줄: 이름 + 회색 설명 + 오른쪽 알약(현재 값, 그 글꼴로)
+-- 한 줄짜리 고르기 (보통 · 크게 · 아주 크게 같은 몇 단계)
+local function SegRow(pane, i)
+    pane.segs = pane.segs or {}
+    local r = pane.segs[i]
+    if r then return r end
+    r = CreateFrame("Frame", nil, pane)
+    r:SetHeight(36)
+    r.name = ns.Font(r, 13); r.name:SetPoint("LEFT", 0, 0)
+    r.hint = ns.Font(r, 10.5, { 0.62, 0.54, 0.52 }); r.hint:SetPoint("LEFT", r.name, "RIGHT", 8, -1)
+    r.btns = {}
+    r.line = r:CreateTexture(nil, "BORDER")
+    r.line:SetColorTexture(0.839, 0.627, 0.612, 0.10); r.line:SetHeight(1)
+    r.line:SetPoint("BOTTOMLEFT"); r.line:SetPoint("BOTTOMRIGHT")
+    function r:Btn(k)
+        local b = self.btns[k]
+        if b then return b end
+        b = CreateFrame("Button", nil, self)
+        b:SetHeight(24)
+        b.bg = ns.RoundRect(b, 12, { 0.23, 0.18, 0.17 }, "BACKGROUND", 0, 0)
+        b.fs = ns.Font(b, 12); b.fs:SetPoint("CENTER", 0, 0)
+        self.btns[k] = b
+        return b
+    end
+    pane.segs[i] = r
+    return r
+end
+
 local function ChoiceRow(pane, i)
     pane.choices = pane.choices or {}
     local r = pane.choices[i]
@@ -836,6 +928,8 @@ end
 ShowPane = function()
     local pane, m = hub.pane, MODULES[sel]
     ClearPane(pane)
+    if pane.lastSel ~= sel then pane.lastSel = sel; pane.sf:SetVerticalScroll(0) end
+    pane:SetContentHeight(0)
     pane.title:SetText(m.title)
     pane.ver:SetText("") -- 버전은 머리의 르엘 UI 버전 하나만
     pane.desc:SetText(m.desc or "")
@@ -866,6 +960,7 @@ ShowPane = function()
     end
 
     local y, ti, bi, ci, si, hi = -66, 0, 0, 0, 0, 0
+    local gi = 0
     local lastBtn
     for _, it in ipairs(m.items) do
         if it.t == "header" then
@@ -913,6 +1008,39 @@ ShowPane = function()
             end)
             r:Show()
             y = y - 52
+        elseif it.t == "seg" then
+            lastBtn = nil
+            gi = gi + 1
+            local r = SegRow(pane, gi)
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", 18, y); r:SetPoint("TOPRIGHT", -18, y)
+            r.name:SetText(it.label)
+            r.hint:SetText(it.hint or "")
+            local cur = it.get()
+            local prev
+            for k = #it.options, 1, -1 do            -- 오른쪽 끝부터 차례로
+                local o = it.options[k]
+                local b = r:Btn(k)
+                b.fs:SetText(o[1])
+                b:SetWidth(math.max(46, b.fs:GetStringWidth() + 22))
+                b:ClearAllPoints()
+                if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("RIGHT", 0, 0) end
+                prev = b
+                local on = (cur == o[2])
+                b.bg:SetColor(on and C.acc or { 0.23, 0.18, 0.17 }, 1)
+                b.fs:SetTextColor(on and C.ink[1] or C.tx[1], on and C.ink[2] or C.tx[2], on and C.ink[3] or C.tx[3])
+                b.fs:SetShadowColor(0, 0, 0, on and 0 or 0.85)
+                b:SetScript("OnClick", function() it.set(o[2]); ShowPane() end)
+                b:Show()
+            end
+            for k = #it.options + 1, #r.btns do r.btns[k]:Hide() end
+            -- 설명 글씨가 단추 밑으로 들어가지 않게 단추 앞에서 자르기
+            r.hint:SetWordWrap(false)
+            r.hint:ClearAllPoints(); r.hint:SetPoint("LEFT", r.name, "RIGHT", 8, -1)
+            if prev then r.hint:SetPoint("RIGHT", prev, "LEFT", -8, 0) end
+            r.hint:SetJustifyH("LEFT")
+            r:Show()
+            y = y - 36
         elseif it.t == "choice" then
             lastBtn = nil
             ci = ci + 1
@@ -1006,6 +1134,7 @@ ShowPane = function()
             b:Show()
         end
     end
+    pane:SetContentHeight(-y + 10)
 end
 
 local function PaintPills()
@@ -1085,6 +1214,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.23", "마우스 효과 · 몹 등급 알약", "던전 안 Leel Quest · 글씨 강조" },
     { "1.3.22", "OpenMap 같이 설치", "이어 붙인 세계 지도" },
     { "1.3.21", "Leel Quest 자동 길 · 반납 상자", "허브 정리 · OpenMap 맞춤" },
     { "1.3.20", "전투 중 오류 · 툴팁 수정", "던전 시체 반짝 상자" },
@@ -1107,6 +1237,11 @@ do
     local okH, orig = pcall(geterrorhandler)
     if okH and orig and seterrorhandler then
         pcall(seterrorhandler, function(msg, ...)
+            -- 와우 포에버 특성 창 자체 오류: 잠긴 특성에 마우스를 올릴 때마다 한국어 조건 문구 조합에서 터져요
+            -- (게임 문구 버그, 툴팁 조건 줄만 빠지고 기능엔 영향 없음) → 오류 창만 안 띄워요
+            if type(msg) == "string" and msg:find("Blizzard_SharedTalentUtil", 1, true) and msg:find("invalid option in `format'", 1, true) then
+                return
+            end
             if type(msg) == "string" and (msg:find("AddOns[\\/]Leel") or msg:find("AddOns[\\/]ForgLeveling")) then
                 local f, l = msg:match("([%w_]+%.lua)[^%d]*(%d+)")
                 ns.lastErr = f and (f .. ":" .. l) or msg:sub(1, 40)

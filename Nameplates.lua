@@ -54,17 +54,14 @@ local function Outline(fs, size, file)
     return fs
 end
 
--- 몹 등급 → 토끼 머리
-local BADGE = 18
--- 몹 등급 = 레벨 앞 동그란 토끼 배지 (분홍 일반 / 금빛+왕관 정예 / 은빛+반짝 희귀 / 빨강+뿔 보스 / 회색 하찮음)
+-- 몹 등급 = 레벨 앞 글자 알약 (일반 · 하찮음은 없음)
+local BADGE = 0
 local RANK = {
-    normal    = { tex = "rb_normal" },
-    elite     = { tex = "rb_elite" },
-    rare      = { tex = "rb_rare" },
-    rareelite = { tex = "rb_rareelite" },
-    boss      = { tex = "rb_boss" },
-    minus     = { tex = "rb_trivial", small = true },
-    trivial   = { tex = "rb_trivial" },
+    elite     = { txt = "정예",      c = { 0.945, 0.780, 0.353 }, ink = { 0.227, 0.165, 0.063 } },
+    rare      = { txt = "희귀",      c = { 0.812, 0.847, 0.902 }, ink = { 0.141, 0.188, 0.247 } },
+    rareelite = { txt = "희귀 정예", c = { 0.722, 0.878, 1.000 }, ink = { 0.086, 0.196, 0.290 } },
+    boss      = { txt = "보스",      c = { 1.000, 0.420, 0.420 }, ink = { 0.227, 0.059, 0.071 } },
+    minus     = { small = true },
 }
 
 -- 비선공(중립) 몹: 크림색 바 + 크림색 이름
@@ -84,21 +81,22 @@ end
 
 -- 바·이름 색: 하찮음 회색 / 비선공 크림 / 선공 루비 레드
 local function PaintPlate(f)
-    if f.aura then f.aura:SetShown(f.trivial and true or false) end
-    if f.trivial then
-        ns.PaintFlat(f.hp, C.grey)
-        f.name:SetTextColor(0.78, 0.80, 0.83)
-        if f.aura then
-            if f.calm then f.aura:SetVertexColor(1.00, 0.84, 0.36, 0.85)      -- 비선공: 노랑
-            else f.aura:SetVertexColor(1.00, 0.26, 0.32, 1.00) end           -- 선공: 빨강
-        end
-    elseif f.calm then
+    -- 낮은(하찮은) 몹도 색은 그대로 (빨강 = 선공 · 크림 = 비선공), 대신 바를 얇게 + 흐리게 + 이름만 회색
+    if f.aura then f.aura:Hide() end
+    local low = f.trivial and true or false
+    if f.lowShape ~= low then
+        f.lowShape = low
+        f.hp:SetHeight(low and (H - 5) or H)
+        f.pct:SetFont(ns.NUM, low and 10 or 13, "OUTLINE")
+    end
+    if f.calm then
         PaintCream(f.hp)
         f.name:SetTextColor(CREAM_NAME[1], CREAM_NAME[2], CREAM_NAME[3])
     else
         ns.PaintHealthRed(f.hp)
         f.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
     end
+    if low then f.name:SetTextColor(0.78, 0.80, 0.83) end
 end
 
 local function Circle(parent, layer, sub, size, c, a)
@@ -147,13 +145,26 @@ local function Build(plate)
     f.title:SetSize(1, 18)
     f.title:SetPoint("BOTTOM", f.hp, "TOP", 0, 3)
     f.head = CreateFrame("Frame", nil, f.title)
-    f.head:SetSize(BADGE, BADGE)
-    f.head:SetPoint("LEFT", f.title, "LEFT", 0, 1)
-    f.headTex = f.head:CreateTexture(nil, "ARTWORK")
-    f.headTex:SetAllPoints()
-    f.headTex:SetTexture(ns.MEDIA .. "rb_normal")
+    f.head:SetSize(1, 15)
+    f.head:SetPoint("LEFT", f.title, "LEFT", 0, 0)
+    do  -- 알약 = 왼끝 · 가운데 · 오른끝 (끝이 안 찌그러지게)
+        local function Piece(l, r)
+            local t = f.head:CreateTexture(nil, "ARTWORK")
+            t:SetTexture(ns.MEDIA .. "pill16"); t:SetTexCoord(l, r, 0, 1)
+            return t
+        end
+        local L, M, R = Piece(0, 0.5), Piece(0.5, 0.5), Piece(0.5, 1)
+        L:SetSize(7.5, 15); L:SetPoint("LEFT")
+        R:SetSize(7.5, 15); R:SetPoint("RIGHT")
+        M:SetPoint("TOPLEFT", L, "TOPRIGHT"); M:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT")
+        f.headParts = { L, M, R }
+    end
+    f.headTxt = f.head:CreateFontString(nil, "OVERLAY")
+    f.headTxt:SetFont(ns.FONT, 10, "")
+    f.headTxt:SetPoint("CENTER", 0, 0)
+    f.head:Hide()
     f.lv = Outline(f.title:CreateFontString(nil, "OVERLAY"), 13, ns.NUM)
-    f.lv:SetPoint("LEFT", f.head, "RIGHT", 3, 0)
+    f.lv:SetPoint("LEFT", f.title, "LEFT", 0, 0)
     f.name = Outline(f.title:CreateFontString(nil, "OVERLAY"), 13)
     f.name:SetPoint("LEFT", f.lv, "RIGHT", 4, 0)
 
@@ -237,7 +248,8 @@ local function FitTitle(f)
         local ok, v = pcall(function() return math.max(fs:GetStringWidth() or 0, 0) end)
         return ok and v or fb
     end
-    f.title:SetWidth(BADGE + 3 + Wd(f.lv, 16) + 4 + Wd(f.name, W - 40))
+    local pre = f.head:IsShown() and (f.head:GetWidth() + 4) or 0
+    f.title:SetWidth(pre + Wd(f.lv, 16) + 4 + Wd(f.name, W - 40))
 end
 
 -- 블리자드 디버프 아이콘 줄을 우리 체력바 아래(debRow)에 고정
@@ -435,8 +447,8 @@ local function UpdateTap(f, unit)
         ic:SetVertexColor(0.92, 0.89, 0.90, 1)
         f.lock = lk
     end
-    f.headTex:SetDesaturated(tapped and true or false)
-    f.headTex:SetAlpha(tapped and 0.7 or 1)
+    for _, t in ipairs(f.headParts) do t:SetDesaturated(tapped and true or false) end
+    f.head:SetAlpha(tapped and 0.7 or 1)
     if tapped then
         f.lvColor = f.lvColor or { f.lv:GetTextColor() }
         f.lv:SetTextColor(0.72, 0.69, 0.70)
@@ -501,9 +513,19 @@ local function UpdateInfo(f, unit)
     end)
     f.trivial = UnitIsTrivial and Try(UnitIsTrivial, unit) or false
     if f.trivial and rank == "normal" then rank = "trivial" end
-    local R = RANK[rank] or RANK.normal
+    local R = RANK[rank] or {}
     f.rank = rank
-    f.headTex:SetTexture(ns.MEDIA .. R.tex)
+    if R.txt then
+        for _, t in ipairs(f.headParts) do t:SetVertexColor(R.c[1], R.c[2], R.c[3], 1) end
+        f.headTxt:SetText(R.txt)
+        f.headTxt:SetTextColor(R.ink[1], R.ink[2], R.ink[3], 1)
+        f.head:SetWidth(math.max(15, (f.headTxt:GetStringWidth() or 20) + 12))
+        f.head:Show()
+        f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.head, "RIGHT", 4, 0)
+    else
+        f.head:Hide()
+        f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.title, "LEFT", 0, 0)
+    end
     -- 선공/비선공: 중립(노랑) 몹은 먼저 안 때려요 → 크림색 바
     local calm = false
     if ns.db.npAggro ~= false then
@@ -550,7 +572,7 @@ local function UpdateBorder(f, unit)
 
     local alpha = 1
     if not isTarget and UnitExists("target") then alpha = 0.62 end
-    if f.trivial then alpha = alpha * 0.8 end
+    if f.trivial then alpha = alpha * 0.68 end
     if f.dead then alpha = 0 end
     f:SetAlpha(alpha)
 

@@ -790,11 +790,13 @@ end
 -- OpenMap(이어 붙인 세계 지도, 따로 설치)을 같이 쓰면: 지도 기능만 쓰고 겹치는 것은 끔 (처음 한 번)
 --   친구·길드 위치(르엘 길드원 위치와 겹침), 내 위치 공유, 핀 공유, 처음 묻는 창들
 ----------------------------------------------------------------------
-local OPENMAP_V = 2
+local OPENMAP_V = 3
 local OPENMAP_SET = {
     friends = false, guild = false, friendsShare = false, shareAsked = true,
     pinsShared = false, presetAsked = true, minimapButton = false,
     mapButtons = false,   -- 지도 위 OpenMap 단추·즐겨찾기 줄 (설정 창 여는 곳)
+    -- 던전 지도 · 우두머리/퀘스트/전리품 옆 칸 끔 (던전 정보는 NeedRoll 같은 따로 애드온으로)
+    dungeonMaps = false, dungeonBosses = false, dungeonQuests = false, dungeonCard = false,
 }
 local function OpenMapInstalled()
     return C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("OpenMap")
@@ -826,7 +828,7 @@ local function HideOpenMapEntry()
 end
 
 StaticPopupDialogs["LEELMAP_OPENMAP"] = {
-    text = "|cfff2b3c2Leel Map|r\n\nOpenMap을 찾았어요.\n이어 붙인 지도는 그대로 쓰고, OpenMap 설정 단추와 르엘 UI와 겹치는 기능(친구·길드 위치, 위치 공유, 핀 공유)은 숨겼어요.\n\n지금 다시 불러올까요?",
+    text = "|cfff2b3c2Leel Map|r\n\nOpenMap을 찾았어요.\n이어 붙인 지도는 그대로 쓰고, OpenMap 설정 단추와 르엘 UI와 겹치는 기능(친구·길드 위치, 위치 공유, 핀 공유, 던전 지도 옆 칸)은 숨겼어요.\n\n지금 다시 불러올까요?",
     button1 = "다시 불러오기",
     button2 = "나중에",
     OnAccept = function() ReloadUI() end,
