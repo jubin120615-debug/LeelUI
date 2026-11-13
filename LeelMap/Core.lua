@@ -25,7 +25,7 @@ local C = {
     plate = { 0.125, 0.094, 0.086, 0.97 },
 }
 
-local defaults = { mini = true, fade = true, fadeAlpha = 0.4, coords = true, levels = true, skin = true }
+local defaults = { exits = true, mini = true, fade = true, fadeAlpha = 0.4, coords = true, levels = true, skin = true }
 local db
 
 local function Print(msg)
@@ -103,6 +103,14 @@ local function Levels(mapID)
     end
     local z = ZONE_LEVELS[mapID]
     if z then return z[1], z[2] end
+end
+
+-- 다른 파일(Exits.lua)에서도 쓰게
+_G.LeelMapLevelInfo = function(m)
+    local minL, maxL = Levels(m)
+    if not minL then return end
+    local c, hint = Difficulty(minL, maxL)
+    return minL, maxL, c, hint
 end
 
 local function LevelText(minL, maxL)
@@ -905,6 +913,8 @@ SlashCmdList.LEELMAP = function(msg)
         db.levels = not db.levels
         UpdateHeader()
         Print("지역 레벨 표시 " .. (db.levels and "켬" or "끔"))
+    elseif cmd == "출구" or cmd == "exits" then
+        if LeelMapExits then LeelMapExits.Dump() end
     elseif cmd == "길드" or cmd == "guild" then
         local G = _G.LeelMapGuild
         if arg == "끔" or arg == "off" then LeelMapDB.gShare = false; if G then G.Send() end; Print("내 위치 길드에 알리기 끔")

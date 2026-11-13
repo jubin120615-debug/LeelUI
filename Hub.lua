@@ -264,12 +264,15 @@ local MODULES = {
     },
     {
         key = "LeelMap", title = "Leel Map", sub = "세계 지도", icon = "hb_map", slash = "LEELMAP",
-        desc = "작은 지도 창, 걸을 때 흐려짐, 좌표, 지역 레벨.\n르엘 UI 쓰는 길드원 위치 (/lmap 길드).",
+        desc = "작은 지도 창, 걸을 때 흐려짐, 좌표, 지역 레벨.\n르엘 UI 쓰는 길드원 위치 (/lmap 길드), 지역 출구 화살표.",
         items = {
             { t = "toggle", label = "걸을 때 흐리게", get = function() return MapDB().fade end, cmd = "흐림" },
             { t = "toggle", label = "좌표 줄", get = function() return MapDB().coords end, cmd = "좌표" },
             { t = "toggle", label = "지역 레벨", get = function() return MapDB().levels end, cmd = "레벨" },
             { t = "toggle", label = "작은 창 지도", hint = "지도를 다시 열면 적용", get = function() return MapDB().mini end, cmd = "작게" },
+            { t = "toggle", label = "지역 출구 화살표", hint = "옆 지역으로 넘어가는 곳에 분홍 동그라미 화살표 (클릭하면 그 지역 지도로)",
+              get = function() return MapDB().exits ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.exits = v and true or false; if LeelMapExits then LeelMapExits.Refresh() end end end },
             { t = "toggle", label = "길드원 위치 보기", hint = "르엘 UI 쓰는 길드원이 지도 · 미니맵에 토끼 점으로",
               get = function() return MapDB().gShow ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.gShow = v and true or false end end },
@@ -1232,6 +1235,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.26", "몹 시전바 크게 · 아이콘", "지역 출구 화살표 · 재료 가방" },
     { "1.3.25", "전문기술 재료 클릭 → 제작식", "Leel Map 길드원 위치" },
     { "1.3.24", "버리기 창 잠금 · 휴지통 슝", "몹 등급 아이콘 알약" },
     { "1.3.23", "마우스 효과 · 몹 등급 알약", "던전 안 Leel Quest · 글씨 강조" },

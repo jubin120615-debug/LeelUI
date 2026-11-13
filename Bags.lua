@@ -17,6 +17,9 @@ ns.BagsDB = DB
 
 local CC = C_Container or {}
 local NumSlots = CC.GetContainerNumSlots or GetContainerNumSlots
+-- 보여 줄 마지막 가방: 재료 가방(5번)이 있으면 거기까지. 남은 칸 세기(가방 꽉 참)는 일반 가방만
+local SHOW_LAST = (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or (NUM_BAG_SLOTS or 4)
+if SHOW_LAST < (NUM_BAG_SLOTS or 4) then SHOW_LAST = NUM_BAG_SLOTS or 4 end
 local NumFree = CC.GetContainerNumFreeSlots or GetContainerNumFreeSlots
 
 local function SlotInfo(bag, slot)
@@ -47,7 +50,7 @@ end
 
 local function GrayValue()
     local sum = 0
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         for slot = 1, (NumSlots(bag) or 0) do
             local q, count, link, noValue = SlotInfo(bag, slot)
             if link and not noValue then
@@ -374,7 +377,7 @@ Layout = function()
     if not win then return end
     if InCombatLockdown() then win.needLayout = true return end
     local fresh, rest = {}, {}
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         local n = NumSlots(bag) or 0
         for slot = 1, n do
             local b = (buttons[bag] and buttons[bag][slot]) or MakeButton(bag, slot)
@@ -413,7 +416,7 @@ end
 -- 아이템 번호별 개수를 세서, 늘어난 것을 "새로"로
 local function CountItems()
     local t = {}
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         for slot = 1, (NumSlots(bag) or 0) do
             local info = GetInfo(bag, slot)
             if info and info.itemID then t[info.itemID] = (t[info.itemID] or 0) + (info.stackCount or 1) end
@@ -443,7 +446,7 @@ end
 
 local function Refresh()
     if not win or not win:IsShown() then return end
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         for slot = 1, (NumSlots(bag) or 0) do
             local b = buttons[bag] and buttons[bag][slot]
             if b then UpdateButton(b, bag, slot) end
@@ -455,7 +458,7 @@ local function Refresh()
     win.money:SetText(BunnyMoney(GetMoney()))
     -- 회색템 개수
     local gray = 0
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         for slot = 1, (NumSlots(bag) or 0) do
             local info = GetInfo(bag, slot)
             if info and info.quality == 0 then gray = gray + 1 end
@@ -581,7 +584,7 @@ local function BuildWindow()
     win.money:SetPoint("BOTTOMRIGHT", -PAD - 2, 15)
 
     -- 가방마다 보이지 않는 자리 (아이템 칸이 어느 가방인지 알게)
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         local h = CreateFrame("Frame", "LeelUI_BagHolder" .. bag, win)
         h:SetID(bag)
         h:SetAllPoints()
@@ -656,8 +659,8 @@ local function TakeOver()
     Hook("OpenBackpack", function() Ask("open") end)
     Hook("CloseAllBags", function(frame) Ask("close", frame) end)
     Hook("CloseBackpack", function() Ask("close") end)
-    Hook("ToggleBag", function(id) if not id or id <= (NUM_BAG_SLOTS or 4) then Ask("toggle") end end)
-    Hook("OpenBag", function(id) if not id or id <= (NUM_BAG_SLOTS or 4) then Ask("open") end end)
+    Hook("ToggleBag", function(id) if not id or id <= SHOW_LAST then Ask("toggle") end end)
+    Hook("OpenBag", function(id) if not id or id <= SHOW_LAST then Ask("open") end end)
 end
 
 ----------------------------------------------------------------------
@@ -736,7 +739,7 @@ ev:SetScript("OnEvent", function(_, event)
         if event == "BAG_UPDATE" and win then
             -- 가방을 새로 끼우면 칸 수가 바뀜
             local need = false
-            for bag = 0, (NUM_BAG_SLOTS or 4) do
+            for bag = 0, SHOW_LAST do
                 local n = NumSlots(bag) or 0
                 local have = 0
                 for slot = 1, n do if buttons[bag] and buttons[bag][slot] and buttons[bag][slot]:IsShown() then have = have + 1 end end
@@ -755,7 +758,7 @@ SLASH_LEELQDUMP2 = "/leelq"
 SlashCmdList.LEELQDUMP = function()
     print("|cfff2b3c2[르엘 가방]|r 퀘스트 템 점검")
     local n = 0
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         for slot = 1, (NumSlots(bag) or 0) do
             local info = CC.GetContainerItemInfo and CC.GetContainerItemInfo(bag, slot)
             if info then
@@ -794,7 +797,7 @@ local keepOpen = false  -- 한 번 버리기 시작하면 닫기 전까지 창 �
 local function Candidates()
     local list = {}
     local keep = (ns.ShopDB and ns.ShopDB().keep) or {}
-    for bag = 0, (NUM_BAG_SLOTS or 4) do
+    for bag = 0, SHOW_LAST do
         for slot = 1, (NumSlots(bag) or 0) do
             local info = GetInfo(bag, slot)
             if info and info.hyperlink and not info.hasNoValue and (info.quality or 9) <= 2 and not keep[info.itemID or 0] then
