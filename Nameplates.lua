@@ -54,13 +54,13 @@ local function Outline(fs, size, file)
     return fs
 end
 
--- 몹 등급 = 레벨 앞 글자 알약 (일반 · 하찮음은 없음)
+-- 몹 등급 = 레벨 앞 아이콘 알약 (둥근 광택 알약 + 흰 모양 + 글자 · 일반 · 하찮음은 없음)
 local BADGE = 0
 local RANK = {
-    elite     = { txt = "정예",      c = { 0.945, 0.780, 0.353 }, ink = { 0.227, 0.165, 0.063 } },
-    rare      = { txt = "희귀",      c = { 0.812, 0.847, 0.902 }, ink = { 0.141, 0.188, 0.247 } },
-    rareelite = { txt = "희귀 정예", c = { 0.722, 0.878, 1.000 }, ink = { 0.086, 0.196, 0.290 } },
-    boss      = { txt = "보스",      c = { 1.000, 0.420, 0.420 }, ink = { 0.227, 0.059, 0.071 } },
+    elite     = { txt = "정예",      ic = "ic_shield", top = { 0.957, 0.812, 0.408 }, bot = { 0.851, 0.647, 0.227 }, ink = { 0.227, 0.149, 0.031 } },
+    rare      = { txt = "희귀",      ic = "ic_star",   top = { 0.890, 0.914, 0.949 }, bot = { 0.682, 0.725, 0.788 }, ink = { 0.149, 0.188, 0.239 } },
+    rareelite = { txt = "희귀 정예", ic = "ic_star",   top = { 0.769, 0.902, 1.000 }, bot = { 0.498, 0.737, 0.918 }, ink = { 0.071, 0.188, 0.290 } },
+    boss      = { txt = "보스",      ic = "ic_crown",  top = { 1.000, 0.541, 0.541 }, bot = { 0.878, 0.290, 0.333 }, ink = { 0.227, 0.047, 0.071 } },
     minus     = { small = true },
 }
 
@@ -147,21 +147,35 @@ local function Build(plate)
     f.head = CreateFrame("Frame", nil, f.title)
     f.head:SetSize(1, 15)
     f.head:SetPoint("LEFT", f.title, "LEFT", 0, 0)
-    do  -- 알약 = 왼끝 · 가운데 · 오른끝 (끝이 안 찌그러지게)
-        local function Piece(l, r)
-            local t = f.head:CreateTexture(nil, "ARTWORK")
-            t:SetTexture(ns.MEDIA .. "pill16"); t:SetTexCoord(l, r, 0, 1)
-            return t
+    do  -- 알약 = 왼끝 · 가운데 · 오른끝 (끝이 안 찌그러지게) · 진한 테 → 그라데이션 속 → 위쪽 광택
+        local function Pill(layer, sub, grow)
+            local function Piece(l, r)
+                local t = f.head:CreateTexture(nil, layer, nil, sub)
+                t:SetTexture(ns.MEDIA .. "circle"); t:SetTexCoord(l, r, 0, 1)   -- 동그라미 반쪽 = 완전히 둥근 끝
+                return t
+            end
+            local h = 15 + grow * 2
+            local L, M, R = Piece(0, 0.5), Piece(0.5, 0.5), Piece(0.5, 1)
+            L:SetSize(h / 2, h); L:SetPoint("LEFT", -grow, 0)
+            R:SetSize(h / 2, h); R:SetPoint("RIGHT", grow, 0)
+            M:SetPoint("TOPLEFT", L, "TOPRIGHT"); M:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT")
+            return { L, M, R }
         end
-        local L, M, R = Piece(0, 0.5), Piece(0.5, 0.5), Piece(0.5, 1)
-        L:SetSize(7.5, 15); L:SetPoint("LEFT")
-        R:SetSize(7.5, 15); R:SetPoint("RIGHT")
-        M:SetPoint("TOPLEFT", L, "TOPRIGHT"); M:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT")
-        f.headParts = { L, M, R }
+        f.headEdge = Pill("BORDER", 0, 1.5)
+        for _, t in ipairs(f.headEdge) do t:SetVertexColor(0.165, 0.102, 0.078, 1) end
+        f.headParts = Pill("ARTWORK", 0, 0)
+        f.headGloss = f.head:CreateTexture(nil, "ARTWORK", nil, 2)
+        f.headGloss:SetTexture(ns.MEDIA .. "circle")
+        f.headGloss:SetPoint("TOPLEFT", 5, -1.5); f.headGloss:SetPoint("TOPRIGHT", -5, -1.5)
+        f.headGloss:SetHeight(3.5)
+        f.headGloss:SetVertexColor(1, 1, 1, 0.38)
     end
+    f.headIcon = f.head:CreateTexture(nil, "OVERLAY")
+    f.headIcon:SetSize(9, 9)
+    f.headIcon:SetPoint("LEFT", 5, 0)
     f.headTxt = f.head:CreateFontString(nil, "OVERLAY")
     f.headTxt:SetFont(ns.FONT, 10, "")
-    f.headTxt:SetPoint("CENTER", 0, 0)
+    f.headTxt:SetPoint("LEFT", f.headIcon, "RIGHT", 2.5, 0)
     f.head:Hide()
     f.lv = Outline(f.title:CreateFontString(nil, "OVERLAY"), 13, ns.NUM)
     f.lv:SetPoint("LEFT", f.title, "LEFT", 0, 0)
@@ -248,7 +262,7 @@ local function FitTitle(f)
         local ok, v = pcall(function() return math.max(fs:GetStringWidth() or 0, 0) end)
         return ok and v or fb
     end
-    local pre = f.head:IsShown() and (f.head:GetWidth() + 4) or 0
+    local pre = f.head:IsShown() and (f.head:GetWidth() + 5) or 0
     f.title:SetWidth(pre + Wd(f.lv, 16) + 4 + Wd(f.name, W - 40))
 end
 
@@ -448,6 +462,7 @@ local function UpdateTap(f, unit)
         f.lock = lk
     end
     for _, t in ipairs(f.headParts) do t:SetDesaturated(tapped and true or false) end
+    if f.headIcon then f.headIcon:SetDesaturated(tapped and true or false) end
     f.head:SetAlpha(tapped and 0.7 or 1)
     if tapped then
         f.lvColor = f.lvColor or { f.lv:GetTextColor() }
@@ -516,12 +531,21 @@ local function UpdateInfo(f, unit)
     local R = RANK[rank] or {}
     f.rank = rank
     if R.txt then
-        for _, t in ipairs(f.headParts) do t:SetVertexColor(R.c[1], R.c[2], R.c[3], 1) end
+        for _, t in ipairs(f.headParts) do
+            if t.SetGradient and CreateColor then
+                t:SetVertexColor(1, 1, 1, 1)
+                t:SetGradient("VERTICAL", CreateColor(R.bot[1], R.bot[2], R.bot[3], 1), CreateColor(R.top[1], R.top[2], R.top[3], 1))
+            else
+                t:SetVertexColor(R.top[1], R.top[2], R.top[3], 1)
+            end
+        end
+        f.headIcon:SetTexture(ns.MEDIA .. R.ic)
+        f.headIcon:SetVertexColor(1, 1, 1, 1)
         f.headTxt:SetText(R.txt)
         f.headTxt:SetTextColor(R.ink[1], R.ink[2], R.ink[3], 1)
-        f.head:SetWidth(math.max(15, (f.headTxt:GetStringWidth() or 20) + 12))
+        f.head:SetWidth(math.max(15, (f.headTxt:GetStringWidth() or 20) + 9 + 2.5 + 12))
         f.head:Show()
-        f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.head, "RIGHT", 4, 0)
+        f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.head, "RIGHT", 5, 0)
     else
         f.head:Hide()
         f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.title, "LEFT", 0, 0)

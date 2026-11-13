@@ -270,7 +270,7 @@ local function ToggleKeep(link)
     local d = DB()
     if d.keep[id] then
         d.keep[id] = nil
-        Print(link .. " 다시 팔아요.")
+        Print(link .. " 잠금을 풀었어요. (다시 팔거나 버릴 수 있어요)")
     else
         if q ~= 0 then return end -- 회색 템만
         d.keep[id] = true

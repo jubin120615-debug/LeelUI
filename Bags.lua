@@ -809,7 +809,7 @@ local function Candidates()
                 if not quest then
                     local ok, name, _, _, _, _, _, _, _, _, _, price = pcall(GetItemInfo, info.hyperlink)
                     if ok and price and price > 0 then
-                        list[#list + 1] = { bag = bag, slot = slot, link = info.hyperlink, name = name or "",
+                        list[#list + 1] = { bag = bag, slot = slot, link = info.hyperlink, name = name or "", id = info.itemID,
                             icon = info.iconFileID, count = info.stackCount or 1, quality = info.quality or 1,
                             value = price * (info.stackCount or 1) }
                     end
@@ -836,12 +836,13 @@ local function BuildFull()
     disc:SetTexture(ns.MEDIA .. "circle"); disc:SetSize(22, 22); disc:SetPoint("TOPLEFT", 12, -10)
     disc:SetVertexColor(1, 0.56, 0.64, 1)
     local ic = f:CreateTexture(nil, "OVERLAY")
-    ic:SetTexture(ns.MEDIA .. "hb_bag"); ic:SetSize(13, 13); ic:SetPoint("CENTER", disc)
+    ic:SetTexture(ns.MEDIA .. "ic_trash"); ic:SetSize(15, 15); ic:SetPoint("CENTER", disc, "CENTER", 0, 0.5)
     ic:SetVertexColor(C.ink[1], C.ink[2], C.ink[3], 1)
     local title = ns.Font(f, 13, C.accHi)
     title:SetPoint("LEFT", disc, "RIGHT", 8, 0)
     title:SetText("가방이 꽉 찼어요 · 버릴 걸 골라요")
     f.title = title
+    f.binDisc, f.binIc = disc, ic
 
     local x = CreateFrame("Button", nil, f)
     x:SetSize(20, 20); x:SetPoint("TOPRIGHT", -10, -11)
@@ -861,6 +862,7 @@ local function BuildFull()
 
         local btn = CreateFrame("Button", nil, c)
         btn:SetSize(42, 42); btn:SetPoint("TOP", 0, -10)
+        c.btn = btn
         c.edge = btn:CreateTexture(nil, "BACKGROUND"); c.edge:SetPoint("TOPLEFT", -1, 1); c.edge:SetPoint("BOTTOMRIGHT", 1, -1)
         c.icon = btn:CreateTexture(nil, "ARTWORK"); c.icon:SetAllPoints(); c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
         c.count = btn:CreateFontString(nil, "OVERLAY")
@@ -878,6 +880,54 @@ local function BuildFull()
         c.val:SetTextColor(0.97, 0.76, 0.6)
         c.name = ns.Font(c, 11)
         c.name:SetPoint("TOP", c.val, "BOTTOM", 0, -4); c.name:SetWidth(CARD_W - 10); c.name:SetWordWrap(false)
+
+        -- 오른쪽 위 자물쇠: 잠그면 버리기 후보 · 상점 토끼 자동 판매에서 빠져요 (상점 토끼 "안 팔기" 목록과 같은 목록)
+        local lk = CreateFrame("Button", nil, c)
+        lk:SetSize(24, 24); lk:SetPoint("TOPRIGHT", -4, -4)
+        lk.bg = lk:CreateTexture(nil, "BACKGROUND"); lk.bg:SetTexture(ns.MEDIA .. "circle"); lk.bg:SetAllPoints()
+        lk.ring = lk:CreateTexture(nil, "BORDER"); lk.ring:SetTexture(ns.MEDIA .. "mring")
+        lk.ring:SetPoint("TOPLEFT", -1.5, 1.5); lk.ring:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+        lk.ic = lk:CreateTexture(nil, "ARTWORK"); lk.ic:SetSize(15, 15); lk.ic:SetPoint("CENTER", 0, 0.5)
+        -- 평소: 반투명 어두운 동그라미 + 분홍 열린 자물쇠 / 올림: 꽉 찬 분홍 / 누름: 닫힌 자물쇠 + 흰 테
+        function lk:Paint(state)
+            local A = C.acc
+            if state == "locked" then
+                self.bg:SetVertexColor(A[1], A[2], A[3], 1); self.ring:SetVertexColor(1, 1, 1, 1)
+                self.ic:SetTexture(ns.MEDIA .. "ic_lock"); self.ic:SetVertexColor(C.ink[1], C.ink[2], C.ink[3], 1)
+            elseif state == "hover" then
+                self.bg:SetVertexColor(A[1], A[2], A[3], 1); self.ring:SetVertexColor(A[1], A[2], A[3], 1)
+                self.ic:SetTexture(ns.MEDIA .. "ic_lock_open"); self.ic:SetVertexColor(C.ink[1], C.ink[2], C.ink[3], 1)
+            else
+                self.bg:SetVertexColor(0.227, 0.165, 0.157, 0.9); self.ring:SetVertexColor(A[1], A[2], A[3], 0.45)
+                self.ic:SetTexture(ns.MEDIA .. "ic_lock_open"); self.ic:SetVertexColor(A[1], A[2], A[3], 1)
+            end
+        end
+        lk:Paint()
+        lk:SetScript("OnEnter", function(self)
+            self:Paint("hover")
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("잠그기", 1, 0.84, 0.88)
+            GameTooltip:AddLine("버리기 후보 · 상점 토끼 자동 판매에서 빠져요", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("풀기: 가방에서 Alt+클릭", 0.6, 0.6, 0.6, true)
+            GameTooltip:Show()
+        end)
+        lk:SetScript("OnLeave", function(self) self:Paint(); GameTooltip:Hide() end)
+        lk:SetScript("OnClick", function(self)
+            local d = c.data
+            if not (d and d.id and ns.ShopDB) then return end
+            ns.ShopDB().keep[d.id] = true
+            GameTooltip:Hide()
+            -- "찰칵": 닫힌 자물쇠를 잠깐 보여 주고 다음 후보로
+            self:Paint("locked")
+            c.del:SetLabel("잠갔어요"); c.del:SetEnabled(false)
+            if ns.PillToast then ns.PillToast("잠갔어요  " .. d.link, "hb_bag") end
+            keepOpen = true
+            C_Timer.After(0.45, function()
+                self:Paint(); c.del:SetLabel("버리기"); c.del:SetEnabled(true)
+                ns.RefillCardInPlace(c)
+            end)
+        end)
+        c.lock = lk
 
         c.del = ns.MakeButton(c, "버리기", true, nil, 76)
         c.del:SetHeight(24)
@@ -904,7 +954,63 @@ local function BuildFull()
     if UISpecialFrames then tinsert(UISpecialFrames, "LeelUI_BagFull") end
 end
 
-local function Destroy(d)
+-- 버린 템이 제목 앞 휴지통으로 "슝" 날아가고 휴지통이 덜컥 (끝나면 done)
+local fly
+local function FlyToBin(card, done)
+    if not (full and full.binDisc and card and card.icon) then if done then done() end return end
+    if not fly then
+        fly = CreateFrame("Frame", nil, full)
+        fly:SetFrameLevel(full:GetFrameLevel() + 20)
+        fly:SetAllPoints(full)
+        fly.t = fly:CreateTexture(nil, "OVERLAY")
+        fly.t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    end
+    local ix, iy = card.icon:GetCenter()
+    local bx, by = full.binDisc:GetCenter()
+    local L, B = full:GetLeft(), full:GetBottom()
+    if not (ix and bx and L) then if done then done() end return end
+    ix, iy, bx, by = ix - L, iy - B, bx - L, by - B
+    fly.t:SetTexture(card.icon:GetTexture())
+    card.icon:SetAlpha(0); card.count:SetAlpha(0); card.edge:SetAlpha(0)
+    card.val:SetAlpha(0.35); card.name:SetAlpha(0.35)
+    local mx, my = (ix + bx) / 2, math.max(iy, by) + 30       -- 위로 살짝 휘어서
+    local T, el = 0.42, 0
+    fly:Show()
+    fly:SetScript("OnUpdate", function(self, dt)
+        el = el + dt
+        local k = math.min(1, el / T)
+        local e = k * k * (3 - 2 * k)
+        local a, b = (1 - e) * (1 - e), 2 * (1 - e) * e
+        local x = a * ix + b * mx + e * e * bx
+        local y = a * iy + b * my + e * e * by
+        local sz = 42 * (1 - 0.88 * e)
+        self.t:SetSize(sz, sz)
+        self.t:ClearAllPoints(); self.t:SetPoint("CENTER", self, "BOTTOMLEFT", x, y)
+        self.t:SetRotation(-3.5 * e)
+        self.t:SetAlpha(1 - 0.4 * e)
+        if k >= 1 then
+            self:SetScript("OnUpdate", nil); self:Hide()
+            -- 휴지통 덜컥
+            local sh = 0
+            local disc, ic = full.binDisc, full.binIc
+            full:SetScript("OnUpdate", function(f2, d2)
+                sh = sh + d2
+                local q = math.min(1, sh / 0.35)
+                local w = math.sin(q * math.pi * 3) * (1 - q)
+                ic:SetRotation(w * 0.3)
+                local z = 22 * (1 + 0.12 * math.sin(q * math.pi))
+                disc:SetSize(z, z)
+                if q >= 1 then
+                    f2:SetScript("OnUpdate", nil); ic:SetRotation(0); disc:SetSize(22, 22)
+                end
+            end)
+            -- 원래 칸은 비운 채로 두고(옛 템이 다시 보이지 않게) 바로 다음 템으로
+            if done then done() end
+        end
+    end)
+end
+
+local function Destroy(d, card)
     local info = GetInfo(d.bag, d.slot)
     if not (info and info.hyperlink == d.link) then
         if ns.ShowBagFull then ns.ShowBagFull(true) end
@@ -913,16 +1019,24 @@ local function Destroy(d)
     ClearCursor()
     local pick = CC.PickupContainerItem or PickupContainerItem
     pick(d.bag, d.slot)
+    local gone = false
     if CursorHasItem() then
         DeleteCursorItem()
+        gone = true
         if ns.PillToast then ns.PillToast("버렸어요  " .. d.link, "hb_bag") end
         keepOpen = true
     end
     ClearCursor()
-    -- 버린 자리에 다음으로 싼 템 채우기
-    C_Timer.After(0.25, function()
+    local function Refill()
         if full and full:IsShown() and not ns.ShowBagFull(true) then full:Hide() end
-    end)
+    end
+    if gone and card then
+        pcall(PlaySoundFile, ns.MEDIA .. "discard.ogg", "SFX")
+        FlyToBin(card, function() C_Timer.After(0.05, function() ns.RefillCardInPlace(card) end) end)
+    else
+        -- 버린 자리에 다음으로 싼 템 채우기
+        C_Timer.After(0.25, Refill)
+    end
 end
 
 local function SlotCount()
@@ -934,32 +1048,28 @@ local function SlotCount()
     return free, total
 end
 
-local function Fill(list)
-    if fullOfs >= #list then fullOfs = 0 end
-    local n = math.min(3, #list - fullOfs)
-    for i, c in ipairs(full.cards) do
-        local d = list[fullOfs + i]
-        c.data = d
-        if d then
-            c.icon:SetTexture(d.icon)
-            c.count:SetText(d.count > 1 and d.count or "")
-            local r, g, b = 0.62, 0.62, 0.62
-            if GetItemQualityColor then
-                local ok, qr, qg, qb = pcall(GetItemQualityColor, d.quality)
-                if ok and qr then r, g, b = qr, qg, qb end
-            end
-            c.edge:SetColorTexture(r, g, b, 1)
-            c.val:SetText(BunnyMoney(d.value, 12))
-            c.name:SetText(d.name)
-            c.name:SetTextColor(r, g, b)
-            c.del:SetScript("OnClick", function() Destroy(d) end)
-            c:Show()
-        else
-            c:Hide()
-        end
+local function FillCard(c, d)
+    c.data = d
+    if not d then c:Hide() return end
+    c:SetScript("OnUpdate", nil)
+    c.btn:ClearAllPoints(); c.btn:SetPoint("TOP", 0, -10)
+    for _, r in ipairs({ c.btn, c.icon, c.count, c.edge, c.val, c.name }) do r:SetAlpha(1) end
+    c.icon:SetTexture(d.icon)
+    c.count:SetText(d.count > 1 and d.count or "")
+    local r, g, b = 0.62, 0.62, 0.62
+    if GetItemQualityColor then
+        local ok, qr, qg, qb = pcall(GetItemQualityColor, d.quality)
+        if ok and qr then r, g, b = qr, qg, qb end
     end
-    full:SetWidth(n * CARD_W + (n - 1) * CARD_GAP + FPAD * 2)
-    full:SetWidth(math.max(full:GetWidth(), 290))
+    c.edge:SetColorTexture(r, g, b, 1)
+    c.val:SetText(BunnyMoney(d.value, 12))
+    c.name:SetText(d.name)
+    c.name:SetTextColor(r, g, b)
+    c.del:SetScript("OnClick", function() Destroy(d, c) end)
+    c:Show()
+end
+
+local function Footer(list)
     local free, total = SlotCount()
     local fc = free == 0 and "|cffff8fa3" or "|cfff8c39a"
     full.slots:SetText(fc .. free .. "|r|cff9a8a86 / " .. total .. "|r")
@@ -971,11 +1081,66 @@ local function Fill(list)
     else
         full.more:Hide()
     end
+end
+
+local function Fill(list)
+    if fullOfs >= #list then fullOfs = 0 end
+    local n = math.min(3, #list - fullOfs)
+    for i, c in ipairs(full.cards) do FillCard(c, list[fullOfs + i]) end
+    full:SetWidth(n * CARD_W + (n - 1) * CARD_GAP + FPAD * 2)
+    full:SetWidth(math.max(full:GetWidth(), 290))
+    Footer(list)
     return n
+end
+
+-- 버리거나 잠근 칸만 다음 템으로 바꿔요 (다른 칸은 그대로) · 새 템은 아래에서 스윽 올라와요
+local function Rise(c)
+    local el = 0
+    c.btn:SetAlpha(0); c.val:SetAlpha(0); c.name:SetAlpha(0)
+    c.icon:SetAlpha(1); c.count:SetAlpha(1); c.edge:SetAlpha(1)   -- 날아가며 숨긴 것 되돌리기 (btn이 0이라 안 보임)
+    c:SetScript("OnUpdate", function(self, dt)
+        el = el + dt
+        local k = math.min(1, el / 0.28)
+        local e = 1 - (1 - k) * (1 - k)
+        self.btn:ClearAllPoints(); self.btn:SetPoint("TOP", 0, -10 - 16 * (1 - e))
+        self.btn:SetAlpha(e); self.val:SetAlpha(e); self.name:SetAlpha(e)
+        if k >= 1 then self:SetScript("OnUpdate", nil) end
+    end)
+end
+function ns.RefillCardInPlace(card)
+    if not (full and full:IsShown() and card) then return end
+    local list = Candidates()
+    fullList = list
+    if #list == 0 then
+        card.icon:SetAlpha(1); card.count:SetAlpha(1); card.edge:SetAlpha(1); card.val:SetAlpha(1); card.name:SetAlpha(1)
+        full:Hide() return
+    end
+    local function Key(d) return d and (d.bag .. ":" .. d.slot .. ":" .. tostring(d.link)) end
+    local shown, old = {}, Key(card.data)
+    for _, c in ipairs(full.cards) do
+        if c ~= card and c:IsShown() and c.data then shown[Key(c.data)] = true end
+    end
+    local pick
+    for _, d in ipairs(list) do
+        local k = Key(d)
+        if not shown[k] and k ~= old then pick = d break end
+    end
+    if pick then
+        FillCard(card, pick)
+        Rise(card)
+    else
+        card:Hide(); card.data = nil
+        card.icon:SetAlpha(1); card.count:SetAlpha(1); card.edge:SetAlpha(1)
+        local any = false
+        for _, c in ipairs(full.cards) do if c:IsShown() then any = true end end
+        if not any then full:Hide() return end
+    end
+    Footer(list)
 end
 
 -- force = 다시 그리기만 (이미 떠 있을 때)
 function ns.ShowBagFull(force)
+    -- 전투 중엔 띄우지 않고(싸우다 가리지 않게) 끝나면 띄워요
     if InCombatLockdown() then fullPending = true return true end
     if not force and GetTime() - lastFullAt < 3 then return full and full:IsShown() end
     local list = Candidates()
@@ -997,12 +1162,24 @@ end
 
 local fev = CreateFrame("Frame")
 fev:RegisterEvent("PLAYER_REGEN_ENABLED")
+fev:RegisterEvent("PLAYER_REGEN_DISABLED")
 fev:RegisterEvent("UI_ERROR_MESSAGE")
+local hiddenForCombat = false
 fev:SetScript("OnEvent", function(_, event, a1, a2)
     if not ns.db or not DB().on or DB().full == false then return end
-    if event == "PLAYER_REGEN_ENABLED" then
+    if event == "PLAYER_REGEN_DISABLED" then
+        -- 떠 있던 창은 전투 동안 숨겼다가, 끝나면 다시 (가방이 아직 꽉 차 있으면)
+        if full and full:IsShown() then
+            full:Hide()
+            hiddenForCombat = true
+            fullPending = true
+        end
+    elseif event == "PLAYER_REGEN_ENABLED" then
         if fullPending then
             fullPending = false
+            local back = hiddenForCombat
+            hiddenForCombat = false
+            if back then C_Timer.After(0.3, function() if not ns.ShowBagFull(true) then keepOpen = false end end) return end
             local free = 0
             for bag = 0, (NUM_BAG_SLOTS or 4) do free = free + ((NumFree and NumFree(bag)) or 0) end
             if free == 0 then C_Timer.After(0.3, function() ns.ShowBagFull(true) end) end

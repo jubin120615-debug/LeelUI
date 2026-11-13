@@ -1128,8 +1128,17 @@ ShowPane = function()
                 C_Timer.After(0.05, function() if hub:IsShown() then ShowPane() end end)
             end)
             b:ClearAllPoints()
-            if lastBtn then b:SetPoint("LEFT", lastBtn, "RIGHT", 8, 0)
-            else b:SetPoint("TOPLEFT", 18, y - 8); y = y - 44 end
+            -- 단추가 줄 끝을 넘으면 다음 줄로 (오른쪽이 잘리지 않게)
+            local paneW = (pane.sf and pane.sf:GetWidth()) or pane:GetWidth() or 360
+            local bw = b:GetWidth() or 80
+            if lastBtn and (pane.rowX or 0) + 8 + bw <= paneW - 18 then
+                b:SetPoint("LEFT", lastBtn, "RIGHT", 8, 0)
+                pane.rowX = pane.rowX + 8 + bw
+            else
+                b:SetPoint("TOPLEFT", 18, y - (lastBtn and 0 or 8))
+                y = y - (lastBtn and 36 or 44)
+                pane.rowX = 18 + bw
+            end
             lastBtn = b
             b:Show()
         end
@@ -1214,6 +1223,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.24", "버리기 창 잠금 · 휴지통 슝", "몹 등급 아이콘 알약" },
     { "1.3.23", "마우스 효과 · 몹 등급 알약", "던전 안 Leel Quest · 글씨 강조" },
     { "1.3.22", "OpenMap 같이 설치", "이어 붙인 세계 지도" },
     { "1.3.21", "Leel Quest 자동 길 · 반납 상자", "허브 정리 · OpenMap 맞춤" },
