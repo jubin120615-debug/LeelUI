@@ -18,5 +18,4 @@ manual-changelog:
 
 required-dependencies:
   - questie
-  - leatrix-maps
   - openmap
