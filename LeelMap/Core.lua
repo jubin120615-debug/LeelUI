@@ -203,6 +203,7 @@ local function Skin()
     header.name:SetPoint("LEFT", ic, "RIGHT", 6, 0)
     header.pill = MakePill(header)
     header.pill:SetPoint("LEFT", header.name, "RIGHT", 8, 0)
+    wm.leelHeader = header     -- Dungeon.lua가 던전 진행 알약을 옆에 붙여요
     hooksecurefunc(wm, "OnMapChanged", UpdateHeader)
     UpdateHeader()
 

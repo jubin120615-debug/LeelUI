@@ -206,6 +206,18 @@ local function Matches(info)
     return ok
 end
 
+-- 아이템 등급 색 (르엘 톤으로 살짝 부드럽게). 1 = 일반은 테 없음
+local QCOL = {
+    [0] = { 0.58, 0.57, 0.56 },          -- 회색
+    [2] = { 0.25, 0.83, 0.35 },          -- 고급
+    [3] = { 0.25, 0.56, 1.00 },          -- 희귀
+    [4] = { 0.71, 0.43, 0.96 },          -- 영웅
+    [5] = { 1.00, 0.60, 0.24 },          -- 전설
+    [6] = { 0.90, 0.80, 0.50 },          -- 유물
+    [7] = { 0.40, 0.80, 1.00 },          -- 계승
+    quest = { 1.00, 0.83, 0.42 },        -- 퀘스트 템
+}
+
 local function MakeButton(bag, slot)
     local holder = holders[bag]
     local name = "LeelUI_Bag" .. bag .. "Slot" .. slot
@@ -220,9 +232,9 @@ local function MakeButton(bag, slot)
     local nt = b.GetNormalTexture and b:GetNormalTexture()
     if nt then nt:SetAlpha(0) end
     local slotBg = CreateFrame("Frame", nil, b)
-    slotBg:SetPoint("TOPLEFT", -2, 2); slotBg:SetPoint("BOTTOMRIGHT", 2, -2)
+    slotBg:SetPoint("TOPLEFT", -1, 1); slotBg:SetPoint("BOTTOMRIGHT", 1, -1)   -- 등급 테 = 이 1px 테두리
     slotBg:SetFrameLevel(math.max(0, b:GetFrameLevel() - 1))
-    b.leelBg = ns.RoundRect(slotBg, 7, { 0.24, 0.19, 0.18 }, "BACKGROUND", 0, 0)
+    b.leelBg = ns.RoundRect(slotBg, 4, { 0.24, 0.19, 0.18 }, "BACKGROUND", 0, 0)
     b.leelEdge = slotBg
     -- 새 아이템 분홍 점 (마우스를 올리면 지워져요)
     local dotF = CreateFrame("Frame", nil, b)
@@ -362,18 +374,58 @@ local function UpdateButton(b, bag, slot)
         local a = b[k]
         if a and a.Stop then a:Stop() end
     end
-    if not info and b.IconBorder then b.IconBorder:Hide() end
     if not info and b.IconOverlay then b.IconOverlay:Hide() end
-    -- 빈 칸은 조금 더 어둡게, 회색템은 회색 테
+    -- A안: 등급 색 테(둥근 칸 바탕이 2px 테가 돼요) + 아이콘 아래 은은한 같은 색 빛
+    --   일반(흰색)은 테 없음 · 회색 잡템은 흐리게 + 왼쪽 위 동전(상점 토끼가 팔 템) · 퀘스트 템은 노랑
+    if b.IconBorder then b.IconBorder:Hide(); b.IconBorder:SetAlpha(0) end
     local q = info and info.quality
+    local isQuest = b.leelQ and b.leelQ:IsShown()
+    if isQuest then for _, e in ipairs(b.leelQ.edges) do e:SetAlpha(0) end end
+    local match = Matches(info)
+    -- 탭 · 검색에 안 맞아서 흐리게 된 칸은 등급 색을 끄기 (안 그러면 흐린 아이콘 뒤로 색 칸이 통째로 비쳐요)
+    local qc = (not info or not match) and nil or (isQuest and QCOL.quest) or QCOL[q or 1]
     if not info then
         b.leelBg:SetColor({ 0.20, 0.16, 0.15 }, 1)
-    elseif q == 0 then
-        b.leelBg:SetColor({ 0.42, 0.40, 0.39 }, 1)
+    elseif qc then
+        b.leelBg:SetColor(qc, 1)
     else
         b.leelBg:SetColor({ 0.24, 0.19, 0.18 }, 1)
     end
-    b:SetAlpha(Matches(info) and 1 or 0.22)
+    local glow = b.leelGlow
+    if not glow and info then
+        glow = b:CreateTexture(nil, "ARTWORK", nil, 7)
+        glow:SetTexture("Interface\\Buttons\\WHITE8X8")
+        glow:SetPoint("BOTTOMLEFT", 0, 0); glow:SetPoint("BOTTOMRIGHT", 0, 0); glow:SetHeight(SZ * 0.6)
+        b.leelGlow = glow
+    end
+    if glow then
+        local gc = qc and q ~= 0 and qc
+        if gc then
+            local ok = pcall(glow.SetGradient, glow, "VERTICAL", CreateColor(gc[1], gc[2], gc[3], 0.62), CreateColor(gc[1], gc[2], gc[3], 0))
+            if not ok and glow.SetGradientAlpha then pcall(glow.SetGradientAlpha, glow, "VERTICAL", gc[1], gc[2], gc[3], 0.62, gc[1], gc[2], gc[3], 0) end
+            glow:Show()
+        else
+            glow:Hide()
+        end
+    end
+    -- 회색 잡템: 아이콘 흐리게 + 동전
+    local icon = b.icon or b.Icon or _G[b:GetName() .. "IconTexture"]
+    local junk = info and q == 0 and not info.isLocked
+    if icon and info and not info.isLocked then
+        if junk then pcall(icon.SetDesaturation, icon, 0.6); icon:SetVertexColor(0.78, 0.78, 0.78)
+        else pcall(icon.SetDesaturation, icon, 0); icon:SetVertexColor(1, 1, 1) end
+    end
+    local keepL = (ns.ShopDB and ns.ShopDB().keep) or {}
+    local sell = match and junk and not info.hasNoValue and not keepL[info.itemID or 0]
+    if sell and not b.leelCoin then
+        local cf = CreateFrame("Frame", nil, b); cf:SetSize(13, 13); cf:SetPoint("TOPLEFT", -1, 1)
+        cf:SetFrameLevel(b:GetFrameLevel() + 6)
+        local o = cf:CreateTexture(nil, "ARTWORK"); o:SetTexture(ns.MEDIA .. "circle"); o:SetAllPoints(); o:SetVertexColor(0.11, 0.08, 0.07, 1)
+        local c = cf:CreateTexture(nil, "OVERLAY"); c:SetTexture(ns.MEDIA .. "coin_c"); c:SetPoint("TOPLEFT", 1.5, -1.5); c:SetPoint("BOTTOMRIGHT", -1.5, 1.5)
+        b.leelCoin = cf
+    end
+    if b.leelCoin then b.leelCoin:SetShown(sell and true or false) end
+    b:SetAlpha(match and 1 or 0.22)
 end
 
 Layout = function()

@@ -82,6 +82,29 @@ end
 -- 화면 퀘스트 목록이 Leel Quest 인지 (아니면 Leel Quest 설정은 흐리게)
 local function LQOn() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "guide" end
 
+local function TSApply()
+    if InCombatLockdown() then Print("전투가 끝나면 토템 세트가 바뀌어요.") end
+    if ns.TotemSetApply then ns.TotemSetApply() end
+    if ns.TotemSetPaint then ns.TotemSetPaint() end
+end
+local function TSSlot(k)
+    return { t = "choice", label = k .. "번", hint = k == 1 and "가장 먼저 깔 토템" or nil,
+        options = function() return ns.TotemOptions and ns.TotemOptions() or {} end,
+        get = function()
+            local t = ns.TotemSetDB and ns.TotemSetDB()
+            local s = t and t.sets[t.cur]
+            return s and s[k] or 0
+        end,
+        set = function(v)
+            local t = ns.TotemSetDB()
+            t.sets[t.cur] = t.sets[t.cur] or {}
+            local s = t.sets[t.cur]
+            for i = 1, 4 do s[i] = s[i] or 0 end
+            s[k] = v
+            TSApply()
+        end }
+end
+
 local MODULES = {
     {
         key = "LeelUI", title = "위쪽 HUD", sub = "내 체력 · 대상 창", icon = "hb_ui",
@@ -93,6 +116,12 @@ local MODULES = {
               set = function(v)
                   ns:SetHudScale(v / 100)
                   if InCombatLockdown() then Print("전투가 끝나면 HUD 크기가 바뀌어요.") end
+              end },
+            { t = "slider", label = "펫 창 크기 (사냥꾼 · 흑마법사)", min = 80, max = 160,
+              get = function() return tonumber(ns.db.petScale) or 130 end,
+              set = function(v)
+                  if ns.SetPetScale then ns.SetPetScale(v) else ns.db.petScale = v end
+                  if InCombatLockdown() then Print("전투가 끝나면 펫 창 크기가 바뀌어요.") end
               end },
             { t = "seg", label = "글씨 강조", hint = "이름 · 체력 · 바",
               options = { { "보통", 0 }, { "크게", 4 }, { "아주 크게", 8 } },
@@ -203,6 +232,9 @@ local MODULES = {
             { t = "toggle", label = "다른 애드온 아이콘 모으기",
               get = function() return ns.db.mmCollect ~= false end,
               set = function(v) ns.db.mmCollect = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+            { t = "toggle", label = "던전 층 지도 카드", hint = "Forever Dungeon Routes가 있으면 던전에서 미니맵 옆에 지금 방 · 길 · 우두머리 (FDR 작은 지도 대신)",
+              get = function() return ns.db.fdrCard ~= false end,
+              set = function(v) ns.db.fdrCard = v; if ns.DungeonCardRefresh then ns.DungeonCardRefresh() end end },
         },
     },
     {
@@ -288,6 +320,35 @@ local MODULES = {
               get = function() return MapDB().gHideInst ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.gHideInst = v and true or false; if LeelMapGuild then LeelMapGuild.Send() end end end },
             { t = "button", label = "지도 위치 초기화", cmd = "위치" },
+        },
+    },
+    {
+        key = "LeelUI_TotemSet", builtin = true, cat = "party",
+        title = "토템 세트", sub = "주술사 · 한 키로 토템", icon = "hb_bolt",
+        onoff = { get = function() local t = ns.TotemSetDB and ns.TotemSetDB(); return t and t.on end,
+                  set = function(v) local t = ns.TotemSetDB(); t.on = v and true or false; TSApply() end },
+        desc = "단축키 하나를 누를 때마다 세트의 다음 토템을 하나씩 깔아요.\n토템 칸 옆 토끼 단추 · 둘레 링 = 깔린 원소. 바꾸기는 전투 밖에서만.",
+        items = {
+            { t = "toggle", label = "토템 세트 단추 쓰기", hint = "주술사만 보여요",
+              get = function() local t = ns.TotemSetDB and ns.TotemSetDB(); return t and t.on end,
+              set = function(v) local t = ns.TotemSetDB(); t.on = v and true or false; TSApply() end },
+            { t = "seg", label = "고칠 세트", hint = "지금 쓰는 세트도 이걸로",
+              options = { { "사냥", 1 }, { "던전", 2 }, { "보스", 3 } },
+              get = function() local t = ns.TotemSetDB and ns.TotemSetDB(); return t and t.cur or 1 end,
+              set = function(v) ns.TotemSetDB().cur = v; TSApply() end },
+            { t = "header", label = function() return "순서 (" .. ((ns.TOTEM_SETNAMES or {})[(ns.TotemSetDB and ns.TotemSetDB() or {}).cur or 1] or "") .. " 세트)" end },
+            TSSlot(1), TSSlot(2), TSSlot(3), TSSlot(4),
+            { t = "header", label = "단축키" },
+            { t = "bind", label = "토템 깔기", hint = "누를 때마다 다음 토템",
+              get = function() local t = ns.TotemSetDB and ns.TotemSetDB(); return t and t.key or "" end,
+              set = function(v) ns.TotemSetDB().key = v; TSApply() end },
+            { t = "bind", label = "토템의 귀환", hint = function() return (ns.TotemRecallKnown and ns.TotemRecallKnown()) and "깐 토템 거두고 마나 일부 돌려받기" or "아직 안 배웠어요" end,
+              get = function() local t = ns.TotemSetDB and ns.TotemSetDB(); return t and t.recallKey or "" end,
+              set = function(v) ns.TotemSetDB().recallKey = v; TSApply() end },
+            { t = "toggle", label = "Shift + 깔기 키 = 다음 세트", hint = "사냥 → 던전 → 보스 (전투 밖 · 깔기 키에 Shift 등이 없을 때)",
+              get = function() local t = ns.TotemSetDB and ns.TotemSetDB(); return t and t.shift end,
+              set = function(v) ns.TotemSetDB().shift = v and true or false; TSApply() end },
+            { t = "button", label = "1번부터 다시", run = function() TSApply() end },
         },
     },
     {
@@ -570,7 +631,7 @@ local MOD_CAT = {
     LeelUI_Chat = "view", LeelUI_Font = "view",
     ForgLeveling = "quest", LeelUI_QTracker = "none", LeelUI_Quest = "quest", LeelUI_QItem = "quest", LeelSpot = "quest",
     LeelMap = "map", LeelUI_Minimap = "map",
-    LeelUI_Party = "party", LeelMark = "party",
+    LeelUI_Party = "party", LeelMark = "party", LeelUI_TotemSet = "party",
     LeelUI_Bags = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
     LeelUI_Profile = "none",
 }
@@ -578,7 +639,7 @@ local MOD_ORDER = {}
 do
     local order = { "LeelUI", "LeelUI_ABar", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font",
         "ForgLeveling", "LeelUI_QTracker", "LeelUI_Quest", "LeelUI_QItem", "LeelSpot",
-        "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelMark",
+        "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelMark", "LeelUI_TotemSet",
         "LeelUI_Bags", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
     for i, k in ipairs(order) do MOD_ORDER[k] = i end
 end
@@ -786,6 +847,10 @@ local function ChoiceRow(pane, i)
     r.pill.bg = ns.RoundRect(r.pill, 12, { 0.23, 0.18, 0.17 }, "BACKGROUND", 0, 0)
     r.pill.fs = r.pill:CreateFontString(nil, "OVERLAY")
     r.pill.fs:SetPoint("LEFT", 12, 0)
+    r.pill.ic = r.pill:CreateTexture(nil, "OVERLAY"); r.pill.ic:SetSize(18, 18); r.pill.ic:SetPoint("LEFT", 4, 0)
+    r.pill.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local icm = r.pill:CreateMaskTexture(); icm:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    icm:SetAllPoints(r.pill.ic); r.pill.ic:AddMaskTexture(icm)
     r.pill.ar = r.pill:CreateTexture(nil, "OVERLAY"); r.pill.ar:SetTexture(ns.MEDIA .. "hb_down")
     r.pill.ar:SetSize(11, 11); r.pill.ar:SetVertexColor(C.acc[1], C.acc[2], C.acc[3]); r.pill.ar:SetPoint("RIGHT", -9, 0)
     r.pill:SetScript("OnEnter", function(self) self.bg:SetColor({ 0.32, 0.25, 0.24 }, 1) end)
@@ -835,8 +900,9 @@ local function OpenDropdown(anchor, slot, onPick)
             end
         end)
     end
-    local opts = ChoiceOptions(slot)
-    local cur = ns.db.font and ns.db.font[slot]
+    local opts, cur
+    if type(slot) == "table" then opts = slot.options(); cur = slot.get()
+    else opts = ChoiceOptions(slot); cur = ns.db.font and ns.db.font[slot] end
     local w = 150
     for i, o in ipairs(opts) do
         local b = dd.items[i]
@@ -846,6 +912,10 @@ local function OpenDropdown(anchor, slot, onPick)
             b.hl = ns.RoundRect(b, 10, nil, "BACKGROUND", 2, 0)
             b.fs = b:CreateFontString(nil, "OVERLAY"); b.fs:SetPoint("LEFT", 10, 0)
             b.tag = ns.Font(b, 10, { 0.62, 0.54, 0.52 }); b.tag:SetPoint("RIGHT", -8, 0)
+            b.ic = b:CreateTexture(nil, "OVERLAY"); b.ic:SetSize(20, 20); b.ic:SetPoint("LEFT", 6, 0)
+            b.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local m_ = b:CreateMaskTexture(); m_:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            m_:SetAllPoints(b.ic); b.ic:AddMaskTexture(m_)
             dd.items[i] = b
         end
         b:ClearAllPoints()
@@ -853,6 +923,8 @@ local function OpenDropdown(anchor, slot, onPick)
         if not (o.file and b.fs:SetFont(o.file, 14, "")) then b.fs:SetFont(ns.FONT, 13, "") end
         b.fs:SetText(o.label)
         b.tag:SetText("")
+        b.ic:SetShown(o.icon and true or false); if o.icon then b.ic:SetTexture(o.icon) end
+        b.fs:ClearAllPoints(); b.fs:SetPoint("LEFT", o.icon and 32 or 10, 0)
         local on = o.key == cur
         b.hl:SetColor(on and C.acc or { 1, 1, 1 }, on and 1 or 0)
         local tc = on and C.ink or C.tx
@@ -861,7 +933,7 @@ local function OpenDropdown(anchor, slot, onPick)
         b:SetScript("OnLeave", function(self) self.hl:SetColor(on and C.acc or { 1, 1, 1 }, on and 1 or 0) end)
         b:SetScript("OnClick", function() dd:Hide(); onPick(o.key) end)
         b:Show()
-        w = math.max(w, b.fs:GetStringWidth() + 80)
+        w = math.max(w, b.fs:GetStringWidth() + 80 + (o.icon and 22 or 0))
     end
     for i = #opts + 1, #dd.items do dd.items[i]:Hide() end
     dd:SetSize(w, #opts * 25 + 12)
@@ -1081,12 +1153,25 @@ ShowPane = function()
             r:SetPoint("TOPLEFT", 18, y); r:SetPoint("TOPRIGHT", -18, y)
             r.name:SetText(it.label)
             r.hint:SetText(it.hint or "")
-            local cur = ns.db.font and ns.db.font[it.slot]
-            local label, file = LabelFor(it.slot, cur)
+            r.pill:EnableKeyboard(false); r.pill:SetScript("OnKeyDown", nil); r.pill:SetScript("OnMouseDown", nil); r.pill.capturing = nil
+            r.pill.ar:Show()
+            r.pill:RegisterForClicks("LeftButtonUp")
+            r.pill.bg:SetColor({ 0.23, 0.18, 0.17 }, 1)
+            local label, file, icon
+            if it.options then
+                local cur = it.get()
+                label = "—"
+                for _, o in ipairs(it.options()) do if o.key == cur then label = o.label; icon = o.icon end end
+            else
+                local cur = ns.db.font and ns.db.font[it.slot]
+                label, file = LabelFor(it.slot, cur)
+            end
             if not (file and r.pill.fs:SetFont(file, 14, "")) then r.pill.fs:SetFont(ns.FONT, 13, "") end
             r.pill.fs:SetText(label)
             r.pill.fs:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
-            r.pill:SetWidth(math.max(70, r.pill.fs:GetStringWidth() + 40))
+            r.pill.fs:ClearAllPoints(); r.pill.fs:SetPoint("LEFT", icon and 27 or 12, 0)
+            r.pill.ic:SetShown(icon and true or false); if icon then r.pill.ic:SetTexture(icon) end
+            r.pill:SetWidth(math.max(70, r.pill.fs:GetStringWidth() + 40 + (icon and 15 or 0)))
             local W_ = { now = { "바로", C.acc, C.ink }, reload = { "다시 불러오기", { 0.32, 0.25, 0.24 }, C.tx },
                          relog = { "재접속", { 0.32, 0.25, 0.24 }, C.tx } }
             local w = it.when and W_[it.when]
@@ -1101,6 +1186,10 @@ ShowPane = function()
             end
             r.pill:SetScript("OnClick", function(self)
                 if dd and dd:IsShown() and dd.anchor == self then dd:Hide() return end
+                if it.options then
+                    OpenDropdown(self, it, function(key) it.set(key); ShowPane() end)
+                    return
+                end
                 OpenDropdown(self, it.slot, function(key)
                     ns:SetFontSlot(it.slot, key)
                     if it.slot == "num" then
@@ -1108,6 +1197,60 @@ ShowPane = function()
                     end
                     ShowPane()
                 end)
+            end)
+            r:Show()
+            y = y - 36
+        elseif it.t == "bind" then
+            -- 단축키 직접 입력: 알약을 누르고 원하는 키(Shift · Ctrl · Alt 조합 가능)를 누르면 저장
+            lastBtn = nil
+            ci = ci + 1
+            local r = ChoiceRow(pane, ci)
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", 18, y); r:SetPoint("TOPRIGHT", -18, y)
+            r.name:SetText(it.label)
+            r.hint:SetText(type(it.hint) == "function" and it.hint() or (it.hint or ""))
+            r.when:Hide(); r.pill.ic:Hide(); r.pill.ar:Hide()
+            r.pill.fs:SetFont(ns.FONT, 13, "")
+            r.pill.fs:ClearAllPoints(); r.pill.fs:SetPoint("CENTER", 0, 0)
+            local function Show_(txt, hot)
+                r.pill.fs:SetText(txt)
+                local c = hot and C.ink or C.tx
+                r.pill.fs:SetTextColor(c[1], c[2], c[3])
+                r.pill.bg:SetColor(hot and C.acc or { 0.23, 0.18, 0.17 }, 1)
+                r.pill:SetWidth(math.max(90, r.pill.fs:GetStringWidth() + 28))
+            end
+            local function Stop()
+                r.pill:EnableKeyboard(false); r.pill:SetScript("OnKeyDown", nil); r.pill.capturing = nil
+            end
+            local cur = it.get()
+            Show_((cur ~= "" and cur) or "없음", false)
+            Stop()
+            r.pill:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            local function Save(k) Stop(); it.set(k); C_Timer.After(0, ShowPane) end
+            r.pill:SetScript("OnClick", function(self, btn)
+                if InCombatLockdown() then Print("전투가 끝나면 바꿀 수 있어요."); return end
+                if btn == "RightButton" then Save("") return end
+                if self.capturing then
+                    -- 잡는 중에 마우스로 누르면: 가운데 · 4 · 5번 버튼을 키로
+                    return
+                end
+                self.capturing = true
+                Show_("키를 누르세요 · Esc 취소", true)
+                self:EnableKeyboard(true)
+                if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(false) end
+                self:SetScript("OnKeyDown", function(_, key)
+                    if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL" or key == "LALT" or key == "RALT" then return end
+                    if key == "ESCAPE" then Stop(); C_Timer.After(0, ShowPane) return end
+                    local pre = (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "") .. (IsShiftKeyDown() and "SHIFT-" or "")
+                    Save(pre .. key)
+                end)
+            end)
+            r.pill:SetScript("OnMouseDown", function(self, btn)
+                if self.capturing and (btn == "MiddleButton" or btn == "Button4" or btn == "Button5") then
+                    local m = (btn == "MiddleButton" and "BUTTON3") or (btn == "Button4" and "BUTTON4") or "BUTTON5"
+                    local pre = (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "") .. (IsShiftKeyDown() and "SHIFT-" or "")
+                    Save(pre .. m)
+                end
             end)
             r:Show()
             y = y - 36
@@ -1255,6 +1398,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.28", "주술사 토템 세트 (Q 한 키) · 토템 칸", "펫 창 크기 · 펫 만족도 · 가방 등급 테 · 던전 카드" },
     { "1.3.27", "Leel Quest 퀘스트 창 대신 · 검색", "지도 머리 줄 · 시전바 · 가방 크기" },
     { "1.3.26", "몹 시전바 크게 · 아이콘", "지역 출구 화살표 · 재료 가방" },
     { "1.3.25", "전문기술 재료 클릭 → 제작식", "Leel Map 길드원 위치" },

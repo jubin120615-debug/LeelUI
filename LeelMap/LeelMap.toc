@@ -2,7 +2,7 @@
 ## Title: |cfff2b3c2Leel|r Map
 ## Notes: 르엘 UI 세계 지도: 작은 창, 걸을 때 흐려짐, 좌표, 지역 레벨(난이도 색). /lmap
 ## Author: 슈엘
-## Version: 0.8.5
+## Version: 0.8.6
 ## Category: 르엘 UI
 ## Group: LeelUI
 ## SavedVariables: LeelMapDB
