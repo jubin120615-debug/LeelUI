@@ -270,11 +270,19 @@ local panel
 local function PanelPaint()
     if not panel then return end
     local list = Live()
-    local show = DB().gShow and #list > 0
-    panel.pill:SetShown(show)
+    -- 길드에 있으면 늘 보여요 (0명이면 회색 0): 단추가 있다 없다 하면 머리 줄이 흔들려서
+    local show = DB().gShow and ((IsInGuild and IsInGuild()) or #list > 0) and true or false
+    if panel.pill:IsShown() ~= show then
+        panel.pill:SetShown(show)
+        if _G.LeelMapPlaceTools then _G.LeelMapPlaceTools() end   -- 머리 줄 단추 자리 다시
+    end
     if not show then panel.list:Hide() return end
-    panel.pill.fs:SetText("길드원 " .. #list)
-    panel.pill:SetWidth(panel.pill.fs:GetStringWidth() + 40)
+    panel.pill.fs:SetText(#list)   -- 토끼 동그라미 + 노란 숫자 뱃지
+    panel.pill.badge:SetWidth(math.max(16, panel.pill.fs:GetStringWidth() + 8))
+    local on = #list > 0
+    panel.pill.badgeY:SetVertexColor(on and 1 or 0.42, on and 0.827 or 0.38, on and 0.42 or 0.37, 1)
+    panel.pill.icon:SetDesaturated(not on); panel.pill.bgc:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], on and 1 or 0.45)
+    if panel.empty then panel.empty:SetShown(not on) end
     if not panel.list:IsShown() then return end
     local rows = panel.rows
     for i, e in ipairs(list) do
@@ -308,7 +316,7 @@ local function PanelPaint()
         r:Show()
     end
     for i = #list + 1, #rows do rows[i]:Hide() end
-    panel.list:SetHeight(12 + #list * 23)
+    panel.list:SetHeight(#list > 0 and (12 + #list * 23) or 46)
 end
 
 local function MakePanel()
@@ -316,17 +324,32 @@ local function MakePanel()
     if panel or not (W and W.ScrollContainer) then return end
     panel = {}
     local pill = CreateFrame("Button", nil, W.ScrollContainer)
-    pill:SetSize(90, 24); pill:SetPoint("TOPLEFT", W.ScrollContainer, "TOPLEFT", 52, -12)   -- 왼쪽 위 동그란 지도 단추들 옆
+    -- A안: ◆ · ! 와 같은 크기 토끼 동그라미 + 오른쪽 위 노란 숫자 (자리는 Core가 머리 줄 오른쪽에)
+    pill:SetSize(28, 28); pill:SetPoint("TOPLEFT", W.ScrollContainer, "TOPLEFT", 52, -12)
     pill:SetFrameLevel(W.ScrollContainer:GetFrameLevel() + 50)
-    local bg = pill:CreateTexture(nil, "BACKGROUND"); bg:SetTexture(LM .. "pill32"); bg:SetAllPoints(); bg:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
-    local ic = pill:CreateTexture(nil, "ARTWORK"); ic:SetTexture(LM .. "bunny"); ic:SetSize(18, 18); ic:SetPoint("LEFT", 5, 0)
-    pill.fs = Font(pill, 12.5, C.ink); pill.fs:SetPoint("LEFT", ic, "RIGHT", 4, 0); pill.fs:SetShadowColor(0, 0, 0, 0)
+    local bo = pill:CreateTexture(nil, "BACKGROUND", nil, -1); bo:SetTexture(LM .. "circle"); bo:SetPoint("TOPLEFT", -1.5, 1.5); bo:SetPoint("BOTTOMRIGHT", 1.5, -1.5); bo:SetVertexColor(0, 0, 0, 0.85)
+    local bg = pill:CreateTexture(nil, "BACKGROUND"); bg:SetTexture(LM .. "circle"); bg:SetAllPoints(); bg:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+    local ic = pill:CreateTexture(nil, "ARTWORK"); ic:SetTexture(LM .. "bunny"); ic:SetSize(24, 24); ic:SetPoint("CENTER")
+    local hl = pill:CreateTexture(nil, "HIGHLIGHT"); hl:SetTexture(LM .. "circle"); hl:SetAllPoints(); hl:SetVertexColor(1, 1, 1, 0.25); hl:SetBlendMode("ADD")
+    local badge = CreateFrame("Frame", nil, pill); badge:SetSize(16, 16); badge:SetPoint("CENTER", pill, "TOPRIGHT", -2, -2)
+    badge:SetFrameLevel(pill:GetFrameLevel() + 3)
+    local bb = badge:CreateTexture(nil, "BACKGROUND"); bb:SetTexture(LM .. "pill16"); pcall(bb.SetTextureSliceMargins, bb, 8, 8, 8, 8)
+    bb:SetPoint("TOPLEFT", -1.5, 1.5); bb:SetPoint("BOTTOMRIGHT", 1.5, -1.5); bb:SetVertexColor(0.137, 0.102, 0.106, 1)
+    local by = badge:CreateTexture(nil, "BORDER"); by:SetTexture(LM .. "pill16"); pcall(by.SetTextureSliceMargins, by, 8, 8, 8, 8)
+    by:SetAllPoints(); by:SetVertexColor(1, 0.827, 0.42, 1)
+    pill.badge, pill.badgeY, pill.icon, pill.bgc = badge, by, ic, bg
+    pill.fs = Font(badge, 10.5, C.ink); pill.fs:SetPoint("CENTER", 0, 0); pill.fs:SetShadowColor(0, 0, 0, 0)
     local list = CreateFrame("Frame", nil, pill)
-    list:SetPoint("TOPLEFT", pill, "BOTTOMLEFT", 0, -6); list:SetWidth(260)
+    list:SetPoint("TOPRIGHT", pill, "BOTTOMRIGHT", 0, -8); list:SetWidth(260)
     local lb = list:CreateTexture(nil, "BACKGROUND"); lb:SetAllPoints(); lb:SetColorTexture(0.125, 0.094, 0.086, 0.95)
     local edge = list:CreateTexture(nil, "BORDER"); edge:SetPoint("TOPLEFT"); edge:SetPoint("BOTTOMLEFT"); edge:SetWidth(2); edge:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.9)
     list:EnableMouse(true)
     list:Hide()
+    panel = panel or {}
+    panel.empty = Font(list, 11.5, C.tx2); panel.empty:SetPoint("LEFT", 14, 0); panel.empty:SetPoint("RIGHT", -8, 0)
+    panel.empty:SetJustifyH("LEFT"); panel.empty:SetText("지금 접속한 길드원이 없어요\n(르엘 지도를 쓰는 길드원만 보여요)")
+    W.leelGuildPill = pill   -- 지도 머리 줄 오른쪽에 자리 잡음 (Core)
+    if _G.LeelMapPlaceTools then _G.LeelMapPlaceTools() end
     pill:SetScript("OnClick", function() list:SetShown(not list:IsShown()); PanelPaint() end)
     pill:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT"); GameTooltip:SetText("르엘 UI 쓰는 길드원")

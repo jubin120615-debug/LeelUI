@@ -9,7 +9,7 @@ local C = ns.C
 local active = {}   -- unit -> 우리 이름표 프레임
 
 local W, H = 164, 15
-local CAST_H, CAST_ICON = 14, 14
+local CAST_H, CAST_ICON = 10, 0
 local CAST_COLOR = { int = { 1, 0.54, 0.44 }, no = { C.grey[1], C.grey[2], C.grey[3] }, stop = { 0.85, 0.25, 0.30 } }
 local DEB_SIZE = 20
 
@@ -185,29 +185,16 @@ local function Build(plate)
     f.name:SetPoint("LEFT", f.lv, "RIGHT", 4, 0)
 
     -- 시전바: 왼쪽 주문 아이콘 + 14px 바, 바 안에 주문 이름 · 남은 초, 끊을 수 있으면 둘레가 빛남
-    f.cast = ns.CreateSkewBar(f, W - CAST_ICON - 2, CAST_H, { inset = 1, noShadow = true, shape = "pill32" })
+    -- 시전바 C: 10px 바 + 아래 주문 이름 13 굵게 · 오른쪽 "차단 가능/불가"
+    f.cast = ns.CreateSkewBar(f, W, CAST_H, { inset = 1, noShadow = true, shape = "pill32" })
     f.cast:SetPoint("TOP", f.hp, "BOTTOM", 0, -4)
-    f.castGlow = f.cast:CreateTexture(nil, "BACKGROUND", nil, -8)
-    f.castGlow:SetTexture(ns.MEDIA .. "pill32")
-    f.castGlow:SetPoint("TOPLEFT", -3, 3); f.castGlow:SetPoint("BOTTOMRIGHT", 3, -3)
-    f.castGlow:SetBlendMode("ADD")
-    f.castGlow:SetVertexColor(1, 0.55, 0.40, 0.6)
-    f.castGlow:Hide()
-    f.castIconBg = f:CreateTexture(nil, "BACKGROUND")
-    f.castIconBg:SetColorTexture(0.07, 0.04, 0.045, 1)
-    f.castIconBg:SetSize(CAST_ICON, CAST_ICON)
-    f.castIconBg:SetPoint("RIGHT", f.cast, "LEFT", -2, 0)
-    f.castIcon = f:CreateTexture(nil, "ARTWORK")
-    f.castIcon:SetPoint("TOPLEFT", f.castIconBg, "TOPLEFT", 1, -1)
-    f.castIcon:SetPoint("BOTTOMRIGHT", f.castIconBg, "BOTTOMRIGHT", -1, 1)
-    f.castIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    f.castName = Outline(f.cast.over:CreateFontString(nil, "OVERLAY"), 10)
-    f.castName:SetPoint("LEFT", f.cast, "LEFT", 6, 0)
-    f.castName:SetPoint("RIGHT", f.cast, "RIGHT", -30, 0)
+    f.castName = Outline(f:CreateFontString(nil, "OVERLAY"), 13)
+    f.castName:SetPoint("TOPLEFT", f.cast, "BOTTOMLEFT", 2, -2)
+    f.castName:SetPoint("RIGHT", f.cast, "RIGHT", -64, 0)
     f.castName:SetJustifyH("LEFT"); f.castName:SetWordWrap(false)
-    f.castTag = Outline(f.cast.over:CreateFontString(nil, "OVERLAY"), 10, ns.NUM)
-    f.castTag:SetPoint("RIGHT", f.cast, "RIGHT", -6, 0)
-    f.cast:Hide(); f.castName:Hide(); f.castTag:Hide(); f.castIcon:Hide(); f.castIconBg:Hide()
+    f.castTag = Outline(f:CreateFontString(nil, "OVERLAY"), 11)
+    f.castTag:SetPoint("TOPRIGHT", f.cast, "BOTTOMRIGHT", -2, -3)
+    f.cast:Hide(); f.castName:Hide(); f.castTag:Hide()
 
     -- 연계 점수 구슬: 바 아래 왼쪽 (오른쪽은 퀘스트 개수 꼬리표 자리)
     f.combo = ns.CreateDots(f, 60, 12)
@@ -385,11 +372,11 @@ local function PlaceDebuffs(f)
         last = f.combo
     end
     f.cast:ClearAllPoints()
-    f.cast:SetPoint("TOPLEFT", last, "BOTTOMLEFT", (last == f.combo and -6 or 0) + CAST_ICON + 2, -4)
-    f.cast:SetWidth(W - CAST_ICON - 2)
+    f.cast:SetPoint("TOPLEFT", last, "BOTTOMLEFT", last == f.combo and -6 or 0, -4)
+    f.cast:SetWidth(W)
     f.debRow:ClearAllPoints()
     if f.cast:IsShown() then
-        f.debRow:SetPoint("TOPLEFT", f.cast, "BOTTOMLEFT", -CAST_ICON, -6)
+        f.debRow:SetPoint("TOPLEFT", f.cast, "BOTTOMLEFT", 2, -21)
     elseif last == f.combo then
         f.debRow:SetPoint("TOPLEFT", f.combo, "BOTTOMLEFT", -4, -5)
     else
@@ -631,7 +618,6 @@ end
 local function StopCast(f)
     f.cast:SetScript("OnUpdate", nil)
     f.cast:Hide(); f.castName:Hide(); f.castTag:Hide()
-    f.castIcon:Hide(); f.castIconBg:Hide(); f.castGlow:Hide()
     PlaceDebuffs(f)
 end
 
@@ -650,23 +636,20 @@ local function UpdateCast(f, unit)
         f.cast.bar:SetMinMaxValues(0, dur)
         if notInt then
             f.cast.fill:SetVertexColor(C.grey[1], C.grey[2], C.grey[3], 1)
-            f.castGlow:Hide()
+            f.castTag:SetText("차단 불가"); f.castTag:SetTextColor(C.tx2[1], C.tx2[2], C.tx2[3])
         else
             f.cast.fill:SetVertexColor(1, 0.54, 0.44, 1)
-            f.castGlow:Show()
+            f.castTag:SetText("차단 가능"); f.castTag:SetTextColor(1, 0.70, 0.65)
         end
         f.castName:SetText(ns.CastLabel and ns.CastLabel((text ~= nil and text ~= "") and text or name) or name)
-        f.castName:SetTextColor(1, 1, 1)
-        f.castTag:SetTextColor(1, 1, 1)
-        f.castIcon:SetTexture(icon or 136243)
+        f.castName:SetTextColor(1, 0.70, 0.65)
 
         f.cast:SetScript("OnUpdate", function()
             local now = GetTime() * 1000
             if now >= endMS then StopCast(f) return end
             f.cast.bar:SetValue(channel and (endMS - now) or (now - startMS))
-            f.castTag:SetFormattedText("%.1f", (endMS - now) / 1000)
         end)
-        f.cast:Show(); f.castName:Show(); f.castTag:Show(); f.castIcon:Show(); f.castIconBg:Show()
+        f.cast:Show(); f.castName:Show(); f.castTag:Show()
         PlaceDebuffs(f)
     end)
     if not ok then StopCast(f) end   -- 숨겨진 값이면 시전바 생략
@@ -712,13 +695,8 @@ local function PinCast(cb)
     cb:SetPoint("BOTTOMRIGHT", f.cast, "BOTTOMRIGHT", -1, 1)
     if cb.Text then
         cb.Text:ClearAllPoints()
-        cb.Text:SetPoint("LEFT", f.cast, "LEFT", 6, 0)
-        cb.Text:SetPoint("RIGHT", f.cast, "RIGHT", -30, 0)
-    end
-    if cb.Icon then
-        cb.Icon:ClearAllPoints()
-        cb.Icon:SetAllPoints(f.castIcon)
-        if cb.Icon.SetTexCoord then cb.Icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+        cb.Text:SetPoint("TOPLEFT", f.cast, "BOTTOMLEFT", 2, -2)
+        cb.Text:SetPoint("RIGHT", f.cast, "RIGHT", -64, 0)
     end
     cb.leelMoving = false
 end
@@ -733,36 +711,24 @@ local function SyncCast(cb)
     local f = cb.leelOwner
     if not f then return end
     local on = cb:IsShown()
-    f.cast:SetShown(on); f.castIconBg:SetShown(on)
-    f.castIcon:Hide()            -- 아이콘 그림은 게임 시전바 것을 그 자리에
-    f.castTag:SetShown(false); f.castGlow:Hide()
-    -- 남은 초 글씨는 게임 시전바 위에 (우리 바보다 위에 그려져서 가려지지 않게)
-    if not cb.leelTime then
-        cb.leelTime = Outline(cb:CreateFontString(nil, "OVERLAY"), 10, ns.NUM)
-        cb.leelTime:SetTextColor(1, 1, 1)
-    end
-    cb.leelTime:ClearAllPoints(); cb.leelTime:SetPoint("RIGHT", f.cast, "RIGHT", -6, 0)
+    f.cast:SetShown(on); f.castTag:SetShown(on)
     if on then
         f.cast:SetScript("OnUpdate", function()
-            -- 남은 초
-            local ok, left = pcall(function()
-                local _, mx = cb:GetMinMaxValues()
-                local v = Plain(cb:GetValue()); mx = Plain(mx)
-                if not (v and mx) then return nil end
-                return cb.channeling and v or (mx - v)
-            end)
-            if ok and left and left >= 0 then cb.leelTime:SetFormattedText("%.1f", left); cb.leelTime:Show() else cb.leelTime:Hide() end
             -- 채움: 게임 바 값을 그대로 (전투 중 숨겨진 값이어도 바에는 넘길 수 있어요)
             pcall(function()
                 f.cast.bar:SetMinMaxValues(cb:GetMinMaxValues())
                 f.cast.bar:SetValue(cb:GetValue())
             end)
-            local c = CAST_COLOR[cb.leelKind or "int"]
-            f.cast.fill:SetVertexColor(c[1], c[2], c[3], 1)
-            -- 끊을 수 있으면 둘레 빛
+            local kind = cb.leelKind or "int"
             local ok2, ni = pcall(function() return Plain(cb.notInterruptible) end)
-            if ok2 and ni ~= nil then f.castGlow:SetShown(ni == false)
-            else f.castGlow:SetShown(cb.leelKind == "int") end
+            if ok2 and ni ~= nil then kind = ni and "no" or (kind == "stop" and "stop" or "int") end
+            local c = CAST_COLOR[kind]
+            f.cast.fill:SetVertexColor(c[1], c[2], c[3], 1)
+            if kind == "no" then
+                f.castTag:SetText("차단 불가"); f.castTag:SetTextColor(C.tx2[1], C.tx2[2], C.tx2[3])
+            else
+                f.castTag:SetText("차단 가능"); f.castTag:SetTextColor(1, 0.70, 0.65)
+            end
         end)
     else
         f.cast:SetScript("OnUpdate", nil)
@@ -783,7 +749,7 @@ local function StyleCast(cb)
     -- 게임이 넘기는 채움 그림 이름으로 상태를 알아요: 보통 · 집중 = 끊을 수 있음, uninterruptable = 못 끊음, interrupted = 끊김
     local function HideRest()
         for _, r in ipairs({ cb:GetRegions() }) do
-            if r ~= cb.Text and r ~= cb.Icon and r ~= cb.leelTime and r.SetAlpha then HideFrame(r, true) end
+            if r ~= cb.Text and r.SetAlpha then HideFrame(r, true) end
         end
         for _, c in ipairs({ cb:GetChildren() }) do HideFrame(c, true) end
         local fill = cb:GetStatusBarTexture()
@@ -802,12 +768,12 @@ local function StyleCast(cb)
         HideRest()
     end)
     if cb.Text then
-        cb.Text:SetFont(ns.FONT, 10, "OUTLINE")
+        cb.Text:SetFont(ns.FONT, 13, "OUTLINE")
         cb.Text:SetShadowColor(0, 0, 0, 0.9)
         cb.Text:SetShadowOffset(1, -1)
         cb.Text:SetJustifyH("LEFT")
         cb.Text:SetWordWrap(false)
-        cb.Text:SetTextColor(1, 1, 1)
+        cb.Text:SetTextColor(1, 0.70, 0.65)
     end
     hooksecurefunc(cb, "SetPoint", PinCast)
     cb:HookScript("OnShow", function(self) PinCast(self); SyncCast(self) end)
@@ -834,7 +800,7 @@ local function DetachCast(plate)
     if not cb then return end
     cb.leelOwner = nil
     pcall(cb.SetIgnoreParentAlpha, cb, false)
-    if cb.leelTime then cb.leelTime:Hide() end
+
 end
 
 local function DetachAuras(plate)

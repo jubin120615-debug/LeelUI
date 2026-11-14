@@ -65,25 +65,23 @@ local function BAGS() return 0, (NUM_BAG_SLOTS or 4) end
 -- 결과 알림 (상인 창 위에 작은 분홍 판)
 ----------------------------------------------------------------------
 local toast
-local function Toast(lines)
+-- rows = { { 글, 값 }, ... }  글은 왼쪽 줄, 값은 오른쪽 줄 끝에 맞춰요
+local function Toast(rows)
     if not toast then
         toast = CreateFrame("Frame", "LeelUI_ShopToast", UIParent)
         toast:SetSize(250, 64)
         toast:SetFrameStrata("HIGH")
         ns.RoundPlate(toast, 14, { 0.125, 0.094, 0.086, 0.96 }, { 0.949, 0.702, 0.761, 0.6 })
         local disc = toast:CreateTexture(nil, "ARTWORK")
-        disc:SetTexture(ns.MEDIA .. "circle"); disc:SetSize(30, 30); disc:SetPoint("LEFT", 12, 0)
+        disc:SetTexture(ns.MEDIA .. "circle"); disc:SetSize(30, 30); disc:SetPoint("LEFT", 14, 0)
         disc:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
         local ic = toast:CreateTexture(nil, "OVERLAY")
         ic:SetTexture(ns.MEDIA .. "hb_shop"); ic:SetSize(17, 17); ic:SetPoint("CENTER", disc)
         ic:SetVertexColor(C.ink[1], C.ink[2], C.ink[3], 1)
         toast.title = ns.Font(toast, 13, C.accHi)
-        toast.title:SetPoint("TOPLEFT", disc, "TOPRIGHT", 10, 4)
+        toast.title:SetPoint("TOPLEFT", 56, -12)
         toast.title:SetText("상점 토끼")
-        toast.body = ns.Font(toast, 11.5)
-        toast.body:SetPoint("TOPLEFT", toast.title, "BOTTOMLEFT", 0, -4)
-        toast.body:SetJustifyH("LEFT")
-        toast.body:SetSpacing(3)
+        toast.L, toast.R = {}, {}
         toast:SetScript("OnUpdate", function(self, el)
             self.t = (self.t or 0) + el
             if self.t > 6 then
@@ -92,9 +90,23 @@ local function Toast(lines)
             end
         end)
     end
-    toast.body:SetText(table.concat(lines, "\n"))
-    toast:SetHeight(math.max(56, 34 + #lines * 16))
-    toast:SetWidth(math.max(220, toast.body:GetStringWidth() + 70))
+    local LH, TOP = 17, 34               -- 줄 높이 · 첫 줄 시작 (제목 아래)
+    local wl, wr = 0, 0
+    for i, r in ipairs(rows) do
+        local l, v = toast.L[i], toast.R[i]
+        if not l then
+            l = ns.Font(toast, 11.5); l:SetJustifyH("LEFT"); toast.L[i] = l
+            v = ns.Font(toast, 11.5); v:SetJustifyH("RIGHT"); toast.R[i] = v
+        end
+        l:ClearAllPoints(); l:SetPoint("TOPLEFT", 56, -TOP - (i - 1) * LH)
+        v:ClearAllPoints(); v:SetPoint("TOPRIGHT", -16, -TOP - (i - 1) * LH)
+        l:SetText(r[1] or ""); v:SetText(r[2] or "")
+        l:Show(); v:Show()
+        wl = math.max(wl, l:GetStringWidth()); wr = math.max(wr, v:GetStringWidth())
+    end
+    for i = #rows + 1, #toast.L do toast.L[i]:Hide(); toast.R[i]:Hide() end
+    toast:SetHeight(TOP + #rows * LH + 10)
+    toast:SetWidth(math.max(230, 56 + wl + 22 + wr + 16))
     toast:ClearAllPoints()
     -- 르엘 가방이 열려 있으면 가방 바로 위, 아니면 화면 위 가운데
     -- (상인 창 위에 붙이면 상인 창이 화면 왼쪽 위라서 구석에 떠요)
@@ -121,19 +133,21 @@ local ticker
 local function Report(repaired, noMoney)
     local d = DB()
     if not d.report then return end
-    local lines = {}
+    local rows = {}
     if soldN > 0 then
-        lines[#lines + 1] = string.format("회색 잡템 %d개 판매  |cff9fe3a8+%s|r", soldN, Money(sold))
+        rows[#rows + 1] = { string.format("회색 잡템 %d개 판매", soldN), "|cff9fe3a8+" .. Money(sold) .. "|r" }
     end
     if repaired and repaired > 0 then
-        lines[#lines + 1] = "장비 수리  |cffff8fa3-" .. Money(repaired) .. "|r"
+        rows[#rows + 1] = { "장비 수리", "|cffff8fa3-" .. Money(repaired) .. "|r" }
     elseif noMoney then
-        lines[#lines + 1] = "|cffff8fa3수리할 돈이 부족해요|r (" .. Money(noMoney) .. " 필요)"
+        rows[#rows + 1] = { "|cffff8fa3수리할 돈이 부족해요|r", Money(noMoney) .. " 필요" }
     end
-    if #lines == 0 then return end
-    lines[#lines + 1] = "|cffd6a09c남은 돈|r  " .. Money(GetMoney())
-    Toast(lines)
-    Print(table.concat(lines, ", "):gsub("  ", " "))
+    if #rows == 0 then return end
+    rows[#rows + 1] = { "|cffd6a09c남은 돈|r", Money(GetMoney()) }
+    Toast(rows)
+    local out = {}
+    for _, r in ipairs(rows) do out[#out + 1] = r[1] .. " " .. r[2] end
+    Print(table.concat(out, ", "))
 end
 
 local function DoRepair()

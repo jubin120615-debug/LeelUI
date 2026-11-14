@@ -150,7 +150,10 @@ end
 ----------------------------------------------------------------------
 -- 르엘 가방: 가방 5개를 분홍 창 하나로 (게임 가방 창 대신)
 ----------------------------------------------------------------------
-local COLS, SZ, GAP, PAD = 12, 36, 4, 12
+local GAP, PAD = 4, 12
+-- 한 줄 칸 수 · 창 크기는 허브 > 르엘 가방에서 (기본 12칸 · 100%). 칸 크기는 36 고정
+local COLS, SZ = 12, 36
+local MINW = 380      -- 칸 수를 줄여도 위쪽 분류 알약 · 찾기 칸이 안 잘리게
 local HEAD, TABS, FOOT = 36, 30, 40
 local GetInfo = function(bag, slot)
     if CC.GetContainerItemInfo then
@@ -388,6 +391,10 @@ Layout = function()
         end
         for slot = n + 1, #(buttons[bag] or {}) do buttons[bag][slot]:Hide() end
     end
+    local d = DB()
+    COLS = math.max(8, math.min(16, tonumber(d.cols) or 12))
+    d.slot = nil   -- 칸 크기는 36 고정 (바꾸면 게임 아이콘 테두리가 겹쳐 보여서 뺐어요)
+    win:SetScale(math.max(0.7, math.min(1.3, (tonumber(d.scale) or 100) / 100)))
     local y = HEAD + TABS + 6
     local function Place(list)
         for i, b in ipairs(list) do
@@ -409,9 +416,11 @@ Layout = function()
         win.newLabel:Hide(); win.newHint:Hide(); win.restLabel:Hide()
     end
     Place(rest)
-    win:SetSize(PAD * 2 + 4 + COLS * (SZ + GAP) - GAP, y + 10 + FOOT)
+    win:SetSize(math.max(MINW, PAD * 2 + 4 + COLS * (SZ + GAP) - GAP), y + 10 + FOOT)
     win.needLayout = false
 end
+-- 허브에서 크기를 바꾸면 바로 다시 놓기 (전투 중이면 끝나고)
+function ns.BagsApplySize() if Layout then Layout() end end
 
 -- 아이템 번호별 개수를 세서, 늘어난 것을 "새로"로
 local function CountItems()

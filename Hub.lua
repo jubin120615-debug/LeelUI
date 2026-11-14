@@ -270,6 +270,11 @@ local MODULES = {
             { t = "toggle", label = "좌표 줄", get = function() return MapDB().coords end, cmd = "좌표" },
             { t = "toggle", label = "지역 레벨", get = function() return MapDB().levels end, cmd = "레벨" },
             { t = "toggle", label = "작은 창 지도", hint = "지도를 다시 열면 적용", get = function() return MapDB().mini end, cmd = "작게" },
+            { t = "slider", label = "지도 창 크기", min = 60, max = 150, step = 5,
+              get = function() return tonumber(MapDB().mapScale) or 100 end,
+              set = function(v) if LeelMapDB then LeelMapDB.mapScale = v; if LeelMapApplyScale then LeelMapApplyScale() end end end },
+            { t = "button", label = "지도 크기 처음으로", run = function()
+                  if LeelMapDB then LeelMapDB.mapScale = nil; if LeelMapApplyScale then LeelMapApplyScale() end end end },
             { t = "toggle", label = "지역 출구 화살표", hint = "옆 지역으로 넘어가는 곳에 분홍 동그라미 화살표 (클릭하면 그 지역 지도로)",
               get = function() return MapDB().exits ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.exits = v and true or false; if LeelMapExits then LeelMapExits.Refresh() end end end },
@@ -358,6 +363,12 @@ local MODULES = {
                   return LQOn() and "Leel Quest" or "Leel Quest  |cff9d8a80· Leel Quest를 고르면 바꿀 수 있어요|r" end,
               btn = { label = "창 자리 처음대로", dep = function() return LQOn() end,
                       run = function() Slash("FORGLEVELING", "초기화") end } },
+            { t = "toggle", label = "L 키로 Leel Quest 열기", hint = "Shift+L = 블리자드 퀘스트 목록 (전투가 끝나면 적용)", dep = function() return LQOn() end,
+              get = function() return GuideDB().lKey ~= false end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.lKey = v and true or false; if LeelQuestApplyKeys then LeelQuestApplyKeys() end end end },
+            { t = "toggle", label = "M 키 지도에서 퀘스트 목록 칸 숨기기", hint = "Shift+M = 목록이 붙은 원래 지도", dep = function() return LQOn() end,
+              get = function() return GuideDB().mapOnly ~= false end,
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.mapOnly = v and true or false; if LeelQuestApplyKeys then LeelQuestApplyKeys() end end end },
             { t = "toggle", label = "새 지역 알림", dep = function() return LQOn() end,
               get = function() return GuideDB().zoneToast ~= false end,
               set = function(v) if ForgLevelingDB then ForgLevelingDB.zoneToast = v and true or false end end },
@@ -475,6 +486,15 @@ local MODULES = {
         items = {
             { t = "header", label = "가방 창",
               btn = { label = "위치 초기화", run = function() ns.BagsDB().winPos = nil; local w = _G.LeelUI_Bag; if w and w.Place then w.Place() end end } },
+            { t = "slider", label = "한 줄 칸 수", min = 8, max = 16, step = 1, fmt = "%d",
+              get = function() return tonumber(ns.BagsDB().cols) or 12 end,
+              set = function(v) ns.BagsDB().cols = v; if ns.BagsApplySize then ns.BagsApplySize() end end },
+            { t = "slider", label = "가방 창 크기", min = 70, max = 130, step = 5,
+              get = function() return tonumber(ns.BagsDB().scale) or 100 end,
+              set = function(v) ns.BagsDB().scale = v; if ns.BagsApplySize then ns.BagsApplySize() end end },
+            { t = "button", label = "크기 처음으로", run = function()
+                  local d = ns.BagsDB(); d.cols, d.scale = nil, nil
+                  if ns.BagsApplySize then ns.BagsApplySize() end end },
             { t = "header", label = "남은 칸" },
             { t = "toggle", label = "거의 찼을 때 알림", hint = "남은 칸 3개 이하가 되는 순간 한 번",
               get = function() return ns.BagsDB().warn end,
@@ -1013,7 +1033,7 @@ ShowPane = function()
                 if user then it.set(nv) end
             end)
             s:SetScript("OnMouseWheel", function(self, d)
-                local nv = math.min(it.max, math.max(it.min, math.floor(self:GetValue() + 0.5) + d * 5))
+                local nv = math.min(it.max, math.max(it.min, math.floor(self:GetValue() + 0.5) + d * (it.step or 5)))
                 self:SetValue(nv)
                 r:Paint(nv)
                 it.set(nv)
@@ -1235,6 +1255,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.27", "Leel Quest 퀘스트 창 대신 · 검색", "지도 머리 줄 · 시전바 · 가방 크기" },
     { "1.3.26", "몹 시전바 크게 · 아이콘", "지역 출구 화살표 · 재료 가방" },
     { "1.3.25", "전문기술 재료 클릭 → 제작식", "Leel Map 길드원 위치" },
     { "1.3.24", "버리기 창 잠금 · 휴지통 슝", "몹 등급 아이콘 알약" },

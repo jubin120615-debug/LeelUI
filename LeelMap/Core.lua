@@ -121,6 +121,7 @@ end
 -- 지도 창 꾸미기
 ----------------------------------------------------------------------
 local header, coords, tip
+local HEAD_CUT, ROW_Y = 25, -46        -- 판 윗변을 내린 만큼 / 한 줄 가운데 높이
 local ns_skinErr
 local SkinChrome, SkinQuestLog, TintChecks
 
@@ -133,7 +134,7 @@ end
 
 local function MakePill(parent)
     local p = CreateFrame("Frame", nil, parent)
-    p:SetSize(44, 20)
+    p:SetSize(44, 24)
     p.bg = p:CreateTexture(nil, "BACKGROUND")
     p.bg:SetTexture(MEDIA .. "pill22")   -- 끝이 완전히 둥근 알약 (9조각)
     pcall(p.bg.SetTextureSliceMargins, p.bg, 11, 11, 11, 11)
@@ -181,11 +182,12 @@ local function Skin()
     if bf.portrait then HideRegion(bf.portrait) end
 
     -- 어두운 둥근 판 (지도 뒤) + 분홍 테두리 (지도 위)
+    -- 머리 칸을 얇게: 판 윗변을 25 내려서 (지도 크기 계산은 그대로) 머리 42 = 알약 24 + 위아래 9
     local plate = RoundTex(wm, "BACKGROUND", -8, "panel", C.plate)
-    plate:SetPoint("TOPLEFT", bf, "TOPLEFT", -3, 3)
+    plate:SetPoint("TOPLEFT", bf, "TOPLEFT", -3, -HEAD_CUT)
     plate:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", 3, -3)
     local rim = RoundTex(bf, "OVERLAY", 7, "rim", C.acc, 0.65)
-    rim:SetPoint("TOPLEFT", bf, "TOPLEFT", -3, 3)
+    rim:SetPoint("TOPLEFT", bf, "TOPLEFT", -3, -HEAD_CUT)
     rim:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", 3, -3)
 
     -- 머리: 토끼 + 지역 이름 + 레벨 알약
@@ -254,12 +256,13 @@ local function StripRegions(fr, keep)
     end
 end
 
-local function Pill(b, inset)
+local function Pill(b, inset, vin)
     inset = inset or 0
+    vin = vin or 1
     local bg = b:CreateTexture(nil, "BACKGROUND", nil, -7)
     bg:SetTexture(MEDIA .. "pill22")
     pcall(bg.SetTextureSliceMargins, bg, 11, 11, 11, 11)
-    bg:SetPoint("TOPLEFT", inset, -1); bg:SetPoint("BOTTOMRIGHT", -inset, 1)
+    bg:SetPoint("TOPLEFT", inset, -vin); bg:SetPoint("BOTTOMRIGHT", -inset, vin)
     local rim = b:CreateTexture(nil, "BACKGROUND", nil, -6)
     rim:SetTexture(MEDIA .. "pill22rim")
     pcall(rim.SetTextureSliceMargins, rim, 11, 11, 11, 11)
@@ -288,7 +291,7 @@ local function StyleNavButton(b)
         HideButtonArt(b)
         for _, k in ipairs({ "arrowUp", "arrowDown", "selected" }) do HideRegion(b[k]) end
         StripRegions(b)
-        b.leelBg, b.leelRim = Pill(b, 4)
+        b.leelBg, b.leelRim = Pill(b, 4, 3)   -- 단추 30 → 보이는 알약 24 (레벨 알약과 같은 높이)
         local fs = b.GetFontString and b:GetFontString()
         if fs then LeelFont(fs, 12, "") end
         local mab = b.MenuArrowButton
@@ -304,6 +307,103 @@ local function StyleNavButton(b)
     end
 end
 
+-- B안: [토끼] 세계 › 칼림도어 › 불모의 땅 ⌄ [10-25] 한 줄
+local function NavRow()
+    local wm = WorldMapFrame
+    local nav = wm and (wm.NavBar or wm.navBar)
+    local sp = wm and wm.TitleCanvasSpacerFrame
+    if not nav or not sp then return end
+    nav:ClearAllPoints()
+    nav:SetPoint("TOPLEFT", sp, "TOPLEFT", 36, ROW_Y + 16)
+    nav:SetPoint("BOTTOMRIGHT", sp, "BOTTOMRIGHT", -4, 5)
+    if wm.BorderFrame then nav:SetFrameLevel(wm.BorderFrame:GetFrameLevel() + 8) end
+    if header then
+        header:ClearAllPoints()
+        header:SetSize(22, 22)
+        header:SetPoint("RIGHT", nav, "LEFT", -4, 0)
+        if header.name then header.name:Hide() end
+    end
+    -- 닫기 · 크게 단추도 같은 줄 높이로
+    local cb = wm.BorderFrame and wm.BorderFrame.CloseButton
+    if cb then
+        cb:ClearAllPoints()
+        cb:SetPoint("CENTER", wm, "TOPRIGHT", -20, ROW_Y)
+    end
+    if _G.LeelMapPlaceTools then _G.LeelMapPlaceTools() end
+end
+
+-- 지도 위 동그란 단추(◆ 추적 핀, ! 표시 설정)와 길드원을 머리 줄 오른쪽으로
+-- [◆] [!] [길드원 2]  같은 높이 · 같은 간격
+do
+    local placing
+    local found = {}
+    local function Consider(f, sc, wm)
+        if not f or found[f] ~= nil or f == wm.leelGuildPill or f == wm.NavBar or f == wm.SidePanelToggle then return end
+        if not (f.IsShown and f:IsShown() and f.GetLeft) then return end
+        local l, t, w, h = f:GetLeft(), f:GetTop(), f:GetWidth(), f:GetHeight()
+        local sl, st = sc:GetLeft(), sc:GetTop()
+        if not (l and t and sl and st) then return end
+        if w >= 18 and w <= 46 and h >= 18 and h <= 46 and math.abs(w - h) <= 8
+            and l - sl > -6 and l - sl < 80 and st - t > -6 and st - t < 150 then
+            found[f] = t
+        end
+    end
+    local function Tools()
+        local wm = WorldMapFrame
+        local sc = wm.ScrollContainer
+        for _, f in ipairs(wm.overlayFrames or {}) do Consider(f, sc, wm) end
+        for _, f in ipairs({ wm:GetChildren() }) do Consider(f, sc, wm) end
+        for _, f in ipairs({ sc:GetChildren() }) do Consider(f, sc, wm) end
+        local list = {}
+        for f, top in pairs(found) do if top and f:IsShown() then list[#list + 1] = f end end
+        table.sort(list, function(x, y) return found[x] > found[y] end)   -- 원래 위에 있던 것부터
+        return list
+    end
+    -- A안: 머리 줄 오른쪽 [◆] [!] [길드원 3]  |  [⤢] [✕]   모두 28 동그라미, 같은 줄 가운데
+    function _G.LeelMapPlaceTools()
+        local wm = WorldMapFrame
+        if placing or not wm or not wm.leelSkinned or not wm.ScrollContainer then return end
+        placing = true
+        local SZ, GAP = 28, 8
+        local lv = wm.BorderFrame:GetFrameLevel() + 22
+        local right = -82                -- ⤢ 단추 왼쪽 (조금 띄움)
+        local gp = wm.leelGuildPill
+        if gp then
+            if gp:GetParent() ~= wm.BorderFrame then gp:SetParent(wm.BorderFrame) end
+            gp:SetFrameLevel(lv)
+            gp:ClearAllPoints()
+            gp:SetPoint("CENTER", wm, "TOPRIGHT", right - SZ / 2, ROW_Y)
+            if gp:IsShown() then right = right - SZ - GAP end
+        end
+        local tools = Tools()
+        for i = #tools, 1, -1 do
+            local f = tools[i]
+            local w = f.leelW or f:GetWidth()
+            f.leelW = w
+            local k = (w and w > 0) and (SZ / w) or 1
+            f:SetScale(k)
+            f:ClearAllPoints()
+            f:SetPoint("CENTER", wm, "TOPRIGHT", (right - SZ / 2) / k, ROW_Y / k)
+            if f:GetFrameLevel() < lv then f:SetFrameLevel(lv) end
+            right = right - SZ - GAP
+        end
+        placing = false
+    end
+    local hooked
+    function _G.LeelMapToolHooks()
+        local wm = WorldMapFrame
+        if hooked or not wm then return end
+        hooked = true
+        local function later()
+            C_Timer.After(0, _G.LeelMapPlaceTools)
+            C_Timer.After(0.3, _G.LeelMapPlaceTools)   -- 다른 애드온이 늦게 옮겨도 다시
+        end
+        if wm.RefreshOverlayFrames then hooksecurefunc(wm, "RefreshOverlayFrames", later) end
+        if wm.SetOverlayFrameLocation then hooksecurefunc(wm, "SetOverlayFrameLocation", later) end
+        wm:HookScript("OnShow", later)
+    end
+end
+
 local function PaintNavBar(nav)
     if not nav or not nav.navList then return end
     local last
@@ -312,16 +412,43 @@ local function PaintNavBar(nav)
         if b:IsShown() then last = b end
     end
     for _, b in ipairs(nav.navList) do PaintNav(b, b == last) end
-    -- 블리자드 길 표시는 화살표 모양이라 단추끼리 겹치게 붙어 있음 → 알약 사이를 6px 띄움
+    -- 알약 크기를 글자에 맞추고, 사이에 › 를 넣음. 지역 바꾸는 ⌄ 는 마지막 알약에만
     local prev
     for _, b in ipairs(nav.navList) do
         if b:IsShown() then
+            local fs = b.GetFontString and b:GetFontString() or b.text
+            local mab = b.MenuArrowButton
+            local arrow = mab and mab:IsShown() and b == last
+            if mab then
+                mab:SetAlpha(arrow and 1 or 0)
+                mab:EnableMouse(arrow and true or false)
+            end
+            if fs then
+                fs:ClearAllPoints()
+                fs:SetPoint("LEFT", b, "LEFT", 14, 0)
+                b:SetWidth(math.floor(fs:GetStringWidth() + (arrow and 44 or 28) + 0.5))
+            end
+            if not b.leelSep then
+                b.leelSep = Font(b, 15, C.tx2)
+                b.leelSep:SetText("›")
+                b.leelSep:SetPoint("CENTER", b, "LEFT", -3, 1)
+            end
             if prev then
                 b:ClearAllPoints()
                 b:SetPoint("LEFT", prev, "RIGHT", 6, 0)
+                b.leelSep:Show()
+            else
+                b.leelSep:Hide()
             end
             prev = b
+        elseif b.leelSep then
+            b.leelSep:Hide()
         end
+    end
+    if header and header.pill then
+        header.pill:ClearAllPoints()
+        if last then header.pill:SetPoint("LEFT", last, "RIGHT", 6, 0)
+        else header.pill:SetPoint("LEFT", header, "RIGHT", 8, 0) end
     end
 end
 
@@ -368,12 +495,59 @@ function SkinChrome()
             a:SetTexture(MEDIA .. "ic_down"); a:SetSize(12, 12); a:SetPoint("CENTER")
             a:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
         end
+        NavRow()
         PaintNavBar(nav)
+        if _G.LeelMapToolHooks then _G.LeelMapToolHooks() end
+        if wm.Minimize then hooksecurefunc(wm, "Minimize", NavRow) end
+        if wm.Maximize then hooksecurefunc(wm, "Maximize", NavRow) end
         if NavBar_AddButton then hooksecurefunc("NavBar_AddButton", function(self) if self == nav then PaintNavBar(nav) end end) end
         if NavBar_Reset then hooksecurefunc("NavBar_Reset", function(self) if self == nav then PaintNavBar(nav) end end) end
         if NavBar_OpenTo then hooksecurefunc("NavBar_OpenTo", function(self) if self == nav then PaintNavBar(nav) end end) end
         if NavBar_ClearTrailingButtons then hooksecurefunc("NavBar_ClearTrailingButtons", function() PaintNavBar(nav) end) end
         if NavBar_CheckLength then hooksecurefunc("NavBar_CheckLength", function(self) if self == nav then PaintNavBar(nav) end end) end
+    end
+    -- 지도 위 큰 지역 이름(멀고어 (1-…)은 숨김: 마우스 옆 르엘 이름표가 이미 보여줌
+    for k, v in pairs(wm.dataProviders or {}) do
+        local dp = type(k) == "table" and k or v
+        if type(dp) == "table" and dp.Label and dp.Label.Name and not dp.Label.leelZL then
+            dp.Label:SetAlpha(0)
+            -- 대신 지도 오른쪽 위에 작은 이름표: [멀고어 1-10]
+            local zl = CreateFrame("Frame", nil, wm)
+            dp.Label.leelZL = zl
+            zl:SetFrameLevel(bf:GetFrameLevel() + 22)
+            zl:SetSize(80, 26)
+            zl:SetPoint("TOPRIGHT", wm.ScrollContainer, "TOPRIGHT", -12, -13)
+            zl:EnableMouse(false)
+            local zbg, zrim = Pill(zl, 0)
+            zbg:SetVertexColor(0.12, 0.085, 0.08, 0.88)
+            zrim:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.9)
+            zl.name = Font(zl, 14, { 1, 1, 1 })
+            zl.name:SetPoint("LEFT", 12, 0)
+            zl.lv = Font(zl, 13, C.acc, NUM)
+            zl.lv:SetPoint("LEFT", zl.name, "RIGHT", 6, 0)
+            zl:Hide()
+            hooksecurefunc(dp.Label.Name, "SetText", function(_, t)
+                t = type(t) == "string" and t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") or ""
+                t = t:gsub("^%s+", ""):gsub("%s+$", "")
+                if t == "" then zl:Hide() return end
+                local name, lo, hi = t:match("^(.-)%s*%((%d+)%s*%-%s*(%d+)%)$")
+                if not name then name, lo = t:match("^(.-)%s*%((%d+)%)$"); hi = lo end
+                if not name then name = t end
+                zl.name:SetText(name)
+                if lo then
+                    lo, hi = tonumber(lo), tonumber(hi)
+                    local c = Difficulty(lo, hi)
+                    zl.lv:SetText(lo == hi and tostring(lo) or (lo .. "-" .. hi))
+                    zl.lv:SetTextColor(c[1], c[2], c[3])
+                    zl.lv:Show()
+                else
+                    zl.lv:SetText(""); zl.lv:Hide()
+                end
+                zl:SetWidth(math.floor(zl.name:GetStringWidth() + (lo and zl.lv:GetStringWidth() + 6 or 0) + 24 + 0.5))
+                zl:Show()
+            end)
+            wm:HookScript("OnHide", function() zl:Hide() end)
+        end
     end
     RoundButton(bf.CloseButton, "ic_x", true)
     local mm = bf.MaximizeMinimizeFrame
@@ -692,8 +866,28 @@ local function RestorePos()
     if InCombatLockdown() then pendingPos = true return end
     pendingPos = false
     wm:ClearAllPoints()
-    wm:SetPoint("CENTER", UIParent, "BOTTOMLEFT", p[1], p[2])
+    -- 저장한 자리는 화면(UIParent) 기준 → 지도 창 크기(배율)만큼 나눠서 놓아요
+    local k = (wm:GetScale() or 1)
+    wm:SetPoint("CENTER", UIParent, "BOTTOMLEFT", p[1] / k, p[2] / k)
 end
+
+-- 지도 창 크기 (허브 > Leel Map > 지도 창 크기, 60~150%).
+-- OpenMap이 있으면 지도 창 크기는 OpenMap이 쥐고 있어서(다른 게 바꾸면 되돌려요), OpenMap 설정 값을 같이 바꿔요
+local pendingScale = false
+local function ApplyScale()
+    local wm = WorldMapFrame
+    if not wm or not db then return end
+    if InCombatLockdown() then pendingScale = true return end
+    pendingScale = false
+    if not db.mapScale and not wm.leelScaled then return end   -- 값을 안 정했으면 그대로
+    local v = math.max(60, math.min(150, tonumber(db.mapScale) or 100)) / 100
+    wm.leelScaled = db.mapScale and true or nil
+    local om = type(OpenMapDB) == "table" and OpenMapDB.worldmap
+    if om then om.windowScale = v end
+    if IsMax() then return end
+    if math.abs((wm:GetScale() or 1) - v) > 0.001 then wm:SetScale(v) end
+end
+_G.LeelMapApplyScale = function() ApplyScale(); RestorePos() end
 
 local function SetupMover()
     local wm = WorldMapFrame
@@ -701,10 +895,10 @@ local function SetupMover()
     if not bf or wm.leelMover then return end
     local m = CreateFrame("Frame", nil, bf)
     wm.leelMover = m
-    m:SetFrameLevel(bf:GetFrameLevel() + 20)
-    m:SetPoint("TOPLEFT", bf, "TOPLEFT", 4, 0)
-    m:SetPoint("TOPRIGHT", bf, "TOPRIGHT", -70, 0)
-    m:SetHeight(26)
+    m:SetFrameLevel(bf:GetFrameLevel() + 2)   -- 길 알약(+8)보다 아래: 빈 곳을 잡고 끌기
+    m:SetPoint("TOPLEFT", bf, "TOPLEFT", 4, -HEAD_CUT)
+    m:SetPoint("TOPRIGHT", bf, "TOPRIGHT", -90, -HEAD_CUT)
+    m:SetHeight(42)
     m:EnableMouse(true)
     m:RegisterForDrag("LeftButton")
     m:SetScript("OnDragStart", function()
@@ -719,7 +913,8 @@ local function SetupMover()
         wm.leelMoving = false
         local x, y = wm:GetCenter()
         if x then
-            db.pos = { math.floor(x + 0.5), math.floor(y + 0.5) }
+            local k = (wm:GetScale() or 1)
+            db.pos = { math.floor(x * k + 0.5), math.floor(y * k + 0.5) }
             RestorePos()
         end
     end)
@@ -735,7 +930,10 @@ local function SetupMover()
     -- 전투가 끝나면 미뤄 둔 자리 맞추기
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
-    ev:SetScript("OnEvent", function() if pendingPos and wm:IsShown() then RestorePos() end end)
+    ev:SetScript("OnEvent", function()
+        if pendingScale then ApplyScale() end
+        if pendingPos and wm:IsShown() then RestorePos() end
+    end)
 end
 
 local function Setup()
@@ -755,7 +953,7 @@ local function Setup()
     -- 블리자드가 지도를 열 때 흐림(0.5)을 등록하므로, 그 뒤에 우리 값으로 다시 등록
     WorldMapFrame:HookScript("OnShow", function()
         C_Timer.After(0, ApplyFade)
-        C_Timer.After(0, RestorePos)
+        C_Timer.After(0, function() ApplyScale(); RestorePos() end)
         UpdateHeader()
     end)
 end
