@@ -82,6 +82,10 @@ end
 -- 화면 퀘스트 목록이 Leel Quest 인지 (아니면 Leel Quest 설정은 흐리게)
 local function LQOn() return ns.QuestTrackerMode and ns.QuestTrackerMode() == "guide" end
 
+local function PartyCells()
+    if ns.ApplyPartyCells then ns:ApplyPartyCells() end
+    if InCombatLockdown() then Print("전투가 끝나면 파티 프레임이 바뀌어요.") end
+end
 local function TSApply()
     if InCombatLockdown() then Print("전투가 끝나면 토템 세트가 바뀌어요.") end
     if ns.TotemSetApply then ns.TotemSetApply() end
@@ -130,6 +134,18 @@ local MODULES = {
             { t = "toggle", label = "기본 플레이어/대상 창 숨기기", hint = "다시 불러오기 후 적용",
               get = function() return ns.db.hideBlizzard end,
               set = function(v) ns.db.hideBlizzard = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
+            { t = "toggle", label = "대상의 대상", hint = "대상 초상화 밑 작은 알약 (직업색 띠 · 이름 · 체력, 클릭 = 그 대상)",
+              get = function() return ns.db.tot ~= false end,
+              set = function(v)
+                  if ns.SetToT then ns.SetToT(v) else ns.db.tot = v end
+                  if InCombatLockdown() then Print("전투가 끝나면 바뀌어요.") end
+              end },
+            { t = "slider", label = "대상의 대상 크기", min = 60, max = 160,
+              get = function() return tonumber(ns.db.totScale) or 100 end,
+              set = function(v)
+                  if ns.SetToTScale then ns.SetToTScale(v) else ns.db.totScale = v end
+                  if InCombatLockdown() then Print("전투가 끝나면 크기가 바뀌어요.") end
+              end },
             { t = "toggle", label = "가운데에 대상과 거리", hint = "끄면 예전처럼 전투 시간",
               get = function() return not ns.db.centerTime end,
               set = function(v)
@@ -232,9 +248,6 @@ local MODULES = {
             { t = "toggle", label = "다른 애드온 아이콘 모으기",
               get = function() return ns.db.mmCollect ~= false end,
               set = function(v) ns.db.mmCollect = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
-            { t = "toggle", label = "던전 층 지도 카드", hint = "Forever Dungeon Routes가 있으면 던전에서 미니맵 옆에 지금 방 · 길 · 우두머리 (FDR 작은 지도 대신)",
-              get = function() return ns.db.fdrCard ~= false end,
-              set = function(v) ns.db.fdrCard = v; if ns.DungeonCardRefresh then ns.DungeonCardRefresh() end end },
         },
     },
     {
@@ -352,6 +365,55 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_Roll", builtin = true, cat = "party",
+        title = "주사위 창", sub = "입찰 · 차비 · 토끼 추천", icon = "hb_gift",
+        onoff = { get = function() return ns.RollDB and ns.RollDB().on end,
+                  set = function(v) ns.RollDB().on = v and true or false; if ns.RollApply then ns.RollApply() end end },
+        desc = "템이 나오면 토끼 단추에서 경매 카드가 튀어나와요. 토끼가 내 특성 기준으로 추천 단추를 빛내 줘요 (대신 누르지는 않아요).\n토끼 단추: 클릭 = 기록장 · 오른쪽 클릭 = 경매 창 접기 · 끌기 = 옮기기",
+        items = {
+            { t = "toggle", label = "르엘 주사위 창", hint = "끄면 게임 기본 창",
+              get = function() return ns.RollDB and ns.RollDB().on end,
+              set = function(v) ns.RollDB().on = v and true or false; if ns.RollApply then ns.RollApply() end end },
+            { t = "toggle", label = "토끼 추천", hint = "더 좋은 템 = 입찰 추천 · 못 쓰거나 다른 특성용 = 차비 추천",
+              get = function() return ns.RollDB and ns.RollDB().rec end,
+              set = function(v) ns.RollDB().rec = v and true or false; if ns.RollApply then ns.RollApply() end end },
+            { t = "choice", label = "내 역할", hint = "장비 비교와 같이 써요 · 곰 탱을 할 땐 탱커로",
+              options = function()
+                  local auto = "자동"
+                  if ns.GearRoleName and ns.GearRole and ns.GearDB then
+                      local cur = ns.GearDB().role
+                      ns.GearDB().role = nil
+                      auto = "자동 (" .. (ns.GearRoleName[ns.GearRole()] or "") .. ")"
+                      ns.GearDB().role = cur
+                  end
+                  return { { key = "auto", label = auto }, { key = "tank", label = "탱커" }, { key = "melee", label = "근접 딜" },
+                           { key = "ranged", label = "원거리 딜" }, { key = "caster", label = "주문 딜" }, { key = "healer", label = "힐러" } }
+              end,
+              get = function() return (ns.GearDB and ns.GearDB().role) or "auto" end,
+              set = function(v) if ns.GearSetRole then ns.GearSetRole(v ~= "auto" and v or nil) end; if ns.RollApply then ns.RollApply() end end },
+            { t = "seg", label = "결과 보드", hint = "고른 뒤 알약 아래로 파티원 숫자",
+              options = { { "끔", "off" }, { "마우스 올리면", "mine" }, { "항상 펼치기", "all" } },
+              get = function() return ns.RollDB and ns.RollDB().board or "mine" end,
+              set = function(v) ns.RollDB().board = v; if ns.RollApply then ns.RollApply() end end },
+            { t = "slider", label = "주사위 창 · 토끼 단추 크기", min = 60, max = 150,
+              get = function() return ns.RollDB and ns.RollDB().scale or 100 end,
+              set = function(v) if ns.RollSetScale then ns.RollSetScale(v) end end },
+            { t = "toggle", label = "토끼 단추 항상 보이기", hint = "끄면 파티 · 공격대에서만 · 클릭 = 기록장",
+              get = function() return ns.RollDB and ns.RollDB().badgeAlways end,
+              set = function(v) ns.RollDB().badgeAlways = v and true or false; if ns.RollPaintBadge then ns.RollPaintBadge() end end },
+            { t = "seg", label = "파티 인사 말풍선", hint = "파티에 들어가면 토끼가 인사 · 블랙리스트가 있으면 빨간 풍선",
+              options = { { "끔", "off" }, { "짧게", "short" }, { "전부", "all" } },
+              get = function() return ns.RollDB and ns.RollDB().greet or "all" end,
+              set = function(v) ns.RollDB().greet = v end },
+            { t = "button", label = "인사 미리 보기", run = function() if ns.RollGreetTest then ns.RollGreetTest() end end },
+            { t = "button", label = "토끼 단추 옮기기", run = function() if ns.RollUnlock then ns.RollUnlock(true) end end },
+            { t = "button", label = "주사위 기록장", run = function() if ns.RollLog then ns.RollLog(true) end end },
+            { t = "button", label = "블랙리스트", run = function() if ns.BlackOpen then ns.BlackOpen(true) end end },
+            { t = "button", label = "미리 보기", run = function() if ns.RollTest then ns.RollTest() end end },
+            { t = "button", label = "처음 자리 · 크기로", run = function() SlashCmdList.LEELROLL("위치") end },
+        },
+    },
+    {
         key = "LeelUI_Party", builtin = true, cat = "party",
         title = "파티 프레임", sub = "둥근 파티 창", icon = "hb_party",
         desc = "르엘 파티 프레임. 왼쪽 스위치는 다시 불러오기 후 적용.\n자리 옮기기는 아래 '이동 모드'.",
@@ -367,9 +429,36 @@ local MODULES = {
             { t = "toggle", label = "기본 파티 창 숨기기", hint = "다시 불러오기 후 적용",
               get = function() return ns.db.partyHideBlizzard ~= false end,
               set = function(v) ns.db.partyHideBlizzard = v; StaticPopup_Show("LEELUI_HUB_RELOAD") end },
-            { t = "button",
-              label = function() return "배치: " .. ((ns.PARTY_LAYOUT_NAMES or {})[ns.db.partyLayout or "row"] or "가로 줄") end,
-              run = function() ns:CyclePartyLayout() end },
+            { t = "header", label = "세부 설정" },
+            { t = "slider", label = "칸 가로", min = 100, max = 280, fmt = "%d",
+              get = function() return tonumber(ns.db.partyW) or 152 end,
+              set = function(v) ns.db.partyW = v; PartyCells() end },
+            { t = "slider", label = "칸 세로", min = 36, max = 110, fmt = "%d",
+              get = function() return tonumber(ns.db.partyH) or 76 end,
+              set = function(v) ns.db.partyH = v; PartyCells() end },
+            { t = "slider", label = "칸 사이", min = 0, max = 24, fmt = "%d",
+              get = function() return tonumber(ns.db.partyGap) or 8 end,
+              set = function(v) ns.db.partyGap = v; PartyCells() end },
+            { t = "seg", label = "이름", hint = "길면 자르기",
+              options = { { "4글자", 4 }, { "6글자", 6 }, { "전부", 0 } },
+              get = function() return tonumber(ns.db.partyNameLen) or 0 end,
+              set = function(v) ns.db.partyNameLen = v; PartyCells() end },
+            { t = "seg", label = "체력 글씨",
+              options = { { "없음", "none" }, { "%", "pct" }, { "숫자", "num" }, { "잃은 만큼", "deficit" } },
+              get = function() return ns.db.partyHp or "pct" end,
+              set = function(v) ns.db.partyHp = v; PartyCells() end },
+            { t = "seg", label = "정렬",
+              options = { { "가로", "row" }, { "세로", "col" }, { "2×2", "grid" } },
+              get = function() return ns.db.partyLayout or "row" end,
+              set = function(v) ns.db.partyLayout = v; PartyCells() end },
+            { t = "toggle", label = "버프 · 디버프 보이기", hint = "내가 건 버프 (오른쪽 위) · 해제할 디버프 (오른쪽 아래)",
+              get = function() return ns.db.partyAuras ~= false end,
+              set = function(v) ns.db.partyAuras = v and true or false; PartyCells() end },
+            { t = "button", label = "세부 설정 처음으로",
+              run = function()
+                  ns.db.partyW, ns.db.partyH, ns.db.partyGap, ns.db.partyNameLen, ns.db.partyHp, ns.db.partyAuras = nil, nil, nil, nil, nil, nil
+                  PartyCells()
+              end },
             { t = "button", label = "위치 초기화",
               run = function() ns:ResetPartyPosition(); Print("파티 프레임 위치를 처음대로 돌렸어요.") end },
         },
@@ -631,7 +720,7 @@ local MOD_CAT = {
     LeelUI_Chat = "view", LeelUI_Font = "view",
     ForgLeveling = "quest", LeelUI_QTracker = "none", LeelUI_Quest = "quest", LeelUI_QItem = "quest", LeelSpot = "quest",
     LeelMap = "map", LeelUI_Minimap = "map",
-    LeelUI_Party = "party", LeelMark = "party", LeelUI_TotemSet = "party",
+    LeelUI_Party = "party", LeelMark = "party", LeelUI_TotemSet = "party", LeelUI_Roll = "party",
     LeelUI_Bags = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
     LeelUI_Profile = "none",
 }
@@ -639,7 +728,7 @@ local MOD_ORDER = {}
 do
     local order = { "LeelUI", "LeelUI_ABar", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font",
         "ForgLeveling", "LeelUI_QTracker", "LeelUI_Quest", "LeelUI_QItem", "LeelSpot",
-        "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelMark", "LeelUI_TotemSet",
+        "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelMark", "LeelUI_TotemSet", "LeelUI_Roll",
         "LeelUI_Bags", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
     for i, k in ipairs(order) do MOD_ORDER[k] = i end
 end
@@ -1398,6 +1487,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.29", "르엘 주사위 창 · 토끼 추천 · 블랙리스트", "파티 인사 말풍선 · 던전 퀘 보고 모드" },
     { "1.3.28", "주술사 토템 세트 (Q 한 키) · 토템 칸", "펫 창 크기 · 펫 만족도 · 가방 등급 테 · 던전 카드" },
     { "1.3.27", "Leel Quest 퀘스트 창 대신 · 검색", "지도 머리 줄 · 시전바 · 가방 크기" },
     { "1.3.26", "몹 시전바 크게 · 아이콘", "지역 출구 화살표 · 재료 가방" },

@@ -231,11 +231,9 @@ local function MakeButton(bag, slot)
     -- 게임 칸 테두리 숨기고 둥근 칸
     local nt = b.GetNormalTexture and b:GetNormalTexture()
     if nt then nt:SetAlpha(0) end
-    local slotBg = CreateFrame("Frame", nil, b)
-    slotBg:SetPoint("TOPLEFT", -1, 1); slotBg:SetPoint("BOTTOMRIGHT", 1, -1)   -- 등급 테 = 이 1px 테두리
-    slotBg:SetFrameLevel(math.max(0, b:GetFrameLevel() - 1))
-    b.leelBg = ns.RoundRect(slotBg, 4, { 0.24, 0.19, 0.18 }, "BACKGROUND", 0, 0)
-    b.leelEdge = slotBg
+    -- 칸 바탕 = 단추 자체의 맨 아래 그림 (1px 바깥까지 → 등급 테)
+    --   (예전엔 따로 틀을 만들었는데, 단추 층이 낮으면 그 틀이 아이콘을 덮어 칸이 통째로 색칠돼 보였어요)
+    b.leelBg = ns.RoundRect(b, 4, { 0.24, 0.19, 0.18 }, "BACKGROUND", -8, -1)
     -- 새 아이템 분홍 점 (마우스를 올리면 지워져요)
     local dotF = CreateFrame("Frame", nil, b)
     dotF:SetSize(11, 11); dotF:SetPoint("CENTER", b, "TOPRIGHT", -2, -2)
@@ -348,7 +346,7 @@ local function UpdateQuest(b, bag, slot, info)
     q:Show()
 end
 
-local function UpdateButton(b, bag, slot)
+local function UpdateButtonRaw(b, bag, slot)
     local info = GetInfo(bag, slot)
     SetItemButtonTexture(b, info and info.iconFileID)
     SetItemButtonCount(b, info and info.stackCount or 0)
@@ -425,8 +423,71 @@ local function UpdateButton(b, bag, slot)
         b.leelCoin = cf
     end
     if b.leelCoin then b.leelCoin:SetShown(sell and true or false) end
-    b:SetAlpha(match and 1 or 0.22)
+    -- 탭 · 검색에 안 맞는 칸: 투명하게 비치는 대신 흑백 + 어두운 막을 덮어 확실히 가라앉게
+    if not match and info then
+        if not b.leelDim then
+            local d = b:CreateTexture(nil, "OVERLAY", nil, 7)
+            d:SetTexture(ns.WHITE or "Interface\\Buttons\\WHITE8X8")
+            d:SetPoint("TOPLEFT", 1, -1); d:SetPoint("BOTTOMRIGHT", -1, 1)
+            b.leelDim = d
+        end
+        b.leelDim:SetVertexColor(0.07, 0.05, 0.05, 0.78)
+        b.leelDim:Show()
+        if icon then pcall(icon.SetDesaturation, icon, 1) end
+        if b.leelQ then b.leelQ:Hide() end
+        if b.leelNew then b.leelNew:Hide() end
+    elseif b.leelDim then
+        b.leelDim:Hide()
+    end
+    b:SetAlpha((match or info) and 1 or 0.5)
 end
+
+-- 칸 칠하다 오류가 나면 그 칸만 옛 색으로 남지 않게: 오류는 기록하고 기본 모양으로 되돌림
+local bagErrs = {}
+local function UpdateButton(b, bag, slot)
+    local ok, err = xpcall(UpdateButtonRaw, function(e) return tostring(e) .. "\n" .. (debugstack and debugstack(2, 4, 0) or "") end, b, bag, slot)
+    if not ok then
+        if #bagErrs < 20 then bagErrs[#bagErrs + 1] = date("%H:%M:%S") .. " " .. bag .. "/" .. slot .. " " .. err end
+        if ns.db then ns.db.bagdbg = ns.db.bagdbg or {}; ns.db.bagdbg.errs = bagErrs end
+        if b.leelBg then b.leelBg:SetColor({ 0.24, 0.19, 0.18 }, 1) end
+        if b.leelGlow then b.leelGlow:Hide() end
+        b:SetAlpha(Matches(GetInfo(bag, slot)) and 1 or 0.22)
+    end
+end
+
+-- /르엘가방검사 : 마우스 올린 칸의 층을 전부 기록 (색이 이상할 때 원인 찾기용)
+local function DumpSlot()
+    local f = GetMouseFocus and GetMouseFocus()
+    if not f and GetMouseFoci then f = (GetMouseFoci() or {})[1] end
+    while f and not (f.GetName and f:GetName() and f:GetName():find("^LeelUI_Bag")) do f = f.GetParent and f:GetParent() end
+    if not f then print("|cffff8fa3르엘|r 가방 칸에 마우스를 올리고 다시 입력해 주세요."); return end
+    local L = {}
+    local function C4(r) local ok, a, b2, c, d = pcall(r.GetVertexColor, r); if ok and a then return string.format("%.2f,%.2f,%.2f,%.2f", a, b2, c, d or 1) end return "-" end
+    local function Regions(fr, pre)
+        for _, r in ipairs({ fr:GetRegions() }) do
+            local lay, sub = "?", 0
+            if r.GetDrawLayer then lay, sub = r:GetDrawLayer() end
+            local tex = r.GetTexture and r:GetTexture() or (r.GetText and ("T:" .. tostring(r:GetText()))) or ""
+            L[#L + 1] = string.format("%s%s %s/%s shown=%s a=%.2f col=%s tex=%s key=%s", pre, r:GetObjectType(), tostring(lay), tostring(sub),
+                tostring(r:IsShown()), r:GetAlpha(), C4(r), tostring(tex), tostring(r.GetName and r:GetName() or ""))
+        end
+    end
+    local info = GetInfo(f:GetParent():GetID(), f:GetID())
+    L[#L + 1] = string.format("%s tab=%s match=%s alpha=%.2f eff=%.2f lvl=%d q=%s quest=%s", f:GetName(), curTab, tostring(Matches(info)),
+        f:GetAlpha(), f:GetEffectiveAlpha(), f:GetFrameLevel(), tostring(info and info.quality), tostring(info and info.isQuestItem))
+    Regions(f, "  ")
+    for _, c in ipairs({ f:GetChildren() }) do
+        L[#L + 1] = string.format("  [child] %s lvl=%d shown=%s a=%.2f", tostring(c:GetName() or c:GetObjectType()), c:GetFrameLevel(), tostring(c:IsShown()), c:GetAlpha())
+        Regions(c, "    ")
+    end
+    ns.db.bagdbg = ns.db.bagdbg or {}
+    ns.db.bagdbg.dumps = ns.db.bagdbg.dumps or {}
+    table.insert(ns.db.bagdbg.dumps, 1, L)
+    while #ns.db.bagdbg.dumps > 6 do table.remove(ns.db.bagdbg.dumps) end
+    print("|cffff8fa3르엘|r 칸 기록 완료 (" .. #L .. "줄). /reload 하면 저장돼요." .. (#bagErrs > 0 and (" 칠하기 오류 " .. #bagErrs .. "개") or ""))
+end
+SLASH_LEELBAGDBG1 = "/르엘가방검사"
+SlashCmdList.LEELBAGDBG = DumpSlot
 
 Layout = function()
     if not win then return end

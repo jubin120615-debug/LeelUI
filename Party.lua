@@ -7,8 +7,10 @@ local _, ns = ...
 local C = ns.C
 local Try = ns.Try
 
-local CELL_W, CELL_H = 152, 76
-local GAP = 8
+-- 칸 크기 · 사이: 허브 > 파티 프레임 > 세부 설정 (가로 · 세로 따로)
+local function CW() return tonumber(ns.db and ns.db.partyW) or 152 end
+local function CH() return tonumber(ns.db and ns.db.partyH) or 76 end
+local function CG() return tonumber(ns.db and ns.db.partyGap) or 8 end
 local PAD = 8
 local LOW_HP, CRIT_HP, LOW_MANA = 0.35, 0.20, 0.20
 local HEALERS = { PRIEST = true, DRUID = true, SHAMAN = true, PALADIN = true }
@@ -182,7 +184,7 @@ local function CreateMember(parent, i)
     local unit = "party" .. i
     local f = CreateFrame("Button", "LeelUI_party" .. i, parent, "SecureUnitButtonTemplate")
     f.unit = unit
-    f:SetSize(CELL_W, CELL_H)
+    f:SetSize(CW(), CH())
     f:SetAttribute("unit", unit)
     f:SetAttribute("*type1", "target")
     f:SetAttribute("*type2", "togglemenu")
@@ -224,7 +226,7 @@ local function CreateMember(parent, i)
     f.hp:SetAllPoints()
     -- 들어올 치유: 체력 끝에서 이어서, 칸 밖으로 넘치는 건 둥근 틀에 잘림
     f.heal = MaskedBar(f, lv + 1)
-    f.heal:SetSize(CELL_W, CELL_H)
+    f.heal:SetSize(CW(), CH())
     f.heal:SetPoint("TOPLEFT", f.hp:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
     f.heal:SetStatusBarColor(MINT[1], MINT[2], MINT[3], 0.7)
     local stripes = f.heal:CreateTexture(nil, "OVERLAY")
@@ -268,7 +270,7 @@ local function CreateMember(parent, i)
 
     f.name = OFont(top, 14)
     f.name:SetPoint("LEFT", pf, "RIGHT", 5, 0)
-    f.name:SetWidth(CELL_W - PAD * 2 - 25 - 56)
+    f.name:SetWidth(CW() - PAD * 2 - 25 - 56)
     f.name:SetJustifyH("LEFT")
     f.name:SetWordWrap(false)
 
@@ -355,7 +357,25 @@ local function UpdateHealth(f)
 
     local cur, max = UnitHealth(u), UnitHealthMax(u)
     ns.SetBar(f.hp, cur, max)
-    PctText(f.val, u, cur, max)
+    -- 체력 글씨: % (기본) · 숫자 · 잃은 만큼 · 없음
+    local mode = ns.db and ns.db.partyHp or "pct"
+    if mode == "none" then
+        f.val:Hide(); f.pct:Hide()
+    elseif mode == "num" then
+        f.pct:Hide(); ns.SetText(f.val, cur)
+    elseif mode == "deficit" then
+        f.pct:Hide()
+        local okD = pcall(function()
+            local miss = max - cur
+            if miss > 0 then f.val:SetFormattedText("-%d", miss) else f.val:SetText("") end
+        end)
+        if not okD then
+            local okM = UnitHealthMissing and pcall(function() f.val:SetFormattedText("-%d", UnitHealthMissing(u)) end)
+            if not okM then PctText(f.val, u, cur, max); f.pct:Show() end
+        end
+    else
+        PctText(f.val, u, cur, max)
+    end
 
     local okp, p = pcall(function() if max > 0 then return cur / max end return 1 end)
     if okp and type(p) == "number" then
@@ -397,7 +417,29 @@ local function UpdateInfo(f)
     local u = f.unit
     if not UnitExists(u) then return end
     f.classFile = ClassOf(u)
-    ns.SetText(f.name, UnitName(u))
+    local nm = UnitName(u)
+    local lim = tonumber(ns.db and ns.db.partyNameLen) or 0
+    if lim > 0 and nm and not ns.IsSecret(nm) then
+        -- 한글도 글자 단위로 자르기
+        local out, n = {}, 0
+        for ch in nm:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+            n = n + 1
+            if n > lim then out[#out + 1] = "…"; break end
+            out[#out + 1] = ch
+        end
+        nm = table.concat(out)
+    end
+    ns.SetText(f.name, nm)
+    -- 블랙리스트 (주사위 창 토끼 단추): 빨간 테 + 표시
+    local raw = UnitName(u)
+    f.blackOn = raw and not ns.IsSecret(raw) and ns.IsBlack and ns.IsBlack(raw) or false
+    if f.blackOn and not f.blackIc then
+        local b = f:CreateTexture(nil, "OVERLAY", nil, 6)
+        b:SetTexture(ns.MEDIA .. "roll_ban"); b:SetSize(14, 14); b:SetPoint("TOPRIGHT", -4, -4)
+        b:SetVertexColor(1, 0.42, 0.5)
+        f.blackIc = b
+    end
+    if f.blackIc then f.blackIc:SetShown(f.blackOn and true or false) end
     SetIcon(f, u)
     f.lead:SetShown(Try(UnitIsGroupLeader, u))
 end
@@ -408,9 +450,17 @@ local function PaintRim(f)
         f.rim:SetVertexColor(1, 0.35, 0.35, 1)
     elseif f.selOn then
         f.rim:SetVertexColor(1, 0.953, 0.965, 1)
+    elseif f.blackOn then
+        f.rim:SetVertexColor(1, 0.42, 0.5, 1)
     else
         f.rim:SetVertexColor(RIM[1], RIM[2], RIM[3], 1)
     end
+end
+
+function ns.PartyBlackRefresh()
+    local members = ns.partyMembers
+    if not members then return end
+    for _, f in ipairs(members) do if f.unit and UnitExists(f.unit) then UpdateInfo(f); PaintRim(f) end end
 end
 
 local function UpdateThreat(f)
@@ -473,11 +523,32 @@ local function Layout()
             elseif mode == "grid" then cx, cy = (i - 1) % 2, math.floor((i - 1) / 2)
             else cx, cy = i - 1, 0 end
             f:ClearAllPoints()
-            f:SetPoint("TOPLEFT", box, "TOPLEFT", cx * (CELL_W + GAP), -cy * (CELL_H + GAP))
+            f:SetPoint("TOPLEFT", box, "TOPLEFT", cx * (CW() + CG()), -cy * (CH() + CG()))
         end
         local cols = mode == "col" and 1 or (mode == "grid" and 2 or 4)
         local rows = mode == "col" and 4 or (mode == "grid" and 2 or 1)
-        box:SetSize(cols * CELL_W + (cols - 1) * GAP, rows * CELL_H + (rows - 1) * GAP)
+        box:SetSize(cols * CW() + (cols - 1) * CG(), rows * CH() + (rows - 1) * CG())
+    end)
+end
+
+-- 세부 설정 적용: 칸 크기 · 이름 칸 · 글씨 크기 · 버프 칸 (전투 중이면 끝나고)
+function ns:ApplyPartyCells()
+    local members = ns.partyMembers
+    if not members then return end
+    ns:RunOutOfCombat("partyCells", function()
+        local W, H = CW(), CH()
+        local auras = ns.db.partyAuras ~= false
+        for _, f in ipairs(members) do
+            f:SetSize(W, H)
+            f.heal:SetSize(W, H)
+            f.name:SetWidth(math.max(30, W - PAD * 2 - 25 - (auras and 56 or 0)))
+            local vs = math.max(14, math.min(26, math.floor(H * 0.34)))
+            f.val:SetFont(ns.NUM, vs, "OUTLINE")
+            if f.buffs then f.buffs:SetShown(auras) end
+            if f.debuffs then f.debuffs:SetShown(auras) end
+            if not ns.party.preview then UpdateAll(f) end
+        end
+        Layout()
     end)
 end
 
@@ -691,6 +762,7 @@ function ns:CreateParty()
     ns.partyMembers = members
     box.mover = CreatePartyMover(box)
     Layout()
+    ns:ApplyPartyCells()
 
     local gev = CreateFrame("Frame")
     gev:RegisterEvent("GROUP_ROSTER_UPDATE")

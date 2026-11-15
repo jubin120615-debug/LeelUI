@@ -314,6 +314,8 @@ local SLOT_NAME = { [1] = "머리", [2] = "목", [3] = "어깨", [5] = "가슴",
     [9] = "손목", [10] = "손", [11] = "반지", [12] = "반지", [13] = "장신구", [14] = "장신구", [15] = "망토",
     [16] = "무기", [17] = "보조 손", [18] = "원거리" }
 
+ns.GearStatName, ns.GearSlotName = STAT_NAME, SLOT_NAME
+function ns.GearForget(link) if link then cache[link] = nil end end
 local DUAL = { WARRIOR = true, ROGUE = true, HUNTER = true }   -- 쌍수 가능 (주술사는 특성이 있어야 해서 빼요)
 
 local function EquippedInfo(slot)

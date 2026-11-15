@@ -1022,7 +1022,14 @@ local board
 local ROW_H, SEC_H = 44, 24
 local zoneSel = nil            -- nil = 알아서 / "all" / "turnin" / 지역 이름
 local onlyEasy, onlySolo = false, false
-local sortBy = "near"          -- near / xp / low
+-- 목록 정렬 (판 검색 칸 옆 메뉴 · 기억): near 가까운 순 / low 레벨 낮은 순 / high 레벨 높은 순
+--   grade 등급: 일반 먼저 / gradeHi 등급: 정예 · 던전 먼저
+local sortBy = "near"
+local GRADE = { elite = 2, dungeon = 3, raid = 4 }
+local SORTS = {
+    { "near", "가까운 순" }, { "low", "레벨 낮은 순" }, { "high", "레벨 높은 순" },
+    { "grade", "등급: 일반 먼저" }, { "gradeHi", "등급: 정예 · 던전 먼저" },
+}
 
 local function Visible(e, m)
     -- 실패한 퀘도 보여요 (목록 맨 아래 "실패" 묶음) — 블리자드 퀘스트 창 대신이라 받은 퀘는 다
@@ -1117,11 +1124,16 @@ local function BuildItems()
     end
     local function sorter(a, b)
         if sortBy == "xp" then return (a.xp or 0) > (b.xp or 0) end
-        if sortBy == "low" then   -- 낮은 레벨 먼저: 회색이 되기 전에 끝내기 (같은 레벨이면 가까운 순)
+        if sortBy == "grade" or sortBy == "gradeHi" then   -- 등급 (일반 1 · 정예 2 · 던전 3 · 공격대 4), 같으면 레벨 낮은 순
+            local ga, gb = GRADE[a.tag or ""] or 1, GRADE[b.tag or ""] or 1
+            if ga ~= gb then if sortBy == "grade" then return ga < gb else return ga > gb end end
+        end
+        if sortBy == "low" or sortBy == "high" or sortBy == "grade" or sortBy == "gradeHi" then
+            -- 레벨 (같은 레벨이면 가까운 순) · 레벨 모르는 퀘는 맨 뒤
             local la, lb = a.level or 0, b.level or 0
-            if la <= 0 then la = 999 end
-            if lb <= 0 then lb = 999 end
-            if la ~= lb then return la < lb end
+            if la <= 0 then la = (sortBy == "high") and -1 or 999 end
+            if lb <= 0 then lb = (sortBy == "high") and -1 or 999 end
+            if la ~= lb then if sortBy == "high" then return la > lb else return la < lb end end
         end
         if a._d ~= b._d then return a._d < b._d end
         return (a.title or "") < (b.title or "")
@@ -1365,13 +1377,34 @@ local function QuestDetailText(e)
     return desc, money, rewards
 end
 local function ShareQuest(e)
-    if not e.index then return end
-    local ok = pcall(function()
-        SelectQuestLogEntry(e.index)
-        if GetQuestLogPushable and not GetQuestLogPushable() then error("no") end
-        QuestLogPushQuest()
+    -- 파티 공유: 목록을 만든 뒤 퀘 순서가 바뀌었을 수 있어서, 퀘 번호(id)로 지금 자리를 다시 찾아요
+    if not (IsInGroup and IsInGroup()) and not (GetNumGroupMembers and GetNumGroupMembers() > 0) then
+        Print("파티에 있어야 공유할 수 있어요"); return
+    end
+    local id, idx = e.id, nil
+    if id then
+        local okI, r = pcall(function()
+            return (C_QuestLog and C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(id))
+                or (GetQuestLogIndexByID and GetQuestLogIndexByID(id))
+        end)
+        if okI and r and r > 0 then idx = r end
+    end
+    idx = idx or e.index
+    local prev = GetQuestLogSelection and GetQuestLogSelection()
+    local pushable, done = nil, false
+    local ok, err = pcall(function()
+        if id and C_QuestLog and C_QuestLog.SetSelectedQuest then C_QuestLog.SetSelectedQuest(id) end
+        if idx and SelectQuestLogEntry then SelectQuestLogEntry(idx) end
+        if id and C_QuestLog and C_QuestLog.IsPushableQuest then pushable = C_QuestLog.IsPushableQuest(id)
+        elseif GetQuestLogPushable then pushable = GetQuestLogPushable() end
+        if pushable == false then return end
+        if QuestLogPushQuest then QuestLogPushQuest(); done = true
+        elseif C_QuestLog and C_QuestLog.PushQuest then C_QuestLog.PushQuest(id); done = true end
     end)
-    Print(ok and (e.title .. " 퀘를 파티에 공유했어요") or "이 퀘는 공유할 수 없어요")
+    if prev and prev > 0 and SelectQuestLogEntry then pcall(SelectQuestLogEntry, prev) end
+    if done then Print(e.title .. " 퀘를 파티에 공유했어요")
+    elseif pushable == false then Print("이 퀘는 공유할 수 없는 퀘예요 (게임 규칙)")
+    else Print("공유가 안 됐어요" .. (err and (" · " .. tostring(err)) or "")) end
 end
 MakeDetail = function()
     if board.det then return board.det end
@@ -1611,10 +1644,56 @@ local function DungeonName()
     return ZoneText()
 end
 -- 이 퀘가 지금 들어와 있는 던전 퀘인지
+--   1) 이름 비교 (띄어쓰기 · 기호 무시, 한쪽이 다른 쪽을 품어도 같다고)
+--   2) Questie 자료: 퀘의 지역 번호 == 지금 던전의 지역 번호 (게임 일지 묶음 이름이 던전 이름과 다를 때)
+local DZ = { qz = {}, dz = {} }   -- 던전 판단 도우미 (지역 변수 수 제한 때문에 한 표에)
+function DZ.Norm(s) return s and (s:gsub("[%s%p]", ""):lower()) or "" end
+function DZ.Same(a, b)
+    a, b = DZ.Norm(a), DZ.Norm(b)
+    if a == "" or b == "" then return false end
+    return a == b or (#a >= 6 and #b >= 6 and (a:find(b, 1, true) or b:find(a, 1, true))) and true or false
+end
+function DZ.Questie(mod)
+    local QL = _G.QuestieLoader
+    if not (QL and QL.ImportModule) then return end
+    local ok, M = pcall(QL.ImportModule, QL, mod)
+    if ok and type(M) == "table" then return M end
+end
+function DZ.QuestZone(id)
+    if not id then return end
+    if DZ.qz[id] ~= nil then return DZ.qz[id] or nil end
+    local z
+    local QDB = DZ.Questie("QuestieDB")
+    if QDB and QDB.QueryQuestSingle then
+        local ok, v = pcall(QDB.QueryQuestSingle, id, "zoneOrSort")
+        if ok then z = tonumber(v) end
+    end
+    DZ.qz[id] = z or false
+    return z
+end
+function DZ.Area()
+    local ok, _, _, _, _, _, _, _, iid = pcall(GetInstanceInfo)
+    if not (ok and iid) then return end
+    local ZDB = DZ.Questie("ZoneDB")
+    local a = ZDB and ZDB.instanceIdToAreaId and ZDB.instanceIdToAreaId[iid]
+    return tonumber(a), ZDB
+end
 local function InThisDungeon(e, dn)
     dn = dn or DungeonName()
     if not (dn and e) then return false end
-    return e.zone == dn or ZoneKey(e) == dn
+    if DZ.Same(e.zone, dn) or DZ.Same(ZoneKey(e), dn) then return true end
+    local zs = DZ.QuestZone(e.id)
+    if zs and zs > 0 then
+        local area, ZDB = DZ.Area()
+        if area then
+            if zs == area then return true end
+            if ZDB and ZDB.GetParentZoneId then
+                local ok, p = pcall(ZDB.GetParentZoneId, ZDB, zs)
+                if ok and p == area then return true end
+            end
+        end
+    end
+    return false
 end
 -- 던전 지도 번호: 내 위치가 안 잡히면 던전 이름으로 찾아요
 local dunMapCache = {}
@@ -2219,6 +2298,9 @@ local function ZoneBtn(i)
     b.dot = b:CreateTexture(nil, "ARTWORK"); b.dot:SetTexture(MEDIA .. "circle"); b.dot:SetSize(7, 7); b.dot:SetPoint("LEFT", 9, 0)
     b.pin = b:CreateTexture(nil, "ARTWORK"); b.pin:SetTexture(MEDIA .. "pin"); b.pin:SetSize(15, 15); b.pin:SetPoint("LEFT", 6, 0); b.pin:Hide()
     b.fs = Font(b, 13, P.tx); b.fs:SetJustifyH("LEFT"); b.fs:SetWordWrap(false)
+    -- 던전 지역이면 이름 옆 성문 아이콘
+    b.dun = b:CreateTexture(nil, "ARTWORK"); b.dun:SetTexture(FLM_ICONS .. "ic_dungeon"); b.dun:SetSize(15, 15)
+    b.dun:SetPoint("LEFT", 4, 0); b.dun:Hide()
     b.tag = MakeChip(b); b.tag:SetHeight(14)
     b.n2 = MakeChip(b); b.n2:SetHeight(16); b.n2:SetPoint("RIGHT", -6, 0)
     b.n1 = MakeChip(b); b.n1:SetHeight(16)
@@ -2232,8 +2314,34 @@ local function ZoneBtn(i)
     return b
 end
 
+-- 이 지역 이름이 던전 · 공격대인가: 바깥 지역이 아니고 (던전 지도가 있거나 · 그 지역 퀘가 던전 퀘)
+function DZ.IsZone(name, tagged)
+    if not name or name == "all" or name == "turnin" then return false end
+    if DZ.dz[name] ~= nil and not tagged then return DZ.dz[name] end
+    local r = false
+    if not ZoneIdByName(name) then
+        -- 던전 지도(던전 종류)가 있거나, 그 지역 퀘가 전부 던전 · 공격대 퀘일 때만
+        local dm = false
+        local ok, kids = pcall(C_Map.GetMapChildrenInfo, 947, Enum.UIMapType.Dungeon, true)
+        for _, k in ipairs(ok and kids or {}) do if k.name == name then dm = true break end end
+        r = dm or (tagged and true or false)
+    end
+    DZ.dz[name] = r
+    return r
+end
+
 local function PaintZones()
     local z, order = ZoneStats()
+    -- 그 지역 퀘가 전부 던전 · 공격대 퀘면 던전 지역
+    local dunTag, cnt = {}, {}
+    for _, e in ipairs(log) do
+        if not e.failed then
+            local k = ZoneKey(e)
+            cnt[k] = (cnt[k] or 0) + 1
+            if e.tag == "dungeon" or e.tag == "raid" then dunTag[k] = (dunTag[k] or 0) + 1 end
+        end
+    end
+    for k, n in pairs(dunTag) do dunTag[k] = (n == cnt[k]) or nil end
     local here = HereName()
     local cur = CurZone()
     local list = {}
@@ -2277,7 +2385,7 @@ local function PaintZones()
         b:ClearAllPoints(); b:SetPoint("TOPLEFT", board.zones, "TOPLEFT", 0, -y); b:SetSize(W, h)
         if it.head then
             for _, t in ipairs(b.bg.tex) do t:Hide() end
-            b.dot:Hide(); b.fs:Hide(); b.tag:Hide(); b.n1:Hide(); b.n2:Hide()
+            b.dot:Hide(); b.fs:Hide(); b.tag:Hide(); b.n1:Hide(); b.n2:Hide(); b.dun:Hide()
             b.head:SetText(it.head); b.head:Show()
             b:EnableMouse(false)
         else
@@ -2313,8 +2421,26 @@ local function PaintZones()
                 b.n1:Set(tostring(it.todo), "mid")
             else b.n1:Hide() end
             b.tag:Hide()
+            -- 던전이면 이름 앞에 성문 (지금 있는 곳은 핀 다음에)
+            local isDun = DZ.IsZone(it.key, dunTag[it.key])
+            b.dun:SetShown(isDun)
+            b.dun:ClearAllPoints()
+            if isDun then
+                if it.here then
+                    b.dun:SetPoint("LEFT", b.pin, "RIGHT", 3, 0)
+                    b.fs:ClearAllPoints(); b.fs:SetPoint("LEFT", b.dun, "RIGHT", 3, 0)
+                elseif not it.dot then
+                    b.dun:SetPoint("LEFT", 5, 0)
+                    b.fs:ClearAllPoints(); b.fs:SetPoint("LEFT", b.dun, "RIGHT", 3, 0)
+                end
+            end
             local used = (b.n1:IsShown() and b.n1:GetWidth() + 4 or 0) + (b.n2:IsShown() and b.n2:GetWidth() + 4 or 0) + (b.tag:IsShown() and b.tag:GetWidth() + 6 or 0)
-            b.fs:SetWidth(math.min(b.fs:GetStringWidth() + 2, W - 30 - used))
+            local left = (isDun and 23 or 9) + (it.here and 20 or 0)
+            local avail = W - left - 8 - used
+            -- 길면 글씨를 조금 작게 해서라도 다 보이게
+            b.fs:SetFont(b.fs:GetFont(), 13, "")
+            if b.fs:GetStringWidth() > avail then b.fs:SetFont(b.fs:GetFont(), 11.5, "") end
+            b.fs:SetWidth(math.min(b.fs:GetStringWidth() + 2, avail))
         end
         b:Show()
         y = y + h + 2 + (it.here and 6 or 0)
@@ -2760,7 +2886,64 @@ local function MakeBoard()
         -- 검색 칸 (목록 맨 위, 늘 보임): 모든 지역에서 퀘 이름 · 목표 · NPC 찾기
         ------------------------------------------------------------------
         local sb = CreateFrame("EditBox", nil, board)
-        sb:SetSize(372, 30); sb:SetPoint("TOPLEFT", board, "TOPLEFT", 232, -54)
+        board.sb = sb
+        sb:SetSize(248, 30); sb:SetPoint("TOPLEFT", board, "TOPLEFT", 232, -54)
+        -- 정렬 메뉴 (검색 칸 오른쪽): 누르면 고르기 목록 · 고른 정렬은 기억
+        do
+            sortBy = DB.listSort or "near"
+            local function Label(k) for _, o in ipairs(SORTS) do if o[1] == k then return o[2] end end return "가까운 순" end
+            local sbn = CreateFrame("Button", nil, board)
+            sbn:SetSize(118, 30); sbn:SetPoint("LEFT", sb, "RIGHT", 6, 0)
+            Plate(sbn, 15, { 0.098, 0.075, 0.078, 1 }, { 0.29, 0.204, 0.22, 1 })
+            sbn.fs = Font(sbn, 12, P.tx); sbn.fs:SetPoint("LEFT", 12, 0); sbn.fs:SetWidth(84); sbn.fs:SetJustifyH("LEFT"); sbn.fs:SetWordWrap(false)
+            sbn.ar = sbn:CreateTexture(nil, "ARTWORK"); sbn.ar:SetTexture(MEDIA .. "hb_down"); sbn.ar:SetSize(10, 10)
+            sbn.ar:SetPoint("RIGHT", -10, 0); sbn.ar:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 1)
+            local function Paint() sbn.fs:SetText(Label(sortBy)) end
+            Paint()
+            local menu = CreateFrame("Frame", nil, board)
+            menu:SetFrameStrata("FULLSCREEN_DIALOG"); menu:EnableMouse(true); menu:Hide()
+            menu:SetPoint("TOPRIGHT", sbn, "BOTTOMRIGHT", 0, -4)
+            Plate(menu, 12, { 0.125, 0.094, 0.086, 0.98 }, { P.acc[1], P.acc[2], P.acc[3], 0.6 })
+            menu.items = {}
+            local w = 150
+            for i, o in ipairs(SORTS) do
+                local b = CreateFrame("Button", nil, menu)
+                b:SetHeight(24); b:SetPoint("TOPLEFT", 6, -6 - (i - 1) * 25); b:SetPoint("TOPRIGHT", -6, -6 - (i - 1) * 25)
+                b.hl = RR(b, 10, { 1, 1, 1 }, "BACKGROUND", 2, 0)
+                b.fs = Font(b, 12.5, P.tx); b.fs:SetPoint("LEFT", 10, 0); b.fs:SetText(o[2])
+                w = math.max(w, b.fs:GetStringWidth() + 36)
+                b:SetScript("OnClick", function()
+                    sortBy = o[1]; DB.listSort = o[1]; menu:Hide(); Paint()
+                    board.offset = 0; RefreshBoard()
+                end)
+                b:SetScript("OnEnter", function(self) if sortBy ~= o[1] then self.hl:SetColor({ 1, 1, 1 }, 0.08) end end)
+                b:SetScript("OnLeave", function(self) if sortBy ~= o[1] then self.hl:SetColor({ 1, 1, 1 }, 0) end end)
+                b.key = o[1]
+                menu.items[i] = b
+            end
+            menu:SetSize(w, #SORTS * 25 + 12)
+            local function PaintMenu()
+                for _, b in ipairs(menu.items) do
+                    local on = b.key == sortBy
+                    b.hl:SetColor(on and P.acc or { 1, 1, 1 }, on and 1 or 0)
+                    local c = on and (P.ink or { 0.23, 0.11, 0.14 }) or P.tx
+                    b.fs:SetTextColor(c[1], c[2], c[3])
+                end
+            end
+            menu:SetScript("OnUpdate", function(self)
+                if not self:IsMouseOver(20, -20, -20, 20) and not sbn:IsMouseOver() then
+                    self.away = (self.away or 0) + 1
+                    if self.away > 40 then self:Hide() end
+                else self.away = 0 end
+            end)
+            sbn:SetScript("OnClick", function() if menu:IsShown() then menu:Hide() else PaintMenu(); menu.away = 0; menu:Show() end end)
+            sbn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetText("목록 정렬", 1, 0.84, 0.88)
+                GameTooltip:AddLine("같은 레벨이면 가까운 순 · 고른 정렬은 기억해요", 0.8, 0.8, 0.8); GameTooltip:Show()
+            end)
+            sbn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            board:HookScript("OnHide", function() menu:Hide() end)
+        end
         sb:SetAutoFocus(false); sb:SetMaxLetters(40)
         local ff = board.title:GetFont()
         sb:SetFont(ff or STANDARD_TEXT_FONT, 13, "")
@@ -3056,6 +3239,22 @@ local MAXQ = 8                 -- 한 번에 보이는 퀘 수 (손잡이로 길
 local YEL = { 0.945, 0.851, 0.541 }
 
 -- 퀘스트 일지에서 그 퀘 열기 (게임 판마다 창이 달라서 되는 방법을 차례로)
+-- 추적창 Shift+클릭: Leel Quest 판을 열고 그 퀘를 펼쳐서 보여줘요 (지역 칸도 그 퀘 지역으로)
+local function OpenQuestDetail(e)
+    if not (e and e.id) then return end
+    MakeBoard()
+    if not board:IsShown() then board:Show(); AutoRoute() end
+    if board.sb and (board.sb:GetText() or "") ~= "" then board.sb:SetText("") end
+    zoneSel = ZoneKey(e)
+    board.offset = 0
+    board.expanded = e.id
+    RefreshBoard()
+    for i, it in ipairs(board.items or {}) do
+        if it.e and it.e.id == e.id then board.offset = math.max(0, i - 2); break end
+    end
+    board.expanded = e.id
+    RefreshBoard()
+end
 local function ShowQuest(e)
     if not e then return end
     -- Leel Quest가 퀘스트 창을 대신하면: 세계 지도(퀘 목록 칸 없이)를 그 퀘 지역으로 열고,
@@ -3243,8 +3442,14 @@ local function MakeRow(i)
             CDB.route = BuildOrder()
             Print(e.title .. " 를 이번 길에서 뺐어요.")
             RefreshTracker(); RefreshBoard()
-        elseif IsShiftKeyDown() and ChatEdit_InsertLink and GetQuestLink then
-            local ok, link = pcall(GetQuestLink, e.id); if ok and link then ChatEdit_InsertLink(link) end
+        elseif IsShiftKeyDown() then
+            -- 채팅 입력 중이면 예전처럼 퀘 링크 넣기, 아니면 그 퀘 자세히 보기
+            local eb = ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow()
+            if eb and ChatEdit_InsertLink and GetQuestLink then
+                local ok, link = pcall(GetQuestLink, e.id); if ok and link then ChatEdit_InsertLink(link) end
+            else
+                OpenQuestDetail(e)
+            end
         else
             ShowQuest(e)
         end
@@ -3255,7 +3460,8 @@ local function MakeRow(i)
         GameTooltip:SetText(self.e.title, 1, 0.84, 0.88)
         local _, _, src = QuestPos(self.e, PlayerMap())
         GameTooltip:AddLine("위치: " .. SRC[src or "none"], 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("클릭: 퀘스트 보기 · 오른쪽 클릭: 이번 길에서 빼기", 0.75, 0.75, 0.75)
+        GameTooltip:AddLine("클릭: 지도에서 위치 · Shift+클릭: 자세히 보기", 0.75, 0.75, 0.75)
+        GameTooltip:AddLine("오른쪽 클릭: 이번 길에서 빼기", 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3454,6 +3660,30 @@ local function MakeTracker()
     near:SetScript("OnLeave", function() GameTooltip:Hide() end)
     near:Hide()
     trk.near = near
+    -- 던전 보고 모드 띠 (A안): 던전에서 나와도 다 깬 던전 퀘만, 다 보고하거나 ✕ 누를 때까지
+    local dbd = CreateFrame("Frame", nil, trk)
+    dbd:SetHeight(24)
+    local dbg = dbd:CreateTexture(nil, "BACKGROUND"); dbg:SetTexture(WHITE); dbg:SetAllPoints()
+    dbg:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 0.14)
+    if CreateColor then
+        pcall(dbg.SetGradient, dbg, "HORIZONTAL", CreateColor(P.acc[1], P.acc[2], P.acc[3], 0.26), CreateColor(P.acc[1], P.acc[2], P.acc[3], 0.04))
+    end
+    local dbl = dbd:CreateTexture(nil, "ARTWORK"); dbl:SetTexture(WHITE); dbl:SetWidth(3)
+    dbl:SetPoint("TOPLEFT"); dbl:SetPoint("BOTTOMLEFT"); dbl:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 1)
+    local dbi = dbd:CreateTexture(nil, "ARTWORK"); dbi:SetTexture(FLM_ICONS .. "ic_dungeon"); dbi:SetSize(16, 16); dbi:SetPoint("LEFT", 8, 0)
+    dbd.t = Font(dbd, 12.5, P.accHi); dbd.t:SetPoint("LEFT", dbi, "RIGHT", 6, 0); dbd.t:SetPoint("RIGHT", -52, 0)
+    dbd.t:SetJustifyH("LEFT"); dbd.t:SetWordWrap(false); dbd.t:SetShadowColor(0, 0, 0, 1)
+    local dx = CreateFrame("Button", nil, dbd); dx:SetSize(44, 18); dx:SetPoint("RIGHT", -4, 0)
+    RR(dx, 6, { 0.114, 0.082, 0.078, 0.7 }, "BACKGROUND", 0, 0)
+    dx.t = Font(dx, 11, P.tx2); dx.t:SetPoint("CENTER", 0, 0); dx.t:SetText("그만")
+    dx:SetScript("OnClick", function() CDB.dunBack = nil; RefreshTracker() end)
+    dx:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText("던전 보고 모드 끝내기")
+        GameTooltip:AddLine("원래 동선 목록으로 돌아가요", 0.75, 0.75, 0.75); GameTooltip:Show()
+    end)
+    dx:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    dbd:Hide()
+    trk.dunBand = dbd
     -- 근처 반납을 알아서 길 앞으로 (C안): 싸우는 중이 아니고, 아직 앞에 없을 때만
     function trk.AutoFront(g)
         if not g or InCombatLockdown() or UnitAffectingCombat("player") then return end
@@ -3856,14 +4086,41 @@ RefreshTracker = function()
     -- 던전 안이면 그 던전 퀘만 (밖의 퀘는 나오면 다시)
     trk.dunHidden, trk.dunName = 0, nil
     local dn = DungeonName()
+    local backN = 0
     if dn then
         local only = {}
         for _, e in ipairs(route) do if InThisDungeon(e, dn) then only[#only + 1] = e end end
         if #only > 0 then
             trk.dunHidden, trk.dunName = #route - #only, dn
             route = only
+            -- 나왔을 때 보고할 수 있게 이 던전 퀘를 기억 (A안 · 던전 보고 모드)
+            local ids = {}
+            for _, e in ipairs(only) do if e.id then ids[e.id] = true end end
+            CDB.dunBack = { name = dn, ids = ids }
+        end
+    elseif CDB.dunBack and CDB.dunBack.ids then
+        -- 던전 밖: 다 깬 던전 퀘만 (귀환 · 비행 · 지역 이동해도 그대로)
+        local ids, keep, only = CDB.dunBack.ids, false, {}
+        for id in pairs(ids) do if byId[id] then keep = true else ids[id] = nil end end   -- 보고했거나 포기한 건 빼요
+        for _, e in ipairs(route) do if e.id and ids[e.id] and e.done then only[#only + 1] = e end end
+        if keep and #only > 0 then
+            trk.dunHidden = #route - #only
+            backN = #only
+            route = only
+        else
+            CDB.dunBack = nil   -- 보고할 게 없으면 원래 동선으로
         end
     end
+    if backN > 0 and not DB.trkFold then
+        trk.dunBand.t:SetText(("%s · 보고하기 %d"):format(CDB.dunBack.name or "던전", backN))
+        trk.dunBand:ClearAllPoints()
+        trk.dunBand:SetPoint("TOPLEFT", trk.head, "BOTTOMLEFT", 0, -6 - nearH); trk.dunBand:SetPoint("TOPRIGHT", trk.head, "BOTTOMRIGHT", 0, -6 - nearH)
+        trk.dunBand:Show()
+        nearH = nearH + 30
+    else
+        trk.dunBand:Hide()
+    end
+    trk.dunBackN = backN
     local total = math.max(CDB.total or #route, #route)
     for _, r in ipairs(trk.rows) do r:Hide(); r.e = nil; r.cur = nil end
     trk.more:Hide()
@@ -4038,7 +4295,8 @@ RefreshTracker = function()
     end
     local moreTxt = rest > 0 and ("+ %d개 더"):format(rest) or nil
     if (trk.dunHidden or 0) > 0 then
-        local h = ("|cff9a8a86던전 밖 퀘 %d개는 나오면 다시 보여요|r"):format(trk.dunHidden)
+        local h = (trk.dunBackN or 0) > 0 and ("|cff9a8a86다른 퀘 %d개는 다 보고하면 다시 보여요|r"):format(trk.dunHidden)
+            or ("|cff9a8a86던전 밖 퀘 %d개는 나오면 다시 보여요|r"):format(trk.dunHidden)
         moreTxt = moreTxt and (moreTxt .. "   " .. h) or h
     end
     -- (보류 퀘는 아래 "그 밖의 퀘"에 다 나와요)
@@ -4060,7 +4318,7 @@ end
 
 ----------------------------------------------------------------------
 -- 추적창 "그 밖의 퀘": 길에 안 든 퀘도 한 줄씩 다 (회색 · 다른 지역 · 반납 · 실패 포함)
---   클릭: 지도에서 그 퀘 · Shift+클릭: 길에 넣기 · 머리를 누르면 접기/펴기 (기억)
+--   클릭: 지도에서 그 퀘 · Shift+클릭: 자세히 보기 · Ctrl+클릭: 길에 넣기 · 머리를 누르면 접기/펴기 (기억)
 ----------------------------------------------------------------------
 do
     local base = RefreshTracker
@@ -4080,7 +4338,9 @@ do
         r:SetScript("OnClick", function(self)
             local e = self.e
             if not e then return end
-            if IsShiftKeyDown() and e.id and not e.failed then
+            if IsShiftKeyDown() and e.id then
+                OpenQuestDetail(e)
+            elseif IsControlKeyDown() and e.id and not e.failed then
                 CDB.mode = "manual"; Sel()[e.id] = true
                 if board and board.Rebuild then board.Rebuild(true)
                 else CDB.route = BuildOrder(); CDB.total = #CDB.route; RefreshTracker(); RefreshBoard() end
@@ -4102,7 +4362,7 @@ do
                     GameTooltip:AddLine("· " .. t, o.done and 0.56 or 0.9, o.done and 0.86 or 0.84, o.done and 0.61 or 0.82)
                 end
             end
-            GameTooltip:AddLine("클릭: 지도에서 보기" .. (e.failed and "" or " · Shift+클릭: 길에 넣기"), 0.75, 0.75, 0.75)
+            GameTooltip:AddLine("클릭: 지도에서 보기 · Shift+클릭: 자세히 보기" .. (e.failed and "" or " · Ctrl+클릭: 길에 넣기"), 0.75, 0.75, 0.75)
             GameTooltip:Show()
         end)
         r:SetScript("OnLeave", function() GameTooltip:Hide() end)

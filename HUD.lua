@@ -1064,6 +1064,87 @@ function ns:CreateHUD()
         PlacePet()
     end
 
+    -- 대상의 대상: 대상 초상화 밑 어두운 알약 (왼쪽 직업색 띠 · 흰 이름 · % · 바닥 체력 줄)
+    --   클릭 = 그 대상으로 바꾸기
+    do
+        local W_, H_ = POR_W + 40, 32   -- 어두운 알약 + 왼쪽 직업색 띠 + 바닥 체력 줄
+        local tt = CreateFrame("Button", "LeelUI_targettarget", target, "SecureUnitButtonTemplate")
+        tt:SetSize(W_, H_)
+        tt:SetPoint("TOPRIGHT", target.portrait, "BOTTOMRIGHT", 0, -8)
+        tt:SetAttribute("unit", "targettarget")
+        tt:SetAttribute("*type1", "target")
+        tt:RegisterForClicks("AnyUp")
+        local rim = ns.RoundRect(tt, 10, { 0.29, 0.204, 0.22 }, "BACKGROUND", 0, -2)
+        local bg = ns.RoundRect(tt, 9, { 0.078, 0.047, 0.055 }, "BACKGROUND", 1, 0)
+        bg:SetColor({ 0.078, 0.047, 0.055 }, 0.92)
+        tt.sfr = CreateFrame("Frame", nil, tt)
+        tt.sfr:SetPoint("TOPLEFT", 4, -4); tt.sfr:SetPoint("BOTTOMLEFT", 4, 4); tt.sfr:SetWidth(6)
+        tt.stripe = ns.RoundRect(tt.sfr, 3, C.acc, "ARTWORK", 0, 0)
+        tt.hp = CreateFrame("StatusBar", nil, tt)
+        tt.hp:SetPoint("BOTTOMLEFT", 14, 3); tt.hp:SetPoint("BOTTOMRIGHT", -8, 3); tt.hp:SetHeight(3)
+        tt.hp:SetStatusBarTexture(ns.WHITE)
+        tt.hp:SetStatusBarColor(0.937, 0.416, 0.486, 1)
+        local hb = tt.hp:CreateTexture(nil, "BACKGROUND"); hb:SetTexture(ns.WHITE); hb:SetAllPoints(); hb:SetVertexColor(1, 1, 1, 0.08)
+        tt.name = ns.Font(tt, 17, { 1, 0.97, 0.96 })
+        tt.name:SetPoint("LEFT", tt, "LEFT", 16, 2)
+        tt.name:SetWidth(W_ - 64); tt.name:SetJustifyH("LEFT"); tt.name:SetWordWrap(false)
+        tt.pct = tt:CreateFontString(nil, "OVERLAY")
+        tt.pct:SetFont(ns.NUM, 14, "")
+        tt.pct:SetTextColor(0.85, 0.78, 0.76)
+        tt.pct:SetPoint("RIGHT", tt, "RIGHT", -10, 2)
+        local function PaintTT()
+            if not UnitExists("targettarget") then return end
+            -- 이름은 캐릭터 이름 (흰 글씨) · 왼쪽 띠 = 플레이어면 직업 색, 몹 · NPC는 분홍
+            tt.name:SetFormattedText("%s", UnitName("targettarget") or "")   -- 전투 중 비밀 이름도 그대로 넘겨요
+            local col
+            local okP, isP = pcall(UnitIsPlayer, "targettarget")
+            if okP and isP and not ns.IsSecret(isP) then
+                local okC, _, file = pcall(UnitClass, "targettarget")
+                if okC and file and not ns.IsSecret(file) then
+                    local cc = (C_ClassColor and C_ClassColor.GetClassColor and C_ClassColor.GetClassColor(file)) or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[file])
+                    if cc then col = { cc.r, cc.g, cc.b } end
+                end
+            end
+            tt.stripe:SetColor(col or C.acc, 1)
+            local cur, max = UnitHealth("targettarget"), UnitHealthMax("targettarget")
+            tt.hp:SetMinMaxValues(0, max or 1)
+            tt.hp:SetValue(cur or 0)
+            if ns.HealthPercentText then ns.HealthPercentText(tt.pct, "targettarget", cur, max) end
+        end
+        local acc = 0
+        tt:SetScript("OnUpdate", function(_, el) acc = acc + el; if acc > 0.2 then acc = 0; PaintTT() end end)
+        tt:SetScript("OnShow", PaintTT)
+        tt:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT"); GameTooltip:SetUnit("targettarget"); GameTooltip:Show()
+        end)
+        tt:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- 크기 (허브 > 위쪽 HUD · 60~160%) · 자리는 크기와 상관없이 대상 초상화 밑
+        local function PlaceTT()
+            local sc = (tonumber(ns.db and ns.db.totScale) or 100) / 100
+            tt:SetScale(sc)
+            tt:ClearAllPoints()
+            tt:SetPoint("TOPRIGHT", target.portrait, "BOTTOMRIGHT", 0, -8 / sc)
+        end
+        PlaceTT()
+        function ns.SetToTScale(v)
+            if ns.db then ns.db.totScale = v end
+            if InCombatLockdown() then
+                local w = CreateFrame("Frame"); w:RegisterEvent("PLAYER_REGEN_ENABLED")
+                w:SetScript("OnEvent", function(self) self:UnregisterAllEvents(); PlaceTT() end)
+                return
+            end
+            PlaceTT()
+        end
+        if ns.db and ns.db.tot == false then tt:Hide() else RegisterUnitWatch(tt) end
+        function ns.SetToT(on)
+            if ns.db then ns.db.tot = on and true or false end
+            if InCombatLockdown() then return end
+            if on then RegisterUnitWatch(tt) else UnregisterUnitWatch(tt); tt:Hide() end
+        end
+        target.tot = tt
+        ns.hudToT = tt
+    end
+
     -- 대상 징표: 대상 초상화 위 가운데
     local raid = target:CreateTexture(nil, "OVERLAY", nil, 7)
     raid:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
@@ -1749,11 +1830,28 @@ do
     tev:RegisterEvent("PLAYER_REGEN_ENABLED")
     tev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     local lastCast
+    -- 처음 접속 때는 위쪽 HUD가 늦게 만들어질 수 있어요: 생길 때까지 1초마다 다시 (최대 30번)
+    local tries = 0
+    local function TryBuild()
+        if row then return end
+        if not InCombatLockdown() then Build() end
+        tries = tries + 1
+        if not row and tries < 30 then C_Timer.After(1, TryBuild) end
+    end
     tev:SetScript("OnEvent", function(_, ev, a1, a2, a3)
-        if not row then C_Timer.After(0.5, Build) end
+        if not row then
+            if ev == "PLAYER_ENTERING_WORLD" then tries = 0; C_Timer.After(0.5, TryBuild) else C_Timer.After(0.5, Build) end
+        end
         if ev == "UNIT_SPELLCAST_SUCCEEDED" then
             local spell = a3
-            lastCast = { t = GetTime(), spell = (not issecret(spell)) and spell or nil }
+            if issecret(spell) then return end
+            -- 토템 주문일 때만 기억 (대지 충격 같은 다른 주문을 쓴 직후 토템이 사라지면 그 그림이 들어가던 문제)
+            local nm
+            pcall(function() nm = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spell)) or (GetSpellInfo and (GetSpellInfo(spell))) end)
+            if type(nm) ~= "string" or issecret(nm) then return end
+            local isTotem = (nm:find("토템") or nm:find("Totem")) and not (nm:find("귀환") or nm:find("Recall"))
+            if not isTotem then return end
+            lastCast = { t = GetTime(), spell = spell }
             return
         end
         if ev == "PLAYER_TOTEM_UPDATE" and row then
