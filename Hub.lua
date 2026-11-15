@@ -1487,6 +1487,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.30", "화살통 칸에 남은 화살", "세로 게이지 · 200발 노랑 · 50발 빨강" },
     { "1.3.29", "르엘 주사위 창 · 토끼 추천 · 블랙리스트", "파티 인사 말풍선 · 던전 퀘 보고 모드" },
     { "1.3.28", "주술사 토템 세트 (Q 한 키) · 토템 칸", "펫 창 크기 · 펫 만족도 · 가방 등급 테 · 던전 카드" },
     { "1.3.27", "Leel Quest 퀘스트 창 대신 · 검색", "지도 머리 줄 · 시전바 · 가방 크기" },

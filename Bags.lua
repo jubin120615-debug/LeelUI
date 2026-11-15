@@ -1323,3 +1323,126 @@ SLASH_LEELBAGFULL1 = "/르엘버리기"
 SlashCmdList.LEELBAGFULL = function()
     if not ns.ShowBagFull(true) then print("|cfff2b3c2[르엘 가방]|r 버릴 후보가 없어요.") end
 end
+
+----------------------------------------------------------------------
+-- 화살통 칸 (D1): 아래 가방 줄의 화살통 · 탄약 주머니 칸에
+--   왼쪽 세로 게이지 (얼마나 찼나) + 아래 숫자 알약 (남은 화살) + 위 "찬 칸/전체"
+--   200발 아래 노랑 · 50발 아래 빨강 + 칸이 빨갛게 숨 쉬기 · 마우스 올리면 툴팁에 자세히
+----------------------------------------------------------------------
+local AQ = { btn = {} }
+AQ.PINK, AQ.YEL, AQ.RED = { 0.949, 0.702, 0.761 }, { 0.953, 0.773, 0.353 }, { 1, 0.353, 0.431 }
+
+function AQ.Scan(bag)
+    local n = NumSlots and NumSlots(bag) or 0
+    if n == 0 then return end
+    local _, fam = NumFree(bag)
+    fam = tonumber(fam) or 0
+    -- 1 = 화살통 · 2 = 탄약 주머니
+    if bit and bit.band then
+        if bit.band(fam, 3) == 0 then return end
+    elseif fam ~= 1 and fam ~= 2 then return end
+    local total, used, maxStack, kinds = 0, 0, 200, {}
+    for s = 1, n do
+        local _, cnt, link = SlotInfo(bag, s)
+        if link then
+            used = used + 1
+            total = total + (cnt or 0)
+            local name, _, _, _, _, _, _, ms = GetItemInfo(link)
+            if ms and ms > 1 then maxStack = ms end
+            local k = name or link
+            kinds[k] = (kinds[k] or 0) + (cnt or 0)
+        end
+    end
+    return { total = total, used = used, slots = n, max = n * maxStack, kinds = kinds, ammo = (bit and bit.band and bit.band(fam, 2) ~= 0) }
+end
+
+function AQ.Make(b)
+    local o = CreateFrame("Frame", nil, b)
+    o:SetAllPoints(b); o:SetFrameLevel(b:GetFrameLevel() + 5)
+    -- 50발 아래: 칸 둘레 빨간 숨쉬기
+    o.glow = o:CreateTexture(nil, "BACKGROUND")
+    o.glow:SetTexture(ns.MEDIA .. "circle"); o.glow:SetBlendMode("ADD")
+    o.glow:SetPoint("TOPLEFT", -10, 10); o.glow:SetPoint("BOTTOMRIGHT", 10, -10)
+    o.glow:SetVertexColor(1, 0.25, 0.35, 1); o.glow:Hide()
+    local ag = o.glow:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+    local a = ag:CreateAnimation("Alpha"); a:SetFromAlpha(0.25); a:SetToAlpha(0.9); a:SetDuration(0.6); a:SetSmoothing("IN_OUT")
+    o.glowAg = ag
+    -- 세로 게이지 (왼쪽 안쪽)
+    o.gbg = o:CreateTexture(nil, "ARTWORK", nil, 1); o.gbg:SetTexture(ns.WHITE)
+    o.gbg:SetPoint("TOPLEFT", 3, -4); o.gbg:SetPoint("BOTTOMLEFT", 3, 4); o.gbg:SetWidth(4)
+    o.gbg:SetVertexColor(0.07, 0.05, 0.05, 0.9)
+    o.gfill = o:CreateTexture(nil, "ARTWORK", nil, 2); o.gfill:SetTexture(ns.WHITE)
+    o.gfill:SetPoint("BOTTOMLEFT", o.gbg, "BOTTOMLEFT", 1, 1); o.gfill:SetWidth(2)
+    -- 위: 찬 칸 / 전체
+    o.slot = o:CreateFontString(nil, "OVERLAY")
+    o.slot:SetFont(ns.NUM or ns.FONT, 10, "OUTLINE"); o.slot:SetPoint("TOPLEFT", 9, -2)
+    -- 아래: 숫자 알약
+    o.pill = CreateFrame("Frame", nil, o); o.pill:SetSize(30, 13); o.pill:SetPoint("BOTTOM", 2, 1)
+    o.pill:SetFrameLevel(o:GetFrameLevel() + 1)
+    o.pillBg = ns.RoundRect(o.pill, 6.5, AQ.PINK, "BACKGROUND", 1, 0)
+    o.pillRim = ns.RoundRect(o.pill, 7.5, { 0.1, 0.07, 0.06 }, "BACKGROUND", 0, -1)
+    o.num = o.pill:CreateFontString(nil, "OVERLAY")
+    o.num:SetFont(ns.NUM or ns.FONT, 11, ""); o.num:SetPoint("CENTER", 0, 0)
+    -- 원래 개수 글씨 (빈 칸 수 등) 가리지 않게 숨김
+    local ct = b.Count or (b.GetName and b:GetName() and _G[b:GetName() .. "Count"])
+    o.oldCount = ct
+    b:HookScript("OnEnter", function(s) AQ.Tip(s) end)
+    return o
+end
+
+function AQ.Paint(b, d)
+    local o = AQ.btn[b] or AQ.Make(b)
+    AQ.btn[b] = o
+    o.d = d
+    if not d then o:Hide(); if o.oldCount then o.oldCount:SetAlpha(1) end; return end
+    o:Show()
+    local col = (d.total < 50 and AQ.RED) or (d.total < 200 and AQ.YEL) or AQ.PINK
+    local frac = d.max > 0 and math.min(1, d.total / d.max) or 0
+    local h = math.max(0, (o.gbg:GetHeight() or 30) - 2)
+    o.gfill:SetHeight(math.max(1, h * frac)); o.gfill:SetVertexColor(col[1], col[2], col[3], 1)
+    o.slot:SetText(d.used .. "/" .. d.slots)
+    o.num:SetText(d.total)
+    o.num:SetTextColor(col == AQ.RED and 1 or 0.23, col == AQ.RED and 1 or 0.11, col == AQ.RED and 1 or 0.14)
+    o.pillBg:SetColor(col)
+    o.pill:SetWidth(math.max(22, o.num:GetStringWidth() + 10))
+    if d.total < 50 then o.glow:Show(); o.glowAg:Play() else o.glowAg:Stop(); o.glow:Hide() end
+    if o.oldCount then o.oldCount:SetAlpha(0) end
+end
+
+function AQ.Tip(b)
+    local o = AQ.btn[b]
+    local d = o and o.d
+    if not d or not GameTooltip:IsOwned(b) then return end
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine((d.ammo and "탄약 주머니" or "화살통") .. " · " .. d.slots .. "칸", 0.95, 0.70, 0.76)
+    for k, c in pairs(d.kinds) do GameTooltip:AddDoubleLine(k, c, 1, 1, 1, 1, 1, 1) end
+    GameTooltip:AddLine(("찬 칸 %d / %d · 빈 칸 %d"):format(d.used, d.slots, d.slots - d.used), 0.73, 0.65, 0.63)
+    local ok, spd = pcall(UnitRangedDamage, "player")
+    if ok and spd and spd > 0 and d.total > 0 then
+        GameTooltip:AddLine(("자동 사격으로 약 %d분"):format(math.floor(d.total * spd / 60 + 0.5)), 0.73, 0.65, 0.63)
+    end
+    GameTooltip:AddLine("200발 아래 노랑 · 50발 아래 빨강", 0.95, 0.77, 0.35)
+    GameTooltip:Show()
+end
+
+function AQ.Update()
+    AQ.pending = false
+    for i = 0, 3 do
+        local b = _G["CharacterBag" .. i .. "Slot"]
+        if b then AQ.Paint(b, AQ.Scan(i + 1)) end
+    end
+end
+
+local aqEv = CreateFrame("Frame")
+aqEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+aqEv:RegisterEvent("BAG_UPDATE")
+pcall(aqEv.RegisterEvent, aqEv, "BAG_UPDATE_DELAYED")
+aqEv:RegisterEvent("UNIT_INVENTORY_CHANGED")
+pcall(aqEv.RegisterEvent, aqEv, "GET_ITEM_INFO_RECEIVED")
+aqEv:SetScript("OnEvent", function(_, ev, unit)
+    if ev == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
+    if AQ.pending then return end
+    AQ.pending = true
+    C_Timer.After(0.2, AQ.Update)
+end)
+ns.AmmoUpdate = AQ.Update
