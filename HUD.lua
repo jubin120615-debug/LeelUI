@@ -1084,23 +1084,25 @@ local function SetupFollow(f)
     local p2 = live:CreateTexture(nil, "OVERLAY", nil, 1); p2:SetTexture(ns.MEDIA .. "follow_p2"); p2:SetAllPoints()
     local p1 = live:CreateTexture(nil, "OVERLAY", nil, 2); p1:SetTexture(ns.MEDIA .. "follow_p1"); p1:SetAllPoints()
     local ring = live:CreateTexture(nil, "OVERLAY", nil, 3); ring:SetTexture(ns.MEDIA .. "follow_ring"); ring:SetAllPoints()
-    local function Hop(t)
-        local ag = t:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
-        local a = ag:CreateAnimation("Translation"); a:SetOffset(0, 2.5); a:SetDuration(0.16); a:SetSmoothing("OUT")
-        return ag
-    end
-    local hop1, hop2 = Hop(p1), Hop(p2)
-    local rag = ring:CreateAnimationGroup(); rag:SetLooping("REPEAT")
-    local ra = rag:CreateAnimation("Rotation"); ra:SetDegrees(-360); ra:SetDuration(2.4)
+    -- 움직임은 애니메이션 대신 직접 (텍스처 이동 애니메이션이 위로 튀어 오르는 문제가 있어서)
+    local liveT = 0
+    live:SetScript("OnUpdate", function(_, el)
+        liveT = liveT + el
+        local w = (bf:GetWidth() or 44) / 44
+        local y1 = 2.5 * w * math.abs(math.sin(liveT * math.pi / 0.32))
+        local y2 = 2.5 * w * math.abs(math.sin(liveT * math.pi / 0.32 + math.pi / 2))   -- 반 박자 늦게
+        p1:ClearAllPoints(); p1:SetPoint("TOPLEFT", bf, "TOPLEFT", 0, y1); p1:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", 0, y1)
+        p2:ClearAllPoints(); p2:SetPoint("TOPLEFT", bf, "TOPLEFT", 0, y2); p2:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", 0, y2)
+        ring:SetRotation(-liveT * 2 * math.pi / 2.4)
+    end)
     local liveOn = false
     local function Live(on)
         if on == liveOn then return end
         liveOn = on
         if on then
-            bt:Hide(); live:Show(); hop1:Play(); rag:Play()
-            C_Timer.After(0.16, function() if liveOn then hop2:Play() end end)   -- 반 박자 늦게 = 번갈아 콩콩
+            bt:Hide(); liveT = 0; live:Show()
         else
-            hop1:Stop(); hop2:Stop(); rag:Stop(); live:Hide(); bt:Show()
+            live:Hide(); bt:Show()
         end
     end
     local bag = bf:CreateAnimationGroup()
