@@ -644,6 +644,7 @@ local DIST_COL = {
     far  = { 0.55, 0.48, 0.46 },   -- 너무 멂
 }
 
+local UseDistFn
 local function CreateCenter(hud)
     local c = CreateFrame("Frame", nil, hud)
     c:SetSize(GAP, 100)
@@ -676,8 +677,10 @@ local function CreateCenter(hud)
         c.dots[i] = d
     end
     local DOT_OFF = { 0.36, 0.27, 0.25 }
+    local GOLD = { 1, 0.843, 0.353 }
     local function Dots(n, col)
         c.rule:Hide()
+        if c.awake and col and col ~= DIST_COL.far then col = GOLD end
         for i, d in ipairs(c.dots) do
             local k = (n and i <= n) and col or DOT_OFF
             d:SetVertexColor(k[1], k[2], k[3], 1)
@@ -691,20 +694,82 @@ local function CreateCenter(hud)
     c.Rule = Rule
     c.Dots = Dots
 
+    -- 토끼 귀 + 전투 중 각성: 귀가 금빛으로 쭉 서고, 숫자 뒤로 금빛 줄기가 솟아요
+    c.ear = c:CreateTexture(nil, "ARTWORK"); c.ear:SetTexture(ns.MEDIA .. "ear_pink")
+    c.ear:SetSize(34, 34); c.ear:SetPoint("BOTTOM", c, "TOP", 0, -12)
+    c.earG = c:CreateTexture(nil, "ARTWORK", nil, 1); c.earG:SetTexture(ns.MEDIA .. "ear_gold")
+    c.earG:SetSize(36, 36); c.earG:SetPoint("BOTTOM", c, "TOP", 0, -12); c.earG:SetAlpha(0)
+    do
+        local ag = c.earG:CreateAnimationGroup()
+        local a1 = ag:CreateAnimation("Scale"); a1:SetScale(1, 1.3); a1:SetOrigin("BOTTOM", 0, 0); a1:SetDuration(0.1); a1:SetOrder(1); a1:SetSmoothing("OUT")
+        local a2 = ag:CreateAnimation("Scale"); a2:SetScale(1, 1 / 1.3); a2:SetOrigin("BOTTOM", 0, 0); a2:SetDuration(0.18); a2:SetOrder(2); a2:SetSmoothing("IN")
+        c.earPop = ag
+    end
+    -- 번쩍
+    c.flash = c:CreateTexture(nil, "BACKGROUND", nil, 2); c.flash:SetTexture(ns.MEDIA .. "soft_glow"); c.flash:SetBlendMode("ADD")
+    c.flash:SetSize(140, 140); c.flash:SetPoint("CENTER", c, "TOP", 0, -22); c.flash:SetVertexColor(1, 0.9, 0.55); c.flash:SetAlpha(0)
+    do
+        local ag = c.flash:CreateAnimationGroup()
+        local a1 = ag:CreateAnimation("Alpha"); a1:SetFromAlpha(0); a1:SetToAlpha(0.95); a1:SetDuration(0.1); a1:SetOrder(1)
+        local a2 = ag:CreateAnimation("Alpha"); a2:SetFromAlpha(0.95); a2:SetToAlpha(0); a2:SetDuration(0.45); a2:SetOrder(2)
+        c.flashAg = ag
+    end
+    -- 솟는 빛줄기
+    c.streaks = {}
+    local SX = { -52, -40, -29, -19, -8, 8, 19, 30, 41, 53 }
+    for i, x in ipairs(SX) do
+        local t = c:CreateTexture(nil, "BACKGROUND", nil, 1); t:SetTexture(ns.MEDIA .. "streak"); t:SetBlendMode("ADD")
+        local h = 34 + ((i * 37) % 30)
+        t:SetSize(3 + (i % 2), h); t:SetVertexColor(GOLD[1], GOLD[2], GOLD[3]); t:SetAlpha(0)
+        t:SetPoint("BOTTOM", c, "TOP", x, -62 - (i % 3) * 4)
+        local d = 1.1 + ((i * 53) % 9) / 10
+        local ag = t:CreateAnimationGroup(); ag:SetLooping("REPEAT")
+        local mv = ag:CreateAnimation("Translation"); mv:SetOffset(0, 46); mv:SetDuration(d); mv:SetOrder(1)
+        local fi = ag:CreateAnimation("Alpha"); fi:SetFromAlpha(0); fi:SetToAlpha(0.45 + (i % 4) * 0.12); fi:SetDuration(d * 0.35); fi:SetOrder(1)
+        local fo = ag:CreateAnimation("Alpha"); fo:SetFromAlpha(0.45 + (i % 4) * 0.12); fo:SetToAlpha(0); fo:SetStartDelay(d * 0.55); fo:SetDuration(d * 0.45); fo:SetOrder(1)
+        c.streaks[i] = { t = t, ag = ag, d = d }
+    end
+    do
+        local ag = c.earG:CreateAnimationGroup()
+        local a = ag:CreateAnimation("Alpha"); a:SetFromAlpha(1); a:SetToAlpha(0); a:SetDuration(0.5)
+        ag:SetScript("OnFinished", function() c.earG:SetAlpha(0) end)
+        c.earOut = ag
+    end
+    function c:Awaken(on)
+        on = on and true or false
+        if on == (self.awake or false) then return end
+        self.awake = on
+        if on then
+            self.fightStart = GetTime()
+            self.earOut:Stop(); self.ear:SetAlpha(0); self.earG:SetAlpha(1)
+            self.earPop:Play(); self.flashAg:Stop(); self.flashAg:Play()
+            for _, st in ipairs(self.streaks) do
+                C_Timer.After(0.15 + math.random() * st.d, function() if c.awake then st.ag:Play() end end)
+            end
+        else
+            for _, st in ipairs(self.streaks) do st.ag:Stop(); st.t:SetAlpha(0) end
+            self.earOut:Play(); self.ear:SetAlpha(1)
+        end
+        if self.ShowDist and UseDistFn and UseDistFn() and self:IsShown() then self:ShowDist() end
+    end
+
     local function Color(col)
+        if c.awake and col ~= DIST_COL.far then col = C.tx end
         c.text:SetTextColor(col[1], col[2], col[3])
         c.unitm:SetTextColor(col[1], col[2], col[3])
     end
 
     local function UseDist() return not ns.db.centerTime end
+    UseDistFn = UseDist
 
     function c:ShowDist()
         local unit = "target"
         if not UnitExists(unit) then
             if UnitAffectingCombat("player") then
-                self.text:SetText("-"); self.unitm:SetText(""); Color(DIST_COL.far)
-                Dots(0)
-                self.sub:SetText("대상 없음"); self:Show()
+                -- 대상 없음: 숫자 · 점 · 글자는 숨기고 귀(+ 각성 빛)만
+                self.text:SetText(""); self.unitm:SetText("")
+                c.rule:Hide(); for _, d in ipairs(c.dots) do d:Hide() end
+                self.sub:SetText(""); self:Show()
             else
                 self:Hide()
             end
@@ -735,6 +800,7 @@ local function CreateCenter(hud)
 
     -- 거리 모드: 대상이 있으면 늘 / 전투 시간 모드: 전투 중에만
     function c:Idle()
+        self:Awaken(false)
         if UseDist() then return self:Dist() end
         self:SetScript("OnUpdate", nil)
         self:Hide()
@@ -757,6 +823,7 @@ local function CreateCenter(hud)
     end
 
     function c:Fight()
+        self:Awaken(true)
         if UseDist() then return self:Dist() end
         local start, acc = GetTime(), 0
         Rule()
@@ -794,6 +861,9 @@ local function CreateCenter(hud)
         tacc = 0
         if UseDist() and not ns.moving and not c:IsShown() then c:ShowDist() end
     end)
+    -- /르엘각성 : 전투 없이 각성 모습 미리 보기 (한 번 더 = 끄기)
+    SLASH_LEELAWAKE1 = "/르엘각성"
+    SlashCmdList.LEELAWAKE = function() c:Awaken(not c.awake); if c.awake and not c:IsShown() then c:ShowDist() end end
     SLASH_LEELTOTEM1 = "/르엘토템"; SLASH_LEELTOTEM2 = "/leeltotem"
     SlashCmdList.LEELTOTEM = function(msg)
         msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")

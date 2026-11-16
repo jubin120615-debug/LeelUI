@@ -741,23 +741,26 @@ local function CreateCoords()
     local sc = wm and wm.ScrollContainer
     if not sc or coords then return end
     coords = CreateFrame("Frame", nil, wm)
-    coords:SetFrameStrata("HIGH")
-    coords:SetFrameLevel(wm.BorderFrame:GetFrameLevel() + 12)
-    coords:SetHeight(22)
-    coords:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 0, 0)
-    coords:SetPoint("BOTTOMRIGHT", sc, "BOTTOMRIGHT", 0, 0)
-    local bg = coords:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.10, 0.075, 0.07, 0.96)   -- 다른 애드온 좌표 글자가 비치지 않게 거의 불투명
+    coords:SetFrameStrata(sc:GetFrameStrata() or "HIGH")   -- 지도 바탕과 같은 층 (그래야 높이 비교가 돼요)
+    -- OpenMap 좌표 알약은 지도 핀보다 위(9900 근처)에 있어서, 그보다 위로 올려 덮어요 (같은 자리 한 줄로)
+    coords:SetFrameLevel(math.max(wm.BorderFrame:GetFrameLevel() + 40, math.min(sc:GetFrameLevel() + 9950, 9990)))
+    coords:SetHeight(26)
+    -- 지도 둥근 모서리 안쪽에 떠 있는 알약 줄 (모서리가 삐져나오지 않게)
+    coords:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 8, 6)
+    coords:SetPoint("BOTTOMRIGHT", sc, "BOTTOMRIGHT", -8, 6)
+    -- (B안) 아래 줄은 보이지 않는 계산용 · 좌표는 위 머리 줄 알약, 찍기는 왼쪽 아래 작은 알약
+    coords:SetAlpha(0)
 
-    coords.meL = Font(coords, 12, C.tx2); coords.meL:SetText("내 위치")
+    coords:EnableMouse(false)
+    coords.meL = Font(coords, 12, C.tx2); coords.meL:SetText("나")
     coords.meL:SetPoint("LEFT", 10, 0)
     coords.me = Font(coords, 15, C.tx, NUM)
     coords.me:SetPoint("LEFT", coords.meL, "RIGHT", 5, 0)
-    coords.cur = Font(coords, 15, C.tx, NUM)
-    coords.cur:SetPoint("RIGHT", -44, 0)   -- 오른쪽 아래 지도 도움말(?) 버튼 피해서
+    coords.sep = Font(coords, 12, { 0.42, 0.33, 0.34 }); coords.sep:SetText("|"); coords.sep:SetPoint("LEFT", coords.me, "RIGHT", 10, 0)
     coords.curL = Font(coords, 12, C.tx2); coords.curL:SetText("마우스")
-    coords.curL:SetPoint("RIGHT", coords.cur, "LEFT", -5, 0)
+    coords.curL:SetPoint("LEFT", coords.sep, "RIGHT", 10, 0)
+    coords.cur = Font(coords, 15, C.tx, NUM)
+    coords.cur:SetPoint("LEFT", coords.curL, "RIGHT", 5, 0)
 
     -- 마우스 옆 레벨 알약
     tip = CreateFrame("Frame", nil, UIParent)
@@ -775,16 +778,43 @@ local function CreateCoords()
 
     local t = 0
     coords:SetScript("OnUpdate", function(self, el)
-        -- OpenMap이 있으면 그쪽 좌표 줄을 써요 (이어 붙인 지도에서 우리 좌표는 맞지 않음)
-        if _G.OpenMapAPI then self:Hide() return end
         t = t + el
         if t < 0.05 then return end
         t = 0
         local mapID = wm:GetMapID()
-        coords.me:SetText(PlayerXY(mapID) or "-")
-        local cx, cy
-        if sc:IsMouseOver() then cx, cy = wm:GetNormalizedCursorPosition() end
-        coords.cur:SetText(Fmt(cx, cy) or "-")
+        local API = _G.OpenMapAPI
+        local stitched = API and API.IsStitched and API.IsStitched()
+        -- 나: 이어 붙인 지도(OpenMap)면 내가 있는 지역 기준
+        local meMap = mapID
+        if stitched and C_Map.GetBestMapForUnit then meMap = C_Map.GetBestMapForUnit("player") or mapID end
+        local mi = stitched and C_Map.GetMapInfo(meMap)
+        coords.meL:SetText(mi and mi.name and ("나 · " .. mi.name) or "나")   -- 지역 이름은 한글 글꼴 쪽에
+        coords.me:SetText(PlayerXY(meMap) or "-")
+        -- 마우스: 이어 붙인 지도면 OpenMap이 알려 주는 마우스 아래 지역 기준
+        local cx, cy, curMap = nil, nil, mapID
+        if stitched then
+            local okC, u, v = pcall(API.CursorPosition)
+            if okC and u then
+                local okM, m = pcall(API.MapAt, u, v)
+                if okM and m then
+                    local okF, x, y = pcall(API.MapFromWorld, m, u, v)
+                    if okF and x then cx, cy, curMap = x, y, m end
+                end
+            end
+        elseif sc:IsMouseOver() then
+            cx, cy = wm:GetNormalizedCursorPosition()
+        end
+        local cs = Fmt(cx, cy)
+        local ci = stitched and cs and C_Map.GetMapInfo(curMap)
+        coords.curL:SetText(ci and ci.name and ("마우스 · " .. ci.name) or "마우스")
+        coords.cur:SetText(cs or "-")
+        if cs then coords.lastCur, coords.lastMap = cs, curMap end
+        local hp = coords.hdr
+        if hp then
+            hp.me:SetText(coords.me:GetText() or "-"); hp.cur:SetText(cs or "-")
+            local w = math.floor(12 + hp.me:GetStringWidth() + 7 + hp.dot:GetStringWidth() + 7 + hp.curL:GetStringWidth() + 5 + math.max(52, hp.cur:GetStringWidth()) + 12)
+            if hp.w ~= w then hp.w = w; hp:SetWidth(w) end
+        end
 
         -- 지역 레벨 알약
         local shown = false
@@ -810,7 +840,149 @@ local function CreateCoords()
         tip:SetShown(shown)
     end)
     coords:SetScript("OnHide", function() if tip then tip:Hide() end end)
+    -- 머리 줄 좌표 알약: "48.3, 45.3 · 마우스 54.5, 64.5"
+    local bf = wm.BorderFrame
+    local hp = CreateFrame("Button", nil, bf)
+    hp:SetFrameLevel(bf:GetFrameLevel() + 12)
+    hp:SetHeight(24)
+    hp:SetPoint("TOP", bf, "TOP", 90, -(HEAD_CUT + 9))
+    local hbg = hp:CreateTexture(nil, "BACKGROUND"); hbg:SetTexture(MEDIA .. "pill22")
+    pcall(hbg.SetTextureSliceMargins, hbg, 11, 11, 11, 11); hbg:SetAllPoints(); hbg:SetVertexColor(0.18, 0.137, 0.129, 1)
+    local hrim = hp:CreateTexture(nil, "BORDER"); hrim:SetTexture(MEDIA .. "pill22rim")
+    pcall(hrim.SetTextureSliceMargins, hrim, 11, 11, 11, 11); hrim:SetAllPoints(); hrim:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.45)
+    hp.me = Font(hp, 14, C.tx, NUM); hp.me:SetPoint("LEFT", 12, 0)
+    hp.dot = Font(hp, 12, { 0.42, 0.33, 0.34 }); hp.dot:SetText("·"); hp.dot:SetPoint("LEFT", hp.me, "RIGHT", 7, 0)
+    hp.curL = Font(hp, 11.5, C.tx2); hp.curL:SetText("마우스"); hp.curL:SetPoint("LEFT", hp.dot, "RIGHT", 7, 0)
+    hp.cur = Font(hp, 14, C.tx, NUM); hp.cur:SetPoint("LEFT", hp.curL, "RIGHT", 5, 0)
+    hp:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(coords.meL:GetText() or "나", 1, 1, 1)
+        GameTooltip:AddLine(coords.curL:GetText() or "마우스", C.tx2[1], C.tx2[2], C.tx2[3])
+        GameTooltip:AddLine("누르면 마지막 마우스 좌표를 찍기 칸에", C.tx2[1], C.tx2[2], C.tx2[3])
+        GameTooltip:Show()
+    end)
+    hp:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    hp:SetScript("OnClick", function()
+        if coords.lastCur and coords.way then
+            local box = coords.way.box
+            box:SetText(coords.lastCur); box.fromMap = coords.lastMap; box:SetFocus()
+        end
+    end)
+    coords.hdr = hp
+    hp:SetShown(db.coords)
+    -- 오른쪽 끝 블리자드 단추(퀘스트 목록 여닫기 등)는 줄 위로 올려서 줄 안에 얹힌 것처럼
+    local function LiftCorner()
+        local right, bottom = sc:GetRight(), sc:GetBottom()
+        if not (right and bottom) then return end
+        local list = {}
+        for _, fr in ipairs(wm.overlayFrames or {}) do list[#list + 1] = fr end
+        for _, k in ipairs({ "SidePanelToggle", "QuestLogToggle" }) do if wm[k] then list[#list + 1] = wm[k] end end
+        for _, fr in ipairs(list) do
+            local okP, fr2, fb = pcall(function() return fr:GetRight(), fr:GetBottom() end)
+            if okP and fr2 and fb and right - fr2 < 40 and fb - bottom < 40 and fr:IsShown() then
+                pcall(fr.SetFrameStrata, fr, coords:GetFrameStrata())
+                pcall(fr.SetFrameLevel, fr, coords:GetFrameLevel() + 5)
+            end
+        end
+    end
+    coords:HookScript("OnShow", function() C_Timer.After(0, LiftCorner) end)
+    wm:HookScript("OnShow", function() C_Timer.After(0.05, LiftCorner) end)
+    C_Timer.After(0, LiftCorner)
     coords:SetShown(db.coords)
+    -- 마우스 좌표 누르면 찍기 칸에 넣기
+    local cb = CreateFrame("Button", nil, coords)
+    cb:SetPoint("TOPLEFT", coords.curL, "TOPLEFT", -4, 4); cb:SetPoint("BOTTOMRIGHT", coords.cur, "BOTTOMRIGHT", 4, -4)
+    cb:SetScript("OnClick", function()
+        if coords.lastCur and coords.way then
+            local box = coords.way.box
+            box:SetText(coords.lastCur); box.fromMap = coords.lastMap; box:SetFocus()
+        end
+    end)
+    cb:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("누르면 마지막 마우스 좌표를 찍기 칸에", 1, 1, 1); GameTooltip:Show() end)
+    cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+----------------------------------------------------------------------
+-- 좌표 찍기 (B안): 좌표 줄 오른쪽 입력 칸 → 지금 보는 지도에 길 안내 핀
+--   "45.3, 62.1" · "45.3 62.1" · "45 62" 모두 됨 · [찍기] 오른쪽 클릭 = 핀 지우기
+----------------------------------------------------------------------
+local function ParseXY(t)
+    t = tostring(t or ""):gsub("，", ",")
+    local x, y = t:match("([%d%.]+)%s*[,%s]%s*([%d%.]+)")
+    x, y = tonumber(x), tonumber(y)
+    if not (x and y) or x <= 0 or y <= 0 or x >= 100 or y >= 100 then return end
+    return x / 100, y / 100
+end
+
+local function PinAt(mapID, x, y, quiet)
+    if not (mapID and C_Map and C_Map.SetUserWaypoint and UiMapPoint) then return false end
+    local can = not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(mapID)
+    if not can then if not quiet then Print("이 지도에는 핀을 찍을 수 없어요 (지역 지도에서 해 주세요)") end return false end
+    local ok = pcall(function()
+        C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(mapID, x, y))
+        if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then C_SuperTrack.SetSuperTrackedUserWaypoint(true) end
+    end)
+    if ok and not quiet then
+        local info = C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+        Print(("%s %.1f, %.1f 에 핀을 찍었어요 · 지우기 = [찍기] 오른쪽 클릭"):format(info and info.name or "", x * 100, y * 100))
+    end
+    return ok
+end
+_G.LeelMapPin = PinAt
+
+local function CreateWayBox()
+    local wm = WorldMapFrame
+    local sc = wm and wm.ScrollContainer
+    if not sc or (coords and coords.way) then return end
+    local f = CreateFrame("Frame", nil, wm)
+    f:SetFrameStrata("HIGH"); f:SetFrameLevel(wm.BorderFrame:GetFrameLevel() + 14)
+    f:SetSize(186, 22)
+    -- 왼쪽 아래 작은 알약 (지도 핀보다 위)
+    f:SetFrameLevel(math.max(wm.BorderFrame:GetFrameLevel() + 14, math.min(sc:GetFrameLevel() + 9950, 9990)))
+    f:SetFrameStrata(sc:GetFrameStrata() or "HIGH")
+    f:SetSize(200, 28)
+    f:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 10, 10)
+    f:EnableMouse(true)
+    local bg = RoundTex(f, "BACKGROUND", 0, "panel", { 0.12, 0.086, 0.078 }, 0.94); bg:SetAllPoints()
+    local brim = RoundTex(f, "BORDER", 0, "rim", C.acc, 0.7); brim:SetAllPoints()
+    f.lbl = Font(f, 12, C.tx2); f.lbl:SetText("찍기"); f.lbl:SetPoint("LEFT", 12, 0)
+    local eb = CreateFrame("EditBox", nil, f)
+    eb:SetSize(92, 18); eb:SetPoint("LEFT", f.lbl, "RIGHT", 6, 0)
+    eb:SetAutoFocus(false); eb:SetMaxLetters(24)
+    if not eb:SetFont(NUM, 14, "") then eb:SetFontObject(ChatFontNormal) end
+    eb:SetTextColor(1, 1, 1); eb:SetTextInsets(8, 6, 0, 0); eb:SetJustifyH("CENTER")
+    local ebg = RoundTex(eb, "BACKGROUND", 0, "panel", { 0.165, 0.122, 0.114 }); ebg:SetAllPoints()
+    local erim = RoundTex(eb, "BORDER", 0, "rim", C.acc, 0.8); erim:SetAllPoints()
+    eb.hint = Font(eb, 11, { 0.55, 0.48, 0.46 }); eb.hint:SetPoint("CENTER"); eb.hint:SetText("45.3, 62.1")
+    eb:SetScript("OnTextChanged", function(self, user) self.hint:SetShown(self:GetText() == ""); if user then self.fromMap = nil end end)
+    eb:SetScript("OnEscapePressed", eb.ClearFocus)
+    local function Go()
+        local x, y = ParseXY(eb:GetText())
+        if not x then Print("좌표를 \"45.3, 62.1\" 처럼 넣어 주세요") return end
+        local API = _G.OpenMapAPI
+        local stitched = API and API.IsStitched and API.IsStitched()
+        local m = eb.fromMap or (stitched and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")) or wm:GetMapID()
+        if PinAt(m, x, y) then eb:ClearFocus() end
+    end
+    eb:SetScript("OnEnterPressed", Go)
+    local go = CreateFrame("Button", nil, f)
+    go:SetSize(44, 18); go:SetPoint("LEFT", eb, "RIGHT", 6, 0)
+    go:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    local gbg = RoundTex(go, "BACKGROUND", 0, "panel", C.acc); gbg:SetAllPoints()
+    go.fs = Font(go, 12, C.ink); go.fs:SetShadowColor(0, 0, 0, 0); go.fs:SetPoint("CENTER", 0, 0); go.fs:SetText("찍기")
+    go:SetScript("OnClick", function(_, btn)
+        if btn == "RightButton" then
+            if C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+            Print("핀을 지웠어요")
+        else Go() end
+    end)
+    go:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("지금 보는 지도에 핀 + 길 안내", 1, 1, 1)
+        GameTooltip:AddLine("오른쪽 클릭: 핀 지우기", C.tx2[1], C.tx2[2], C.tx2[3]); GameTooltip:Show()
+    end)
+    go:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.box = eb
+    if coords then coords.way = f end
 end
 
 ----------------------------------------------------------------------
@@ -846,6 +1018,9 @@ end
 local function ApplyCVars()
     pcall(SetCVar, "miniWorldMap", db.mini and "1" or "0")
     pcall(SetCVar, "mapFade", "0")   -- 흐림은 Leel Map이 직접 함
+    if db.coords then   -- 게임 기본 좌표 글자도 끔 (Leel Map 아래 줄과 겹치지 않게)
+        pcall(SetCVar, "worldMapShowPlayerCoords", "0"); pcall(SetCVar, "worldMapShowCursorCoords", "0")
+    end
 end
 
 
@@ -949,6 +1124,8 @@ local function Setup()
     end
     local ok, err = pcall(CreateCoords)
     if not ok then Print("좌표 줄 오류: " .. tostring(err)) end
+    local okw, errw = pcall(CreateWayBox)
+    if not okw then Print("좌표 찍기 오류: " .. tostring(errw)) end
     local okm, errm = pcall(SetupMover)
     if not okm then Print("지도 옮기기 오류: " .. tostring(errm)) end
     -- 블리자드가 지도를 열 때 흐림(0.5)을 등록하므로, 그 뒤에 우리 값으로 다시 등록
@@ -997,12 +1174,13 @@ end
 -- OpenMap(이어 붙인 세계 지도, 따로 설치)을 같이 쓰면: 지도 기능만 쓰고 겹치는 것은 끔 (처음 한 번)
 --   친구·길드 위치(르엘 길드원 위치와 겹침), 내 위치 공유, 핀 공유, 처음 묻는 창들
 ----------------------------------------------------------------------
-local OPENMAP_V = 5
+local OPENMAP_V = 6
 local OPENMAP_SET = {
     -- 길드원 위치는 Leel Map(Guild.lua)이 보여줘요 → OpenMap 쪽 길드 · 친구 표시와 공유는 꺼서 두 번 안 나오게
     friends = false, guild = false, friendsShare = false, shareAsked = true,
     pinsShared = false, presetAsked = true, minimapButton = false,
     mapButtons = false,   -- 지도 위 OpenMap 단추·즐겨찾기 줄 (설정 창 여는 곳)
+    coords = false,       -- 좌표는 Leel Map 아래 한 줄(나 · 마우스 · 찍기)이 보여줘요 → OpenMap 좌표 알약은 끔
     -- 던전 지도 그림은 쓰고(끄면 던전 안에서 지도가 초록으로 비어요), 우두머리/퀘스트/전리품 옆 칸은 끔
     -- (오른쪽 칸은 평소 퀘스트 목록으로 · 던전 정보는 NeedRoll 같은 따로 애드온으로)
     dungeonMaps = true, dungeonBosses = false, dungeonQuests = false, dungeonCard = false,
@@ -1038,7 +1216,7 @@ local function HideOpenMapEntry()
 end
 
 StaticPopupDialogs["LEELMAP_OPENMAP"] = {
-    text = "|cfff2b3c2Leel Map|r\n\nOpenMap을 찾았어요.\n이어 붙인 지도는 그대로 쓰고, OpenMap 설정 단추와 르엘 UI와 겹치는 기능(친구·길드 위치, 위치 공유, 핀 공유, 던전 지도 옆 칸)은 숨겼어요. 길드원 위치는 Leel Map이 보여줘요.\n\n지금 다시 불러올까요?",
+    text = "|cfff2b3c2Leel Map|r\n\nOpenMap을 찾았어요.\n이어 붙인 지도는 그대로 쓰고, OpenMap 설정 단추와 르엘 UI와 겹치는 기능(친구·길드 위치, 위치 공유, 핀 공유, 던전 지도 옆 칸, 좌표 알약)은 숨겼어요. 길드원 위치는 Leel Map이 보여줘요.\n\n지금 다시 불러올까요?",
     button1 = "다시 불러오기",
     button2 = "나중에",
     OnAccept = function() ReloadUI() end,
@@ -1104,9 +1282,14 @@ SlashCmdList.LEELMAP = function(msg)
         end
         ApplyCVars(); ApplyFade()
         Print("걸을 때 흐림 " .. (db.fade and ("켬 (" .. math.floor(db.fadeAlpha * 100 + 0.5) .. "%)") or "끔"))
+    elseif cmd == "찍기" or cmd == "pin" then
+        -- /lmap 찍기 45.3 62.1 : 지금 있는 지역에 핀
+        local x, y = ParseXY(arg)
+        local m = C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+        if not x then Print("/lmap 찍기 45.3 62.1 처럼 써 주세요") elseif m then PinAt(m, x, y) end
     elseif cmd == "좌표" or cmd == "coords" then
         db.coords = not db.coords
-        if coords then coords:SetShown(db.coords) end
+        if coords then coords:SetShown(db.coords); if coords.hdr then coords.hdr:SetShown(db.coords) end end
         Print("좌표 줄 " .. (db.coords and "켬" or "끔"))
     elseif cmd == "레벨" or cmd == "levels" then
         db.levels = not db.levels

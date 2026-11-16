@@ -451,6 +451,17 @@ local MODULES = {
               options = { { "가로", "row" }, { "세로", "col" }, { "2×2", "grid" } },
               get = function() return ns.db.partyLayout or "row" end,
               set = function(v) ns.db.partyLayout = v; PartyCells() end },
+            { t = "seg", label = "파티 인원", hint = "5인 = 내 칸도 같이 (분홍 테) · 2×2면 탱커 칸이 위에 넓게",
+              options = { { "4인 · 나 빼고", "four" }, { "5인 · 나 포함", "five" } },
+              get = function() return ns.db.partyFive and "five" or "four" end,
+              set = function(v) ns.db.partyFive = (v == "five"); if ns.ApplyPartyFive then ns:ApplyPartyFive() end end },
+            { t = "seg", label = "내 칸 자리", hint = "5인일 때 · 가로면 맨 왼쪽 / 맨 오른쪽",
+              options = { { "맨 위", "top" }, { "맨 아래", "bottom" } },
+              get = function() return ns.db.partyMePos or "top" end,
+              set = function(v) ns.db.partyMePos = v; if ns.ApplyPartyFive then ns:ApplyPartyFive() end end },
+            { t = "toggle", label = "해제할 디버프 알림", hint = "내가 풀 수 있는 디버프: 왼쪽 세로 줄 + 아이콘 링 맥박 (종류별 색)",
+              get = function() return ns.db.partyDispelFx ~= false end,
+              set = function(v) ns.db.partyDispelFx = v and true or false; PartyCells() end },
             { t = "toggle", label = "버프 · 디버프 보이기", hint = "내가 건 버프 (오른쪽 위) · 해제할 디버프 (오른쪽 아래)",
               get = function() return ns.db.partyAuras ~= false end,
               set = function(v) ns.db.partyAuras = v and true or false; PartyCells() end },
@@ -1487,6 +1498,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.31", "파티 5인 · 해제 알림 · 주사위 토끼", "직업 아이콘 · 역할 배지 · 전투 중 금빛 토끼 귀" },
     { "1.3.30", "화살통 칸에 남은 화살", "세로 게이지 · 200발 노랑 · 50발 빨강" },
     { "1.3.29", "르엘 주사위 창 · 토끼 추천 · 블랙리스트", "파티 인사 말풍선 · 던전 퀘 보고 모드" },
     { "1.3.28", "주술사 토템 세트 (Q 한 키) · 토템 칸", "펫 창 크기 · 펫 만족도 · 가방 등급 테 · 던전 카드" },

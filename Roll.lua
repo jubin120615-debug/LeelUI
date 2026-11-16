@@ -22,8 +22,8 @@ ns.RollDB = DB
 
 local GetItemInfo = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo
 local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or _G.GetItemInfoInstant
-local W, PADX = 204, 8
-local CARD_H, PILL_H = 92, 24
+local W, PADX = 230, 8   -- 아코디언 폭 (티켓이 너무 길지 않게)
+local CARD_H, PILL_H = 92, 30   -- 접힌 줄 높이
 local PW = (W - 6) / 2   -- 접힌 반쪽 알약 폭
 local PINK, GOLD, GREY = { 1, 0.561, 0.639 }, { 0.953, 0.773, 0.353 }, { 0.29, 0.227, 0.216 }
 local TXT_UP, TXT_SIDE, TXT_NO = { 0.56, 0.91, 0.60 }, { 0.953, 0.773, 0.353 }, { 1, 0.60, 0.66 }
@@ -307,18 +307,31 @@ local function Ticket(fr, r, stripW)
     local t = {}
     t.rim = ns.RoundRect(fr, r, TK_RIM, "BACKGROUND", -1, -1)
     t.bg = ns.RoundRect(fr, r, TK_BG, "BACKGROUND", 0, 0); t.bg:SetColor(TK_BG, 0.97)
-    t.strip = fr:CreateTexture(nil, "BORDER"); t.strip:SetTexture(ns.WHITE)
-    t.strip:SetPoint("TOPLEFT", 1, -r * 0.5); t.strip:SetPoint("BOTTOMLEFT", 1, r * 0.5); t.strip:SetWidth(stripW or 4)
+    -- 등급 색 (C안): 왼쪽에서 은은하게 번지는 빛 + 위아래가 흐려지는 가는 줄
+    t.wash = fr:CreateTexture(nil, "BORDER"); t.wash:SetTexture(ns.WHITE)
+    t.wash:SetPoint("TOPLEFT", 1.5, -1.5); t.wash:SetPoint("BOTTOMLEFT", 1.5, 1.5); t.wash:SetWidth(90)
+    t.strip = fr:CreateTexture(nil, "BORDER", nil, 1); t.strip:SetTexture(ns.WHITE)
+    t.strip:SetPoint("TOPLEFT", 2.5, -r * 0.8); t.strip:SetPoint("BOTTOMLEFT", 2.5, r * 0.8); t.strip:SetWidth(2)
+    t.strip2 = fr:CreateTexture(nil, "BORDER", nil, 1); t.strip2:SetTexture(ns.WHITE)
+    t.strip2:SetPoint("BOTTOMLEFT", t.strip, "TOPLEFT", 0, 0); t.strip2:SetWidth(2); t.strip2:SetHeight(8)
+    t.strip3 = fr:CreateTexture(nil, "BORDER", nil, 1); t.strip3:SetTexture(ns.WHITE)
+    t.strip3:SetPoint("TOPLEFT", t.strip, "BOTTOMLEFT", 0, 0); t.strip3:SetWidth(2); t.strip3:SetHeight(8)
     -- 양옆 홈 (추첨권처럼 파인 자리)
     t.notch = {}
     for i, side in ipairs({ "LEFT", "RIGHT" }) do
         local rr = fr:CreateTexture(nil, "BORDER", nil, 2); rr:SetTexture(ns.MEDIA .. "circle")
         rr:SetSize(10, 10); rr:SetPoint("CENTER", fr, side, 0, 0); rr:SetVertexColor(TK_RIM[1], TK_RIM[2], TK_RIM[3], 1)
         local n = fr:CreateTexture(nil, "BORDER", nil, 3); n:SetTexture(ns.MEDIA .. "circle")
-        n:SetSize(7, 7); n:SetPoint("CENTER", rr); n:SetVertexColor(0.06, 0.045, 0.05, 1)
+        n:SetSize(7, 7); n:SetPoint("CENTER", rr); n:SetVertexColor(0.137, 0.09, 0.098, 1)   -- 칸 색과 거의 같게
         t.notch[#t.notch + 1] = rr; t.notch[#t.notch + 1] = n
     end
-    function t:Strip(c) self.strip:SetVertexColor(c[1], c[2], c[3], 1) end
+    t.wash:SetVertexColor(1, 1, 1, 0); t.strip:SetVertexColor(1, 1, 1, 0); t.strip2:SetVertexColor(1, 1, 1, 0); t.strip3:SetVertexColor(1, 1, 1, 0)
+    function t:Strip(c)
+        self.strip:SetVertexColor(c[1], c[2], c[3], 0.55)
+        pcall(self.strip2.SetGradient, self.strip2, "VERTICAL", CreateColor(c[1], c[2], c[3], 0.55), CreateColor(c[1], c[2], c[3], 0))
+        pcall(self.strip3.SetGradient, self.strip3, "VERTICAL", CreateColor(c[1], c[2], c[3], 0), CreateColor(c[1], c[2], c[3], 0.55))
+        pcall(self.wash.SetGradient, self.wash, "HORIZONTAL", CreateColor(c[1], c[2], c[3], 0.20), CreateColor(c[1], c[2], c[3], 0))
+    end
     function t:Notch(on) for _, n in ipairs(self.notch) do n:SetShown(on) end end
     return t
 end
@@ -391,6 +404,8 @@ local function PaintBadge()
         if e and not e.mine and not e.done then n = n + 1; if e.rec == "need" then hot = true end end
     end
     badge.count:SetShown(n > 0); badge.countFs:SetText(n)
+    if badge.urgent and n > 0 then return end   -- 10초 남음 모션 중
+    if badge.popAg and badge.popAg:IsPlaying() then return end
     if hot or unlock then badge.glow:Show(); badge.ag:Play() else badge.glow:Hide(); badge.ag:Stop() end
     if n > 0 and not badge.hopping then
         badge.hopping = true
@@ -409,6 +424,14 @@ function ns.RollUnlock(on)
     if on then P("토끼 단추를 끌어서 옮겨요 (놓으면 끝). 휠 = 크기. 평소엔 파티 · 공격대에서만 보여요.") end
 end
 
+function ns.RollBadgePop()
+    if not (badge and badge:IsShown()) then return end
+    badge.idleAg:Stop(); badge.hopAg:Stop(); badge.hopping = false
+    badge.popAg:Stop(); badge.popAg:Play(); badge.flashAg:Stop(); badge.flashAg:Play()
+    C_Timer.After(0.45, function() if badge.count:IsShown() then badge.countAg:Play() end end)
+    badge.popAg:SetScript("OnFinished", function() PaintBadge() end)
+end
+
 local function MakeBadge()
     if badge then return badge end
     local b = CreateFrame("Button", "LeelUI_RollBadge", UIParent)
@@ -418,20 +441,27 @@ local function MakeBadge()
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     b:RegisterForDrag("LeftButton")
     b.glow = b:CreateTexture(nil, "BACKGROUND", nil, -2)
-    b.glow:SetTexture(ns.MEDIA .. "circle"); b.glow:SetBlendMode("ADD")
-    b.glow:SetPoint("CENTER"); b.glow:SetSize(78, 78); b.glow:SetVertexColor(1, 0.561, 0.639, 1); b.glow:Hide()
+    b.glow:SetTexture(ns.MEDIA .. "soft_glow"); b.glow:SetBlendMode("ADD")
+    b.glow:SetPoint("CENTER", 0, -2); b.glow:SetSize(96, 96); b.glow:SetVertexColor(1, 0.561, 0.639, 1); b.glow:Hide()
     local ag = b.glow:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
     local al = ag:CreateAnimation("Alpha"); al:SetFromAlpha(0.2); al:SetToAlpha(0.75); al:SetDuration(0.7); al:SetSmoothing("IN_OUT")
     b.ag = ag
     -- 보물상자 토끼 그림 (테두리 · 배경 포함 한 장)
     b.icon = b:CreateTexture(nil, "ARTWORK")
-    b.icon:SetTexture(ns.MEDIA .. "roll_badge"); b.icon:SetSize(50, 50); b.icon:SetPoint("CENTER", 0, 0)
+    b.icon:SetTexture(ns.MEDIA .. "roll_badge_dice"); b.icon:SetSize(50, 50); b.icon:SetPoint("CENTER", 0, 0)   -- 유리 주사위 토끼
+    -- 늘 은은한 뒤 빛 (유리 느낌)
+    b.aura = b:CreateTexture(nil, "BACKGROUND", nil, -3); b.aura:SetTexture(ns.MEDIA .. "soft_glow"); b.aura:SetBlendMode("ADD")
+    b.aura:SetPoint("CENTER", 0, -2); b.aura:SetSize(80, 80); b.aura:SetVertexColor(1, 0.561, 0.639, 0.25)
     -- 굴릴 템 수 (빨간 동그라미)
     b.count = CreateFrame("Frame", nil, b); b.count:SetSize(20, 20); b.count:SetPoint("CENTER", b, "TOPRIGHT", -4, -4)
     b.count:SetFrameLevel(b:GetFrameLevel() + 3)
     local cr = b.count:CreateTexture(nil, "ARTWORK"); cr:SetTexture(ns.MEDIA .. "circle"); cr:SetPoint("CENTER"); cr:SetSize(24, 24); cr:SetVertexColor(0.165, 0.122, 0.114)
     local cd = b.count:CreateTexture(nil, "ARTWORK", nil, 1); cd:SetTexture(ns.MEDIA .. "circle"); cd:SetAllPoints(); cd:SetVertexColor(1, 0.353, 0.431)
     b.countFs = b.count:CreateFontString(nil, "OVERLAY"); b.countFs:SetFont(ns.NUM or ns.FONT, 14, ""); b.countFs:SetPoint("CENTER", 0, 0)
+    local cag = b.count:CreateAnimationGroup()
+    local c1 = cag:CreateAnimation("Scale"); c1:SetScale(1.4, 1.4); c1:SetDuration(0.15); c1:SetOrder(1); c1:SetSmoothing("OUT")
+    local c2 = cag:CreateAnimation("Scale"); c2:SetScale(1 / 1.4, 1 / 1.4); c2:SetDuration(0.2); c2:SetOrder(2); c2:SetSmoothing("IN")
+    b.countAg = cag
     b.count:Hide()
     b.hop = b.icon
     -- 굴릴 게 있으면 콩콩
@@ -441,14 +471,33 @@ local function MakeBadge()
     local rest = hag:CreateAnimation("Alpha"); rest:SetFromAlpha(1); rest:SetToAlpha(1); rest:SetDuration(1.2); rest:SetOrder(3)
     b.hopAg = hag
     -- 평소: 4초마다 살짝 콩 + 기울기 (숨 쉬듯)
+    -- 평소: 3초마다 살짝 떠올랐다 내려오기 (숨쉬기)
     local iag = b.icon:CreateAnimationGroup(); iag:SetLooping("REPEAT")
-    local w0 = iag:CreateAnimation("Alpha"); w0:SetFromAlpha(1); w0:SetToAlpha(1); w0:SetDuration(3.2); w0:SetOrder(1)
-    local i1 = iag:CreateAnimation("Translation"); i1:SetOffset(0, 3); i1:SetDuration(0.16); i1:SetOrder(2); i1:SetSmoothing("OUT")
-    local r1 = iag:CreateAnimation("Rotation"); r1:SetDegrees(6); r1:SetDuration(0.16); r1:SetOrder(2)
-    local i2 = iag:CreateAnimation("Translation"); i2:SetOffset(0, -3); i2:SetDuration(0.16); i2:SetOrder(3); i2:SetSmoothing("IN")
-    local r2 = iag:CreateAnimation("Rotation"); r2:SetDegrees(-12); r2:SetDuration(0.22); r2:SetOrder(3)
-    local r3 = iag:CreateAnimation("Rotation"); r3:SetDegrees(6); r3:SetDuration(0.18); r3:SetOrder(4)
+    local i1 = iag:CreateAnimation("Translation"); i1:SetOffset(0, 4); i1:SetDuration(1.5); i1:SetOrder(1); i1:SetSmoothing("IN_OUT")
+    local i2 = iag:CreateAnimation("Translation"); i2:SetOffset(0, -4); i2:SetDuration(1.5); i2:SetOrder(2); i2:SetSmoothing("IN_OUT")
     b.idleAg = iag
+    -- 템이 나왔을 때: 폴짝 뛰며 한 바퀴 + 뒤 빛 퍼짐 + 숫자 톡
+    local pag = b.icon:CreateAnimationGroup()
+    local p1 = pag:CreateAnimation("Translation"); p1:SetOffset(0, 14); p1:SetDuration(0.22); p1:SetOrder(1); p1:SetSmoothing("OUT")
+    local pr1 = pag:CreateAnimation("Rotation"); pr1:SetDegrees(-180); pr1:SetDuration(0.22); pr1:SetOrder(1)
+    local p2 = pag:CreateAnimation("Translation"); p2:SetOffset(0, -14); p2:SetDuration(0.22); p2:SetOrder(2); p2:SetSmoothing("IN")
+    local pr2 = pag:CreateAnimation("Rotation"); pr2:SetDegrees(-180); pr2:SetDuration(0.22); pr2:SetOrder(2)
+    local p3 = pag:CreateAnimation("Translation"); p3:SetOffset(0, 4); p3:SetDuration(0.1); p3:SetOrder(3); p3:SetSmoothing("OUT")
+    local p4 = pag:CreateAnimation("Translation"); p4:SetOffset(0, -4); p4:SetDuration(0.1); p4:SetOrder(4); p4:SetSmoothing("IN")
+    b.popAg = pag
+    local fl = b:CreateTexture(nil, "BACKGROUND", nil, -1); fl:SetTexture(ns.MEDIA .. "soft_glow"); fl:SetBlendMode("ADD")
+    fl:SetPoint("CENTER", 0, -2); fl:SetSize(110, 110); fl:SetVertexColor(1, 0.7, 0.78, 1); fl:SetAlpha(0)
+    local fag = fl:CreateAnimationGroup()
+    local fa1 = fag:CreateAnimation("Alpha"); fa1:SetFromAlpha(0); fa1:SetToAlpha(1); fa1:SetDuration(0.25); fa1:SetOrder(1)
+    local fa2 = fag:CreateAnimation("Alpha"); fa2:SetFromAlpha(1); fa2:SetToAlpha(0); fa2:SetDuration(0.6); fa2:SetOrder(2)
+    b.flashAg = fag
+    -- 10초 남음: 부르르 떨기
+    local sag = b.icon:CreateAnimationGroup(); sag:SetLooping("REPEAT")
+    local s1 = sag:CreateAnimation("Translation"); s1:SetOffset(-2.5, 0); s1:SetDuration(0.05); s1:SetOrder(1)
+    local s2 = sag:CreateAnimation("Translation"); s2:SetOffset(5, 0); s2:SetDuration(0.1); s2:SetOrder(2)
+    local s3 = sag:CreateAnimation("Translation"); s3:SetOffset(-2.5, 0); s3:SetDuration(0.05); s3:SetOrder(3)
+    local s4 = sag:CreateAnimation("Alpha"); s4:SetFromAlpha(1); s4:SetToAlpha(1); s4:SetDuration(0.2); s4:SetOrder(4)
+    b.shakeAg = sag
     -- 반짝이 둘 (상자 위 · 오른쪽), 번갈아 반짝
     b.sparks = {}
     for i, pt in ipairs({ { 14, 12, 12, 0 }, { -15, 6, 9, 1.3 } }) do
@@ -468,6 +517,29 @@ local function MakeBadge()
     -- 마우스 올리면 살짝 커지기 (부드럽게)
     b.size, b.target = 50, 50
     b:SetScript("OnUpdate", function(s2, el)
+        -- 10초 남은 템이 있으면: 뒤 빛 빨강 깜빡 + 부르르
+        s2.uT = (s2.uT or 0) + el
+        if s2.uT > 0.25 then
+            s2.uT = 0
+            local urgent = false
+            for _, f in ipairs(active) do
+                local e = f.e
+                if e and not e.mine and not e.done then
+                    local left
+                    if e.test then left = (e.endAt - GetTime()) * 1000 elseif GetLootRollTimeLeft then left = tonumber(GetLootRollTimeLeft(e.id)) end
+                    if left and left > 0 and left <= 10000 then urgent = true break end
+                end
+            end
+            if urgent ~= s2.urgent then
+                s2.urgent = urgent
+                if urgent then
+                    s2.glow:SetVertexColor(1, 0.25, 0.35, 1); s2.glow:Show(); s2.ag:Play()
+                    s2.hopAg:Stop(); s2.hopping = false; s2.shakeAg:Play()
+                else
+                    s2.glow:SetVertexColor(1, 0.561, 0.639, 1); s2.shakeAg:Stop(); PaintBadge()
+                end
+            end
+        end
         if math.abs(s2.size - s2.target) < 0.2 then return end
         s2.size = s2.size + (s2.target - s2.size) * math.min(1, el * 14)
         s2.icon:SetSize(s2.size, s2.size)
@@ -491,6 +563,7 @@ local function MakeBadge()
     end)
     b:SetScript("OnEnter", function(s)
         s.target = 56
+        s.icon:SetRotation(math.rad(8)); s.aura:SetVertexColor(1, 0.561, 0.639, 0.6)   -- 마우스: 살짝 기울고 뒤 빛 밝게
         GameTooltip:SetOwner(s, "ANCHOR_LEFT")
         GameTooltip:AddLine("|cfff2b3c2르엘 주사위|r")
         GameTooltip:AddLine("클릭: 기록장 · 블랙리스트 · 미리 보기 · 설정", 0.85, 0.78, 0.76)
@@ -498,7 +571,7 @@ local function MakeBadge()
         GameTooltip:AddLine("끌기: 옮기기 · Shift + 휠: 크기 (" .. (DB().scale or 100) .. "%)", 0.85, 0.78, 0.76)
         GameTooltip:Show()
     end)
-    b:SetScript("OnLeave", function(s) s.target = 50; GameTooltip:Hide() end)
+    b:SetScript("OnLeave", function(s) s.target = 50; s.icon:SetRotation(0); s.aura:SetVertexColor(1, 0.561, 0.639, 0.25); GameTooltip:Hide() end)
     b:SetScript("OnMouseDown", function(s) s.target = 46 end)
     b:SetScript("OnMouseUp", function(s) s.target = s:IsMouseOver() and 56 or 50 end)
     badge = b
@@ -536,19 +609,23 @@ Anchor = function()
         local b = CreateFrame("Button", nil, bulk)
         b:SetHeight(20)
         local gold = col == GOLD
-        b.bg = ns.RoundRect(b, 7, TK_BG, "BACKGROUND", 0, 0); b.bg:SetColor(TK_BG, 0.97)
-        b.rim = ns.RoundRect(b, 7, gold and GOLD or TK_RIM, "BACKGROUND", -1, -1)
-        b.fs = ns.Font(b, 10.5, gold and GOLD or { 0.85, 0.78, 0.76 }); b.fs:SetPoint("CENTER")
-        b.fs:SetText(text); b:SetWidth(b.fs:GetStringWidth() + 20)
+        -- 유리 미니멀: 글자 + 밑줄만
+        b.fs = ns.Font(b, 11, gold and GOLD or { 0.85, 0.80, 0.78 }); b.fs:SetPoint("CENTER", 0, 1)
+        b.fs:SetText(text); b:SetWidth(b.fs:GetStringWidth() + 8)
+        b.ul = b:CreateTexture(nil, "ARTWORK"); b.ul:SetTexture(ns.WHITE); b.ul:SetHeight(1.5)
+        b.ul:SetPoint("BOTTOMLEFT", 4, 1); b.ul:SetPoint("BOTTOMRIGHT", -4, 1)
+        local uc = gold and GOLD or { 1, 1, 1 }
+        b.ul:SetVertexColor(uc[1], uc[2], uc[3], gold and 1 or 0.3)
         b:SetScript("OnClick", fn)
-        b:SetScript("OnEnter", function() b.bg:SetColor({ 0.24, 0.17, 0.18 }, 1) end)
-        b:SetScript("OnLeave", function() b.bg:SetColor(TK_BG, 0.97) end)
+        b:SetScript("OnEnter", function() b.ul:SetVertexColor(uc[1], uc[2], uc[3], 1) end)
+        b:SetScript("OnLeave", function() b.ul:SetVertexColor(uc[1], uc[2], uc[3], gold and 1 or 0.3) end)
         return b
     end
-    bulk.rec = Pill("추천대로 누르기", GOLD, function() ns.RollAll("rec") end)
+    bulk.rec = Pill("추천대로", GOLD, function() ns.RollAll("rec") end)
     bulk.pass = Pill("모두 포기", { 0.85, 0.78, 0.76 }, function() ns.RollAll("pass") end)
-    bulk.rec:SetPoint("TOPLEFT", bulk, "TOPLEFT", 0, 0); bulk.rec:SetWidth(PW)
-    bulk.pass:SetPoint("TOPLEFT", bulk, "TOPLEFT", PW + 6, 0); bulk.pass:SetWidth(PW)
+    bulk.rec:SetPoint("TOPLEFT", bulk, "TOPLEFT", 0, 0)
+    bulk.rec:ClearAllPoints(); bulk.rec:SetPoint("TOPLEFT", bulk, "TOPLEFT", 2, 0)
+    bulk.pass:SetPoint("LEFT", bulk.rec, "RIGHT", 10, 0)
     return anchor
 end
 
@@ -646,23 +723,19 @@ local function SegBtn(card, col, tex, label)
     b.shine = b:CreateTexture(nil, "BORDER", nil, 1); b.shine:SetTexture(ns.WHITE); b.shine:SetHeight(1)
     b.shine:SetPoint("TOPLEFT", 1, 0); b.shine:SetPoint("TOPRIGHT", -1, 0); b.shine:SetVertexColor(1, 0.96, 0.78, 0.9)
     b.ic = b:CreateTexture(nil, "ARTWORK"); b.ic:SetTexture(ns.MEDIA .. tex); b.ic:SetSize(17, 17)
+    -- 유리 미니멀: 글자 탭 (추천 칸만 금색 + 밑줄 + ★)
+    b.ul = b:CreateTexture(nil, "ARTWORK"); b.ul:SetTexture(ns.WHITE); b.ul:SetHeight(2.5)
+    b.ul:SetPoint("BOTTOMLEFT", 6, 0); b.ul:SetPoint("BOTTOMRIGHT", -6, 0); b.ul:Hide()
     function b:SetLabel(t, icon)
-        self.ic:ClearAllPoints()
-        if not self.fs then self.ic:SetPoint("CENTER"); return end
-        self.fs:SetText(t); self.fs:ClearAllPoints()
-        if icon == false then
-            self.ic:Hide(); self.fs:SetPoint("CENTER", 0, 0)
-        else
-            self.ic:Show()
-            self.ic:SetPoint("RIGHT", self, "CENTER", -2 - self.fs:GetStringWidth() / 2 + 6, 0)
-            self.fs:SetPoint("LEFT", self.ic, "RIGHT", 3, 0)
-        end
+        self.ic:Hide()
+        self.curLabel = t or self.curLabel
+        if not self.fs then self.fs = ns.Font(self, 12); self.fs:SetShadowColor(0, 0, 0, 0) end
+        self.fs:ClearAllPoints(); self.fs:SetPoint("CENTER", 0, 1)
+        self.fs:SetText((self.curLabel or "포기") .. (self.isRec and " ★" or ""))
     end
-    if label then
-        b.fs = ns.Font(b, 11.5); b.fs:SetShadowColor(0, 0, 0, 0)
-        b.label = label
-    end
-    b:SetLabel(label)
+    b.fs = ns.Font(b, 12); b.fs:SetShadowColor(0, 0, 0, 0)
+    b.label = label
+    b:SetLabel(label or "포기")
     b.tip = label or "포기"
     b:SetScript("OnEnter", function(s2)
         s2.hov = true; ns.RollSegPaint(s2)
@@ -678,23 +751,14 @@ local function SegBtn(card, col, tex, label)
 end
 -- 추천 칸 = 색으로 꽉 채움 + 흰 테, 나머지 = 진한 바탕 + 색 글씨
 function ns.RollSegPaint(b)
-    local c = b.col
+    b.fill:SetAlpha(0); b.sep:Hide(); b.shine:Hide(); b.ic:Hide()
     if b.isRec then
-        -- 추천 칸 = 금박 (위 밝게 · 아래 진하게)
-        local top = { math.min(1, c[1] + 0.12), math.min(1, c[2] + 0.18), math.min(1, c[3] + 0.25) }
-        pcall(b.fill.SetGradient, b.fill, "VERTICAL", CreateColor(c[1] * 0.92, c[2] * 0.82, c[3] * 0.7, 1), CreateColor(top[1], top[2], top[3], 1))
-        b.shine:Show()
-        if b.fs then b.fs:SetTextColor(C.ink[1], C.ink[2], C.ink[3]); b.fs:SetShadowColor(0, 0, 0, 0) end
+        b.fs:SetTextColor(1, 0.82, 0.35); b.ul:SetVertexColor(1, 0.82, 0.35, 1); b.ul:Show()
     else
-        local k = b.hov and 0.08 or 0
-        pcall(b.fill.SetGradient, b.fill, "VERTICAL", CreateColor(0.2 + k, 0.15 + k, 0.16 + k, 1), CreateColor(0.23 + k, 0.17 + k, 0.18 + k, 1))
-        b.shine:Hide()
-        if b.fs then
-            if c == GREY then b.fs:SetTextColor(0.85, 0.78, 0.76) else b.fs:SetTextColor(c[1], c[2], c[3]) end
-            b.fs:SetShadowColor(0, 0, 0, 0.85)
-        end
+        local k = b.hov and 1 or (b.col == GREY and 0.45 or 0.72)
+        b.fs:SetTextColor(k, k, k); b.ul:SetShown(b.hov and true or false); b.ul:SetVertexColor(1, 1, 1, 0.35)
     end
-    b.ic:SetVertexColor(1, 1, 1)
+    b:SetLabel()
 end
 
 local function MakeCard(i)
@@ -726,7 +790,7 @@ local function MakeCard(i)
     -- 아이콘 (둘레 = 등급 색)
     local ic = CreateFrame("Button", nil, f)
     ic:SetSize(28, 28); ic:SetPoint("TOPLEFT", PADX, -6)
-    ic.halo = ic:CreateTexture(nil, "BACKGROUND", nil, -2); ic.halo:SetTexture(ns.MEDIA .. "circle")
+    ic.halo = ic:CreateTexture(nil, "BACKGROUND", nil, -2); ic.halo:SetTexture(ns.MEDIA .. "soft_glow")
     ic.halo:SetBlendMode("ADD"); ic.halo:SetPoint("CENTER"); ic.halo:SetSize(42, 42)
     ic.rim = ns.RoundRect(ic, 6, { 1, 1, 1 }, "BACKGROUND", 0, -2)
     ic.tex = ic:CreateTexture(nil, "ARTWORK"); ic.tex:SetAllPoints(); ic.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -740,6 +804,18 @@ local function MakeCard(i)
     end)
     ic:SetScript("OnLeave", function() GameTooltip:Hide() end)
     ic:SetScript("OnClick", function() if f.e and f.e.link and HandleModifiedItemClick then HandleModifiedItemClick(f.e.link) end end)
+    -- 유리 미니멀: 아이콘은 동그랗게 + 둘레 분홍 링 = 남은 시간
+    local icm = ic:CreateMaskTexture()
+    icm:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); icm:SetAllPoints(ic.tex)
+    ic.tex:AddMaskTexture(icm)
+    ic.track = ic:CreateTexture(nil, "BACKGROUND", nil, 1); ic.track:SetTexture(ns.MEDIA .. "ring_thin")
+    ic.track:SetPoint("TOPLEFT", -4, 4); ic.track:SetPoint("BOTTOMRIGHT", 4, -4); ic.track:SetVertexColor(1, 1, 1, 0.12)
+    local cd = CreateFrame("Cooldown", nil, ic, "CooldownFrameTemplate")
+    cd:SetPoint("TOPLEFT", -4, 4); cd:SetPoint("BOTTOMRIGHT", 4, -4)
+    cd:SetSwipeTexture(ns.MEDIA .. "ring_thin"); cd:SetSwipeColor(1, 0.561, 0.639, 1)
+    cd:SetReverse(true); cd:SetDrawEdge(false); cd:SetDrawBling(false)
+    if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
+    ic.cd = cd
     f.ic = ic
     f.name = ns.Font(f, 12); f.name:SetPoint("TOPLEFT", ic, "TOPRIGHT", 8, 1)
     f.name:SetWidth(W - 28 - PADX * 2 - 8 - 96); f.name:SetJustifyH("LEFT"); f.name:SetWordWrap(false)
@@ -787,7 +863,16 @@ local function MakeCard(i)
     f.bar:SetStatusBarTexture(ns.WHITE); f.bar:SetMinMaxValues(0, 1)
     f.bar:SetPoint("BOTTOMLEFT", PADX, 4); f.bar:SetPoint("BOTTOMRIGHT", -PADX, 4); f.bar:SetHeight(3)
     f.barbg = f.bar:CreateTexture(nil, "BACKGROUND"); f.barbg:SetAllPoints(); f.barbg:SetColorTexture(1, 1, 1, 0.16)
-    f.secs = f:CreateFontString(nil, "OVERLAY"); f.secs:SetFont(ns.NUM or ns.FONT, 12, ""); f.secs:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADX, -6)
+    f.secs = f:CreateFontString(nil, "OVERLAY"); f.secs:SetFont(ns.NUM or ns.FONT, 20, ""); f.secs:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADX, -6)
+    -- 유리 바탕 · 가는 테 · 등급 띠/구멍 없음
+    f.tk.bg:SetColor({ 0.07, 0.047, 0.047 }, 0.78)
+    f.tk.rim:SetColor({ 1, 1, 1 }, 0.12)
+    f.tk.Strip = function() end
+    f.tk:Notch(false); f.tk.Notch = function() end
+    f.segrim:SetColor({ 1, 1, 1 }, 0)
+    f.sepLine = f:CreateTexture(nil, "BORDER"); f.sepLine:SetTexture(ns.WHITE); f.sepLine:SetHeight(1)
+    f.sepLine:SetPoint("BOTTOMLEFT", f.segbox, "TOPLEFT", -2, 1); f.sepLine:SetPoint("BOTTOMRIGHT", f.segbox, "TOPRIGHT", 2, 1)
+    f.sepLine:SetVertexColor(1, 1, 1, 0.12)
     f:SetScript("OnUpdate", function(s, el)
         s.t = (s.t or 0) + el
         if s.t < 0.1 then return end
@@ -876,9 +961,23 @@ local function Paint(f)
     f.isPill = pill
     f.ic.tex:SetTexture(e.texture)
     f.ic.count:SetText((not pill and (e.count or 1) > 1) and e.count or "")
-    f.ic.rim:SetColor(qc, pill and 0 or 1)
-    f.ic.halo:SetShown((e.quality or 0) >= 3 and not pill)
-    f.ic.halo:SetVertexColor(qc[1], qc[2], qc[3], 0.22)
+    f.ic.rim:SetColor({ 0.10, 0.07, 0.06 }, 0)
+    f.ic.halo:SetShown(false)
+    -- 아이콘 둘레 링 = 남은 시간 (고른 템은 링 없이)
+    if not chosen and not e.done then
+        local left
+        if e.test then left = math.max(0, (e.endAt - GetTime()) * 1000)
+        elseif GetLootRollTimeLeft then left = tonumber(GetLootRollTimeLeft(e.id)) or 0 end
+        local total = (e.total or 0) / 1000
+        if total > 0 and left then
+            f.ic.cd:SetCooldown(GetTime() - (total - left / 1000), total); f.ic.cd:Show()
+        end
+        f.ic.track:Show()
+    else
+        f.ic.cd:Clear(); f.ic.cd:Hide(); f.ic.track:Hide()
+    end
+    f.ic.halo:SetSize(pill and 34 or 60, pill and 34 or 60)
+    f.ic.halo:SetVertexColor(qc[1], qc[2], qc[3], pill and 0.30 or 0.40)
     local isz = pill and 16 or 34
     f.ic:SetSize(isz, isz)
     f.ic:ClearAllPoints()
@@ -887,7 +986,7 @@ local function Paint(f)
     local off = ban and 20 or 0
     if pill then f.ic:SetPoint("LEFT", f, "LEFT", 9, 0) else f.ic:SetPoint("TOPLEFT", PADX + 4, -(PADX + off)) end
     f.secs:ClearAllPoints()
-    if ban then f.secs:SetPoint("RIGHT", f.banBg, "RIGHT", -6, 0) else f.secs:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADX, -6) end
+    f.secs:SetPoint("RIGHT", f, "TOPRIGHT", -PADX - 2, -(PADX + off + 17))   -- 아이콘 옆 큰 숫자
     -- 펼친 카드 부분
     f.name:SetShown(not pill); f.why:SetShown(not pill); f.bar:Hide(); f.secs:SetShown(not pill)
     f.tk:Strip(qc); f.segbox:SetShown(not pill)
@@ -896,14 +995,15 @@ local function Paint(f)
     f.mine:Hide(); f.hint:Hide(); f.chev:Hide()
     if f.rows then for _, r in ipairs(f.rows) do r:Hide() end end
     f.ptxt:SetShown(pill)
+    if f.ptl and not pill then f.ptl:Hide(); f.ptlFill:Hide() end
     if not pill then
         f:SetSize(W, CARD_H)
-        f.name:ClearAllPoints(); f.name:SetPoint("TOPLEFT", f.ic, "TOPRIGHT", 8, 1)
-        f.name:SetWidth(W - PADX * 2 - isz - 8 - 4 - 18)
+        f.name:ClearAllPoints(); f.name:SetPoint("TOPLEFT", f.ic, "TOPRIGHT", 11, 1)
+        f.name:SetWidth(W - PADX * 2 - isz - 8 - 4 - 34)
         f.name:SetWordWrap(true); if f.name.SetMaxLines then f.name:SetMaxLines(2) end
         f.name:SetText(e.name or ""); f.name:SetTextColor(qc[1], qc[2], qc[3])
         f.why:ClearAllPoints(); f.why:SetPoint("TOPLEFT", f.name, "BOTTOMLEFT", 0, -2)
-        f.why:SetWidth(W - PADX * 2 - isz - 8 - 4)
+        f.why:SetWidth(W - PADX * 2 - isz - 8 - 4 - 30)
         f.why:SetWordWrap(true); if f.why.SetMaxLines then f.why:SetMaxLines(3) end
         f.why:SetJustifyV("TOP")
         local col = e.whyCol or TXT_SIDE
@@ -918,27 +1018,41 @@ local function Paint(f)
         -- 내 장비가 아니면: 입찰은 작고 흐리게 · "차비로 양보"를 넓게
         local inner = W - PADX * 2 - 3 - 30
         if e.notMine then
-            f.need:SetWidth(40); f.need:SetLabel("입찰", false); f.greed:SetLabel("차비로 양보")
+            f.need:SetWidth(40); f.pass:SetWidth(44); f.need:SetLabel("입찰", false); f.greed:SetLabel("차비로 양보")
             f.need:SetAlpha(can and 0.45 or 0.3)
         else
-            f.need:SetWidth(inner / 2); f.need:SetLabel("입찰"); f.greed:SetLabel("차비")
+            local third = (W - PADX * 2 - 4) / 3   -- 탭 세 개 같은 폭
+            f.need:SetWidth(third); f.pass:SetWidth(third); f.need:SetLabel("입찰"); f.greed:SetLabel("차비")
         end
         f.segbox:ClearAllPoints(); f.segbox:SetPoint("TOPLEFT", f, "TOPLEFT", PADX + 2, -(segY + 4)); f.segbox:SetPoint("RIGHT", f, "RIGHT", -PADX, 0)
         -- 뜯는 선
         local dw = (W - 28) / #f.dash
-        for i, d in ipairs(f.dash) do d:ClearAllPoints(); d:SetPoint("TOPLEFT", f, "TOPLEFT", 14 + (i - 1) * dw, -(segY - 1)); d:Show() end
+        for _, d in ipairs(f.dash) do d:Hide() end   -- 유리 미니멀: 시간은 아이콘 링
         f:SetHeight(segY + 4 + 26 + 9)
         f.tk:Notch(true)
         return
     end
-    -- 반쪽 알약
-    f:SetSize(PW, PILL_H)
-    f.ptxt:ClearAllPoints(); f.ptxt:SetPoint("LEFT", f.ic, "RIGHT", 5, 0); f.ptxt:SetPoint("RIGHT", f, "RIGHT", -5, 0)
+    -- 접힌 한 줄: 아이콘 · 이름 전체 · 오른쪽 상태 · 꺾쇠 · 줄 아래 남은 시간
+    f:SetSize(W, PILL_H)
+    f.ic:SetSize(20, 20); f.ic:ClearAllPoints(); f.ic:SetPoint("LEFT", f, "LEFT", 9, 0)
+    if not f.ptl then
+        f.ptl = f:CreateTexture(nil, "ARTWORK"); f.ptl:SetTexture(ns.WHITE); f.ptl:SetHeight(2)
+        f.ptl:SetPoint("BOTTOMLEFT", 12, 3); f.ptl:SetPoint("BOTTOMRIGHT", -12, 3)
+        f.ptl:SetVertexColor(0.227, 0.169, 0.157, 1)
+        f.ptlFill = f:CreateTexture(nil, "ARTWORK", nil, 1); f.ptlFill:SetTexture(ns.WHITE); f.ptlFill:SetHeight(2)
+        f.ptlFill:SetPoint("BOTTOMLEFT", f.ptl, "BOTTOMLEFT", 0, 0)
+    end
+    local live = not chosen and not e.done
+    f.ptl:SetShown(false); f.ptlFill:SetShown(false)   -- 시간은 아이콘 링
+    f.hint:ClearAllPoints()
+    if live then f.chev:Show(); f.hint:SetPoint("RIGHT", f.chev, "LEFT", -6, 0) else f.hint:SetPoint("RIGHT", f, "RIGHT", -PADX - 2, 0) end
+    f.ptxt:ClearAllPoints(); f.ptxt:SetPoint("LEFT", f.ic, "RIGHT", 8, 0); f.ptxt:SetPoint("RIGHT", f.hint, "LEFT", -8, 0)
+    f.ptxt:SetText(e.name or ""); f.ptxt:SetTextColor(qc[1], qc[2], qc[3])
     local txt, col
     if not chosen then
-        if e.notMine then txt, col = "내 장비 아님", { 0.72, 0.65, 0.63 }
-        elseif e.rec == "need" then txt, col = "입찰 추천", PINK
-        elseif e.rec == "greed" then txt, col = "차비 추천", GOLD
+        if e.notMine then txt, col = "내 템 아님", { 0.72, 0.65, 0.63 }
+        elseif e.rec == "need" then txt, col = "입찰 ★", { 1, 0.82, 0.35 }
+        elseif e.rec == "greed" then txt, col = "차비 ★", { 1, 0.82, 0.35 }
         else txt, col = "고르기", { 0.72, 0.65, 0.63 } end
     else
         local list = SortedRolls(e)
@@ -953,7 +1067,8 @@ local function Paint(f)
             else txt = e.winner .. " 획득"; col = { 0.72, 0.65, 0.63 } end
         elseif e.allPassed then txt, col = "모두 포기", { 0.62, 0.55, 0.53 } end
     end
-    f.ptxt:SetText(txt); f.ptxt:SetTextColor(col[1], col[2], col[3])
+    f.hint:SetText(txt); f.hint:SetTextColor(col[1], col[2], col[3]); f.hint:Show()
+    f.ptxt:SetWidth(math.max(40, W - 12 - 20 - 8 - 8 - (f.hint:GetStringWidth() or 60) - (live and 22 or 10)))
 end
 
 function ns.RollPillTip(f)
@@ -979,25 +1094,18 @@ local function Relayout()
     Anchor()
     for _, f in ipairs(active) do if f.e then Paint(f) end end
     local y, open = 0, 0
-    -- 펼친 카드 먼저
+    -- 펼친 카드 → 아직 안 고른 템 줄 → 고른 템 (결과 한 줄, 맨 아래로)
+    local function place(f, h) f:ClearAllPoints(); f:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, y); y = y - h - 5 end
     for _, f in ipairs(active) do
-        if f.e and not f.isPill then
-            f:ClearAllPoints(); f:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, y)
-            y = y - f:GetHeight() - 4
-        end
         if f.e and not f.e.mine and not f.e.done then open = open + 1 end
     end
-    -- 나머지는 반쪽 알약 2칸씩
-    local k = 0
+    for _, f in ipairs(active) do if f.e and not f.isPill then place(f, f:GetHeight()) end end
     for _, f in ipairs(active) do
-        if f.e and f.isPill then
-            local col = k % 2
-            f:ClearAllPoints(); f:SetPoint("TOPLEFT", anchor, "TOPLEFT", col * (PW + 6), y)
-            if col == 1 then y = y - PILL_H - 4 end
-            k = k + 1
-        end
+        if f.e and f.isPill and not (f.e.mine or f.e.done) then place(f, PILL_H) end
     end
-    if k % 2 == 1 then y = y - PILL_H - 4 end
+    for _, f in ipairs(active) do
+        if f.e and f.isPill and (f.e.mine or f.e.done) then place(f, PILL_H) end
+    end
     basis:SetShown(false)
     bulk:ClearAllPoints(); bulk:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, y - 1)
     bulk:SetShown(open >= 2)
@@ -1101,6 +1209,11 @@ function ns.RollTick(f)
     f.secs:SetText(e.done and "" or s)
     f.secs:SetTextColor(red and 1 or 0.949, red and 0.42 or 0.702, red and 0.5 or 0.761)
     -- 뜯는 선 = 남은 시간: 왼쪽부터 분홍으로 켜져 있다가 오른쪽부터 꺼져요 (10초 아래 = 빨강 + 깜빡)
+    if f.ptlFill and f.isPill and f.ptl:IsShown() then
+        local w = (f.ptl:GetWidth() or 0) * frac
+        f.ptlFill:SetWidth(math.max(0.01, w))
+        f.ptlFill:SetVertexColor(red and 1 or PINK[1], red and 0.35 or PINK[2], red and 0.43 or PINK[3], 1)
+    end
     if f.dash and not f.isPill then
         local n = #f.dash
         local lit = math.ceil(frac * n)
@@ -1178,6 +1291,7 @@ local function Open(e)
     Paint(f)
     f:Show()
     Relayout()
+    if ns.RollBadgePop then ns.RollBadgePop() end
 end
 
 local function OnStart(id, ms)
@@ -2335,17 +2449,20 @@ local function MakeFan()
     fan.btns = {}
     for i, d in ipairs(FAN) do
         local b = CreateFrame("Button", nil, fan)
-        b:SetSize(38, 38)
+        b:SetSize(44, 44)
+        -- 어두운 받침 그림자: 밝은 배경에서도 또렷하게
+        b.shade = b:CreateTexture(nil, "BACKGROUND", nil, -2); b.shade:SetTexture(ns.MEDIA .. "soft_glow")
+        b.shade:SetPoint("CENTER", 0, -1); b.shade:SetSize(70, 70); b.shade:SetVertexColor(0, 0, 0, 0.6)
         -- 뒤 빛: 평소 없음 · 마우스 = 흰빛 · 블랙리스트가 파티에 있으면 빨간빛
-        b.ring = b:CreateTexture(nil, "BACKGROUND", nil, -1); b.ring:SetTexture(ns.MEDIA .. "circle"); b.ring:SetBlendMode("ADD")
-        b.ring:SetPoint("CENTER"); b.ring:SetSize(58, 58); b.ring:SetVertexColor(1, 1, 1); b.ring:SetAlpha(0)
+        b.ring = b:CreateTexture(nil, "BACKGROUND", nil, -1); b.ring:SetTexture(ns.MEDIA .. "soft_glow"); b.ring:SetBlendMode("ADD")
+        b.ring:SetPoint("CENTER", 0, -2); b.ring:SetSize(72, 72); b.ring:SetVertexColor(1, 1, 1); b.ring:SetAlpha(0)
         b.ic = b:CreateTexture(nil, "ARTWORK"); b.ic:SetTexture(ns.MEDIA .. d.tex); b.ic:SetAllPoints()
         b.cnt = CreateFrame("Frame", nil, b); b.cnt:SetSize(16, 16); b.cnt:SetPoint("CENTER", b, "TOPRIGHT", -3, -3); b.cnt:SetFrameLevel(b:GetFrameLevel() + 2)
         local cd = b.cnt:CreateTexture(nil, "ARTWORK"); cd:SetTexture(ns.MEDIA .. "circle"); cd:SetAllPoints(); cd:SetVertexColor(1, 0.353, 0.431)
         b.cntFs = b.cnt:CreateFontString(nil, "OVERLAY"); b.cntFs:SetFont(ns.NUM or ns.FONT, 12, ""); b.cntFs:SetPoint("CENTER")
         b.cnt:Hide()
         b:SetScript("OnEnter", function(s2)
-            s2.ring:SetVertexColor(1, 0.85, 0.9); s2.ring:SetAlpha(0.55); s2.ic:SetSize(42, 42); s2.ic:ClearAllPoints(); s2.ic:SetPoint("CENTER")
+            s2.ring:SetVertexColor(1, 0.561, 0.639); s2.ring:SetAlpha(0.8); s2.ic:SetSize(50, 50); s2.ic:ClearAllPoints(); s2.ic:SetPoint("CENTER")
             GameTooltip:SetOwner(s2, "ANCHOR_LEFT"); GameTooltip:AddLine(d.tip); GameTooltip:Show()
             fan.idle = 0
         end)
@@ -2360,11 +2477,11 @@ local function MakeFan()
         for i, b in ipairs(s2.btns) do
             local a = math.rad(s2.angles[i])
             b:ClearAllPoints()
-            b:SetPoint("CENTER", s2, "CENTER", math.cos(a) * 80 * p, math.sin(a) * 80 * p)
+            b:SetPoint("CENTER", s2, "CENTER", math.cos(a) * 92 * p, math.sin(a) * 92 * p)
             b:SetAlpha(p)
         end
         -- 마우스가 떠나고 3초 지나면 접기
-        if s2:IsMouseOver(90, -90, -90, 90) or badge:IsMouseOver() then s2.idle = 0
+        if s2:IsMouseOver(110, -110, -110, 110) or badge:IsMouseOver() then s2.idle = 0
         else s2.idle = (s2.idle or 0) + el; if s2.idle > 3 then ns.RollFan(false) end end
     end)
     fan:Hide()
@@ -2410,5 +2527,19 @@ SlashCmdList.LEELROLL = function(msg)
         print("  /르엘주사위 위치 — 처음 자리 · 크기로 (Shift + 카드 끌기로도 옮겨요)")
         print("  /르엘주사위 인사 — 파티 인사 말풍선 미리 보기")
         print("  /르엘주사위 끄기 · 켜기")
+    end
+end
+
+-- 점검: /르엘마우스 — 지금 마우스 아래에서 클릭을 받는 창 이름 (룻 · 시점 돌리기가 막힐 때)
+SLASH_LEELMOUSE1 = "/르엘마우스"
+SlashCmdList.LEELMOUSE = function()
+    local list = {}
+    if GetMouseFoci then for _, f in ipairs(GetMouseFoci() or {}) do list[#list + 1] = f end
+    elseif GetMouseFocus then list[1] = GetMouseFocus() end
+    if #list == 0 then P("마우스 아래에 창이 없어요 (게임 화면이 클릭을 받는 상태)") return end
+    for i, f in ipairs(list) do
+        local name = (f.GetDebugName and f:GetDebugName()) or (f.GetName and f:GetName()) or tostring(f)
+        local w, h = f:GetSize()
+        P(("%d. %s · %dx%d · 보임 %s · 투명도 %.2f"):format(i, tostring(name), w or 0, h or 0, tostring(f:IsVisible()), f:GetEffectiveAlpha() or 1))
     end
 end

@@ -1354,13 +1354,34 @@ end
 local MakeDetail, PaintDetail
 do
 local DET_H = 200
+local descOwner = {}   -- 내용 글 → 그 글을 받은 퀘 번호 (다른 퀘 글이 잘못 끼는 걸 막아요)
 local function QuestDetailText(e)
     local desc, money, rewards = nil, nil, {}
-    if not e.index then return end
+    -- 목록을 만든 뒤 퀘 순서가 바뀌었을 수 있어서, 퀘 번호(id)로 지금 자리를 다시 찾아요
+    local idx = e.index
+    if e.id then
+        local okI, r = pcall(function()
+            return (C_QuestLog and C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(e.id))
+                or (GetQuestLogIndexByID and GetQuestLogIndexByID(e.id))
+        end)
+        if okI and r and r > 0 then idx = r end
+    end
+    if not idx then return end
     local prev = GetQuestLogSelection and GetQuestLogSelection()
     pcall(function()
-        if SelectQuestLogEntry then SelectQuestLogEntry(e.index) end
-        if GetQuestLogQuestText then desc = GetQuestLogQuestText() end
+        -- 새 엔진은 퀘 번호로 고르는 쪽만 따르기도 해서 둘 다 골라요
+        if e.id and C_QuestLog and C_QuestLog.SetSelectedQuest then pcall(C_QuestLog.SetSelectedQuest, e.id) end
+        if SelectQuestLogEntry then SelectQuestLogEntry(idx) end
+        if GetQuestLogQuestText then
+            local okT, t = pcall(GetQuestLogQuestText, idx)
+            desc = okT and t or GetQuestLogQuestText()
+        end
+        -- 정말 이 퀘 글인지: 같은 글이 이미 다른 퀘 것으로 나왔으면 믿지 않아요
+        if desc and desc ~= "" and e.id then
+            local owner = descOwner[desc]
+            if owner and owner ~= e.id and byId[owner] then desc = false
+            else descOwner[desc] = e.id end
+        end
         if GetQuestLogRewardMoney then money = GetQuestLogRewardMoney() end
         local n = GetNumQuestLogRewards and GetNumQuestLogRewards() or 0
         for i = 1, math.min(n, 6) do
@@ -1374,6 +1395,7 @@ local function QuestDetailText(e)
         end
     end)
     if prev and prev > 0 and SelectQuestLogEntry then pcall(SelectQuestLogEntry, prev) end
+    if desc == false then return false, nil, {} end   -- 다른 퀘가 골라져 있었어요: 보상 그림도 그 퀘 것이라 버려요
     return desc, money, rewards
 end
 local function ShareQuest(e)
@@ -1529,7 +1551,8 @@ PaintDetail = function(d, e, w)
     d.way:SetText(way)
     -- 내용 · 보상
     local desc, money, rewards = QuestDetailText(e)
-    if desc then desc = desc:gsub("^%s+", ""):gsub("\n%s*\n", "\n") end   -- 앞 빈 줄 때문에 글이 아래로 밀리던 것
+    if desc == false then desc = "|cff9a8a86(이 퀘 내용을 못 불러왔어요 · 게임 퀘스트 창에서 한 번 눌러 보면 돼요)|r"
+    elseif desc then desc = desc:gsub("^%s+", ""):gsub("\n%s*\n", "\n") end   -- 앞 빈 줄 때문에 글이 아래로 밀리던 것
     d.txt:SetText(desc and desc ~= "" and desc or "(내용 없음)")
     local rw = {}
     if e.xp and e.xp > 0 then rw[#rw + 1] = "경험치 " .. (BreakUpLargeNumbers and BreakUpLargeNumbers(e.xp) or e.xp) end
@@ -4088,10 +4111,14 @@ RefreshTracker = function()
     local dn = DungeonName()
     local backN = 0
     if dn then
-        local only = {}
-        for _, e in ipairs(route) do if InThisDungeon(e, dn) then only[#only + 1] = e end end
+        local only, inR = {}, {}
+        for _, e in ipairs(route) do if InThisDungeon(e, dn) then only[#only + 1] = e; inR[e] = true end end
+        -- 길에 안 넣은 퀘라도 이 던전 퀘면 같이 (던전에선 고르지 않아도 다 보여요)
+        for _, e in ipairs(log) do
+            if not inR[e] and not e.failed and InThisDungeon(e, dn) then only[#only + 1] = e end
+        end
         if #only > 0 then
-            trk.dunHidden, trk.dunName = #route - #only, dn
+            trk.dunHidden, trk.dunName = math.max(0, #route - #only), dn
             route = only
             -- 나왔을 때 보고할 수 있게 이 던전 퀘를 기억 (A안 · 던전 보고 모드)
             local ids = {}

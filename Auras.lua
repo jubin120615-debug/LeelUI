@@ -83,6 +83,8 @@ local function MakeInit(opt)
         pcall(btn.SetDurationText, btn, time)
     end
     time:SetPoint("CENTER", 0, 0)
+    ns.auraTimes = ns.auraTimes or setmetatable({}, { __mode = "k" })
+    ns.auraTimes[btn] = time
 
     -- 오른쪽 위 중첩 숫자
     local count = over:CreateFontString(nil, "OVERLAY")
@@ -123,6 +125,7 @@ function ns.CreateTargetDebuffs(f)
         return
     end
     f.debuffs = cont
+    ns.auraHost = f
 
     -- 버프 줄: 디버프 줄 바로 아래, 오른쪽부터 (아군이면 내가 줄 버프 확인, 적이면 해제할 버프 확인)
     local ok3, bc = pcall(CreateFrame, "AuraContainer", nil, f, "CustomAuraContainerTemplate")
@@ -153,4 +156,28 @@ function ns.CreateTargetDebuffs(f)
         pcall(cont.UpdateAllAuras, cont)
         if f.buffs then pcall(f.buffs.UpdateAllAuras, f.buffs) end
     end)
+end
+
+-- 점검: /르엘오라검사 (대상에 내 디버프를 건 채로)
+SLASH_LEELAURACHK1 = "/르엘오라검사"
+SlashCmdList.LEELAURACHK = function()
+    local P = function(m) print("|cfff2b3c2[르엘 오라]|r " .. m) end
+    P("숫자 서식기: " .. (DurationFormatter() and "있음" or "없음") .. " · 기본 표시로 바꾼 칸: " .. (ns.auraFallback or 0))
+    if ns.debuffNote then P("알림: " .. ns.debuffNote) end
+    local f = ns.auraHost
+    local cont = f and f.debuffs
+    if not cont then P("디버프 줄을 못 찾았어요") return end
+    local n = 0
+    for _, b in ipairs({ cont:GetChildren() }) do
+        local tfs = ns.auraTimes and ns.auraTimes[b]
+        if b:IsShown() and tfs then
+            n = n + 1
+            local t = tfs:GetText()
+            local st = (issecretvalue and t ~= nil and issecretvalue(t)) and "(숨김 값 · 화면엔 보여야 함)" or tostring(t)
+            local cd = false
+            for _, c in ipairs({ b:GetChildren() }) do if c.IsObjectType and c:IsObjectType("Cooldown") and c:IsShown() then cd = true end end
+            P(n .. "번 칸 · 시간 글자: " .. st .. " · 링: " .. (cd and "돎" or "없음") .. " · 글자 보임: " .. tostring(tfs:IsVisible()))
+        end
+    end
+    if n == 0 then P("보이는 디버프 칸이 없어요 (대상에 내 디버프를 걸고 해 보세요)") end
 end
