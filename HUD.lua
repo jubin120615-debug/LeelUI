@@ -735,6 +735,43 @@ local function CreateCenter(hud)
         ag:SetScript("OnFinished", function() c.earG:SetAlpha(0) end)
         c.earOut = ag
     end
+    -- 노란 번개: 각성 중 여기저기서 빠직빠직
+    c.bolts = {}
+    for i = 1, 4 do
+        local t = c:CreateTexture(nil, "OVERLAY", nil, 2); t:SetBlendMode("ADD"); t:SetAlpha(0)
+        local ag = t:CreateAnimationGroup()
+        local function A(from, to, d, o) local a = ag:CreateAnimation("Alpha"); a:SetFromAlpha(from); a:SetToAlpha(to); a:SetDuration(d); a:SetOrder(o) end
+        A(0, 1, 0.03, 1); A(1, 1, 0.05, 2); A(1, 0.15, 0.03, 3); A(0.15, 1, 0.03, 4); A(1, 1, 0.04, 5); A(1, 0, 0.12, 6)
+        c.bolts[i] = { t = t, ag = ag }
+    end
+    -- 번개 자리: 귀 양옆 · 숫자 양옆 (거리 칸 위쪽 기준)
+    local BOLT_AT = { { -30, 6 }, { 30, 8 }, { -48, -26 }, { 48, -24 }, { -40, -50 }, { 42, -48 }, { -16, 18 }, { 16, 20 } }
+    local boltN, boltWait, boltLast = 0, 0, 0
+    local function Crackle(n)
+        for _ = 1, n do
+            boltN = boltN % #c.bolts + 1
+            local b = c.bolts[boltN]
+            local at
+            repeat at = math.random(#BOLT_AT) until at ~= boltLast
+            boltLast = at
+            local p = BOLT_AT[at]
+            local big = math.random() < 0.35
+            b.t:SetTexture(ns.MEDIA .. (math.random() < 0.5 and "bolt1" or "bolt2"))
+            b.t:SetSize(big and 16 or 12, big and 32 or 24)
+            b.t:ClearAllPoints(); b.t:SetPoint("CENTER", c, "TOP", p[1] + math.random(-4, 4), p[2] + math.random(-4, 4))
+            local r = math.rad((p[1] < 0 and 1 or -1) * math.random(10, 35))
+            b.t:SetRotation(r)
+            b.ag:Stop(); b.ag:Play()
+        end
+    end
+    c.boltTick = CreateFrame("Frame", nil, c); c.boltTick:Hide()
+    c.boltTick:SetScript("OnUpdate", function(_, el)
+        boltWait = boltWait - el
+        if boltWait > 0 then return end
+        Crackle(math.random() < 0.3 and 2 or 1)
+        boltWait = 0.35 + math.random() * 0.9
+    end)
+
     function c:Awaken(on)
         on = on and true or false
         if on == (self.awake or false) then return end
@@ -743,11 +780,13 @@ local function CreateCenter(hud)
             self.fightStart = GetTime()
             self.earOut:Stop(); self.ear:SetAlpha(0); self.earG:SetAlpha(1)
             self.earPop:Play(); self.flashAg:Stop(); self.flashAg:Play()
+            Crackle(3); boltWait = 0.5; self.boltTick:Show()   -- 변신 순간 번개 세 갈래
             for _, st in ipairs(self.streaks) do
                 C_Timer.After(0.15 + math.random() * st.d, function() if c.awake then st.ag:Play() end end)
             end
         else
             for _, st in ipairs(self.streaks) do st.ag:Stop(); st.t:SetAlpha(0) end
+            self.boltTick:Hide(); for _, b in ipairs(self.bolts) do b.ag:Stop(); b.t:SetAlpha(0) end
             self.earOut:Play(); self.ear:SetAlpha(1)
         end
         if self.ShowDist and UseDistFn and UseDistFn() and self:IsShown() then self:ShowDist() end

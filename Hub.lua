@@ -1498,6 +1498,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.32", "전투 중 노란 번개", "금빛 토끼 귀 옆으로 빠직빠직" },
     { "1.3.31", "파티 5인 · 해제 알림 · 주사위 토끼", "직업 아이콘 · 역할 배지 · 전투 중 금빛 토끼 귀" },
     { "1.3.30", "화살통 칸에 남은 화살", "세로 게이지 · 200발 노랑 · 50발 빨강" },
     { "1.3.29", "르엘 주사위 창 · 토끼 추천 · 블랙리스트", "파티 인사 말풍선 · 던전 퀘 보고 모드" },
