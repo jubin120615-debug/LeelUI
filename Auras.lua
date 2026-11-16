@@ -150,12 +150,29 @@ function ns.CreateTargetDebuffs(f)
     end
 
     -- 대상이 바뀌면 새로 채우기
+    -- 여러 마리를 번갈아 잡으면 컨테이너가 앞 대상에 묶여 있을 때가 있어서,
+    -- 대상을 한 번 풀었다가 다시 "target"으로 묶고 전부 다시 그려요 (조금 뒤 한 번 더)
+    local function Rebind(c)
+        if not c then return end
+        pcall(c.SetUnit, c, nil)
+        pcall(c.SetUnit, c, "target")
+        pcall(c.UpdateAllAuras, c)
+    end
+    local function RefreshAll() Rebind(cont); Rebind(f.buffs) end
+    ns.RefreshTargetAuras = RefreshAll
+    local seq = 0
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+    ev:RegisterEvent("PLAYER_REGEN_DISABLED")
     ev:SetScript("OnEvent", function()
-        pcall(cont.UpdateAllAuras, cont)
-        if f.buffs then pcall(f.buffs.UpdateAllAuras, f.buffs) end
+        RefreshAll()
+        seq = seq + 1
+        local my = seq
+        C_Timer.After(0.2, function() if my == seq then RefreshAll() end end)
+        C_Timer.After(0.6, function() if my == seq then RefreshAll() end end)
     end)
+    -- HUD 대상 칸이 숨었다 다시 보일 때도
+    f:HookScript("OnShow", function() C_Timer.After(0, RefreshAll) end)
 end
 
 -- 점검: /르엘오라검사 (대상에 내 디버프를 건 채로)

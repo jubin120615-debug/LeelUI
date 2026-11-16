@@ -990,9 +990,10 @@ local function Paint(f)
     -- 펼친 카드 부분
     f.name:SetShown(not pill); f.why:SetShown(not pill); f.bar:Hide(); f.secs:SetShown(not pill)
     f.tk:Strip(qc); f.segbox:SetShown(not pill)
+    if f.sepLine then f.sepLine:SetShown(not pill) end   -- 접힌 줄엔 단추 위 구분선이 없어요 (줄을 가로지르던 선)
     if pill then for _, d in ipairs(f.dash) do d:Hide() end; f.tk:Notch(false) end
     f.need:SetShown(not pill); f.greed:SetShown(not pill); f.pass:SetShown(not pill)
-    f.mine:Hide(); f.hint:Hide(); f.chev:Hide()
+    f.mine:Hide(); f.hint:Hide(); f.chev:Hide(); if f.chip then f.chip:Hide() end; if f.clk then f.clk:Hide() end
     if f.rows then for _, r in ipairs(f.rows) do r:Hide() end end
     f.ptxt:SetShown(pill)
     if f.ptl and not pill then f.ptl:Hide(); f.ptlFill:Hide() end
@@ -1048,7 +1049,7 @@ local function Paint(f)
     if live then f.chev:Show(); f.hint:SetPoint("RIGHT", f.chev, "LEFT", -6, 0) else f.hint:SetPoint("RIGHT", f, "RIGHT", -PADX - 2, 0) end
     f.ptxt:ClearAllPoints(); f.ptxt:SetPoint("LEFT", f.ic, "RIGHT", 8, 0); f.ptxt:SetPoint("RIGHT", f.hint, "LEFT", -8, 0)
     f.ptxt:SetText(e.name or ""); f.ptxt:SetTextColor(qc[1], qc[2], qc[3])
-    local txt, col
+    local txt, col, chipT, chipN
     if not chosen then
         if e.notMine then txt, col = "내 템 아님", { 0.72, 0.65, 0.63 }
         elseif e.rec == "need" then txt, col = "입찰 ★", { 1, 0.82, 0.35 }
@@ -1064,11 +1065,64 @@ local function Paint(f)
         if my and my.n then txt = txt .. " " .. my.n .. ((rank and e.mine ~= "pass") and (" · " .. rank .. "등") or "") end
         if e.winner then
             if e.winner == e.me then txt = "|T" .. ns.MEDIA .. "crown:11:11:0:0:128:128:0:128:0:128:255:215:90|t 획득!"; col = { 1, 0.88, 0.54 }
-            else txt = e.winner .. " 획득"; col = { 0.72, 0.65, 0.63 } end
+            else
+                local cc = ClassColorOf(e.winner)
+                txt = ("|cff%02x%02x%02x%s|r"):format(math.floor(cc[1] * 255), math.floor(cc[2] * 255), math.floor(cc[3] * 255), e.winner)
+                col = { 0.85, 0.80, 0.78 }
+            end
+            local wr = e.rolls[e.winner]
+            if wr and wr.t and wr.t ~= "pass" then chipT, chipN = wr.t, wr.n end
         elseif e.allPassed then txt, col = "모두 포기", { 0.62, 0.55, 0.53 } end
     end
+    -- 먹은 사람이 누른 단추: "입찰 80" / "차비 4" 작은 알약
+    if not f.chip then
+        f.chip = CreateFrame("Frame", nil, f); f.chip:SetHeight(16)
+        f.chip.bg = ns.RoundRect(f.chip, 8, PINK, "BACKGROUND", 0, 0)
+        f.chip.rim = ns.RoundRect(f.chip, 8, PINK, "BACKGROUND", -1, -1)
+        f.chip.fs = ns.Font(f.chip, 10, PINK); f.chip.fs:SetPoint("CENTER", 0, 0)
+    end
+    -- 고른 뒤 결과를 기다리는 동안: 작은 파이 시계 + 남은 초 알약
+    if not f.clk then
+        local k = CreateFrame("Frame", nil, f); k:SetSize(36, 16)
+        k.bg = ns.RoundRect(k, 8, { 1, 1, 1 }, "BACKGROUND", 0, 0); k.bg:SetColor({ 1, 1, 1 }, 0.07)
+        k.dial = k:CreateTexture(nil, "ARTWORK"); k.dial:SetTexture(ns.MEDIA .. "circle"); k.dial:SetSize(11, 11)
+        k.dial:SetPoint("LEFT", 4, 0); k.dial:SetVertexColor(1, 1, 1, 0.14)
+        k.cd = CreateFrame("Cooldown", nil, k, "CooldownFrameTemplate")
+        k.cd:SetAllPoints(k.dial); k.cd:SetSwipeTexture(ns.MEDIA .. "circle"); k.cd:SetReverse(true)
+        k.cd:SetDrawEdge(false); k.cd:SetDrawBling(false)
+        if k.cd.SetHideCountdownNumbers then k.cd:SetHideCountdownNumbers(true) end
+        k.fs = k:CreateFontString(nil, "OVERLAY"); k.fs:SetFont(ns.NUM or ns.FONT, 12, ""); k.fs:SetPoint("LEFT", k.dial, "RIGHT", 4, 0)
+        f.clk = k
+    end
+    local waiting = chosen and not e.winner and not e.allPassed and not e.done
+    local clkW = 0
+    if waiting then
+        f.clk:ClearAllPoints(); f.clk:SetPoint("RIGHT", f, "RIGHT", -PADX - 2, 0); f.clk:Show()
+        f.hint:ClearAllPoints(); f.hint:SetPoint("RIGHT", f.clk, "LEFT", -6, 0)
+        local total = (e.total and e.total > 0) and e.total or 60000
+        local left
+        if e.test then left = math.max(0, (e.endAt - GetTime()) * 1000) elseif GetLootRollTimeLeft then left = tonumber(GetLootRollTimeLeft(e.id)) end
+        left = left or 0
+        f.clk.cd:SetCooldown(GetTime() - (total - left) / 1000, total / 1000)
+        clkW = 42
+    else
+        f.clk:Hide()
+    end
+    local chipW = clkW
+    if chipT then
+        local cc = TYPE_COL[chipT] or PINK
+        f.chip.bg:SetColor({ cc[1] * 0.25, cc[2] * 0.2, cc[3] * 0.2 }, 0.95); f.chip.rim:SetColor(cc, 0.6)
+        f.chip.fs:SetText((TYPE_TXT[chipT] or "") .. (chipN and (" " .. chipN) or "")); f.chip.fs:SetTextColor(cc[1], cc[2], cc[3])
+        chipW = (f.chip.fs:GetStringWidth() or 30) + 14
+        f.chip:SetWidth(chipW)
+        f.chip:ClearAllPoints(); f.chip:SetPoint("RIGHT", f, "RIGHT", -PADX - 2, 0); f.chip:Show()
+        f.hint:ClearAllPoints(); f.hint:SetPoint("RIGHT", f.chip, "LEFT", -6, 0)
+        chipW = chipW + 6
+    else
+        f.chip:Hide()
+    end
     f.hint:SetText(txt); f.hint:SetTextColor(col[1], col[2], col[3]); f.hint:Show()
-    f.ptxt:SetWidth(math.max(40, W - 12 - 20 - 8 - 8 - (f.hint:GetStringWidth() or 60) - (live and 22 or 10)))
+    f.ptxt:SetWidth(math.max(40, W - 12 - 20 - 8 - 8 - (f.hint:GetStringWidth() or 60) - chipW - (live and 22 or 10)))
 end
 
 function ns.RollPillTip(f)
@@ -1077,12 +1131,25 @@ function ns.RollPillTip(f)
     if e.link then pcall(GameTooltip.SetHyperlink, GameTooltip, e.link) else GameTooltip:AddLine(e.name or "") end
     if e.why and not e.mine then GameTooltip:AddLine(" "); GameTooltip:AddLine((e.notMine and "파티 매너 · 내 장비가 아니에요\n" or "") .. (e.whyLong or e.why), 1, 0.82, 0.6, true) end
     if e.party and not e.mine then GameTooltip:AddLine("맞는 파티원: " .. e.party, 0.56, 0.91, 0.6, true) end
-    if e.mine then
+    if e.mine or e.winner then
         GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("모두의 선택", 0.73, 0.65, 0.63)
+        local ICON = { need = "roll_btn_need", greed = "roll_btn_greed", pass = "roll_btn_pass" }
+        local bestGreed, winNeed = nil, nil
         for _, it in ipairs(SortedRolls(e)) do
             local cc = ClassColorOf(it.name)
-            GameTooltip:AddDoubleLine(("|cff%02x%02x%02x%s|r  %s"):format(math.floor(cc[1] * 255), math.floor(cc[2] * 255), math.floor(cc[3] * 255), it.name, TYPE_TXT[it.t] or "고민 중…"),
-                it.n and tostring(it.n) or "-", 0.85, 0.78, 0.76, 1, 0.88, 0.54)
+            local tc = TYPE_COL[it.t] or { 0.6, 0.55, 0.53 }
+            local ic = ICON[it.t] and ("|T" .. ns.MEDIA .. ICON[it.t] .. ":12:12|t ") or "    "
+            local crown = (e.winner == it.name) and (" |T" .. ns.MEDIA .. "crown:11:11:0:0:128:128:0:128:0:128:255:215:90|t") or ""
+            local left = ("%s|cff%02x%02x%02x%s|r  |cff%02x%02x%02x%s|r%s"):format(ic,
+                math.floor(tc[1] * 255), math.floor(tc[2] * 255), math.floor(tc[3] * 255), TYPE_TXT[it.t] or "고민 중…",
+                math.floor(cc[1] * 255), math.floor(cc[2] * 255), math.floor(cc[3] * 255), it.name, crown)
+            GameTooltip:AddDoubleLine(left, it.n and tostring(it.n) or "-", 1, 1, 1, tc[1], tc[2], tc[3])
+            if it.t == "greed" and it.n and (not bestGreed or it.n > bestGreed) then bestGreed = it.n end
+            if e.winner == it.name and it.t == "need" then winNeed = it.n end
+        end
+        if winNeed and bestGreed and bestGreed > winNeed then
+            GameTooltip:AddLine(("입찰한 사람이 있으면 차비 %d보다 입찰 %d이 먼저 가져가요"):format(bestGreed, winNeed), 0.73, 0.65, 0.63, true)
         end
     else
         GameTooltip:AddLine("누르면 펼쳐서 고르기", 0.6, 0.55, 0.53)
@@ -1207,6 +1274,13 @@ function ns.RollTick(f)
     local red = s <= 10
     f.bar:SetStatusBarColor(red and 1 or PINK[1], red and 0.35 or PINK[2], red and 0.43 or PINK[3], 1)
     f.secs:SetText(e.done and "" or s)
+    if f.clk and f.clk:IsShown() then
+        f.clk.fs:SetText(s)
+        local c = red and { 1, 0.353, 0.431 } or PINK
+        f.clk.cd:SetSwipeColor(c[1], c[2], c[3], 1)
+        if red then f.clk.fs:SetTextColor(1, 0.353, 0.431) else f.clk.fs:SetTextColor(0.85, 0.80, 0.78) end
+        f.clk:SetWidth(4 + 11 + 4 + (f.clk.fs:GetStringWidth() or 12) + 7)
+    end
     f.secs:SetTextColor(red and 1 or 0.949, red and 0.42 or 0.702, red and 0.5 or 0.761)
     -- 뜯는 선 = 남은 시간: 왼쪽부터 분홍으로 켜져 있다가 오른쪽부터 꺼져요 (10초 아래 = 빨강 + 깜빡)
     if f.ptlFill and f.isPill and f.ptl:IsShown() then
@@ -1406,6 +1480,9 @@ local function BuildPats()
     add("LOOT_ROLL_YOU_WON", "youwon")
     add("LOOT_ROLL_WON", "won")
     add("LOOT_ROLL_ALL_PASSED", "allpass")
+    -- 예비: "○○님이 아이템을 획득했습니다" (굴림 결과 줄이 안 잡힐 때 누가 가져갔는지)
+    add("LOOT_ITEM", "got")
+    add("LOOT_ITEM_SELF", "gotself")
 end
 
 -- 같은 템이 여러 개면 아직 안 끝난 것 중 먼저 나온 것
@@ -1445,7 +1522,7 @@ local function OnLootMsg(msg)
         local a = Match(m, msg)
         if a then
             hit = true
-            RollDbg(m.kind, msg)
+            if m.kind ~= "got" and m.kind ~= "gotself" then RollDbg(m.kind, msg) end
             if m.kind == "rolled" then
                 local e = FindEntry(a[2]); if not e then return end
                 local who = Short(a[3])
@@ -1473,7 +1550,16 @@ local function OnLootMsg(msg)
                 if n then local r = e.rolls[e.winner] or {}; r.n = r.n or n; r.t = r.t or e.mine or "need"; e.rolls[e.winner] = r end
                 e.done = true
                 Refresh(e)
-                FinishLater(e, 4)
+                FinishLater(e, 10)   -- 누가 먹었는지 충분히 보이게
+            elseif m.kind == "got" or m.kind == "gotself" then
+                -- 굴림 중인 템일 때만 (그냥 주운 템은 무시)
+                local link = (m.kind == "gotself") and a[1] or a[2]
+                local e = FindEntry(link)
+                if not e or not next(e.rolls) then return end
+                e.winner = (m.kind == "gotself") and e.me or Short(a[1])
+                e.done = true
+                Refresh(e)
+                FinishLater(e, 10)
             elseif m.kind == "allpass" then
                 local e = FindEntry(a[1]); if not e then return end
                 e.allPassed = true; e.done = true
@@ -1522,9 +1608,21 @@ local function Blizz(off)
     local c = _G.GroupLootContainer
     if c and not c.leelHooked then
         c.leelHooked = true
-        c:HookScript("OnShow", function(self) if DB().on then self:SetAlpha(0) else self:SetAlpha(1) end end)
+        c.leelMouse = c:IsMouseEnabled()
+        -- 투명하게만 하면 클릭을 계속 받아서 화면 가운데 클릭 · 룻 · 시점 돌리기가 막혀요 → 클릭도 꺼요
+        c:HookScript("OnShow", function(self)
+            if DB().on then self:SetAlpha(0); pcall(self.EnableMouse, self, false) else self:SetAlpha(1) end
+        end)
     end
-    if c then c:SetAlpha(off and 0 or 1) end
+    if c then
+        c:SetAlpha(off and 0 or 1)
+        if off then pcall(c.EnableMouse, c, false) elseif c.leelMouse ~= nil then pcall(c.EnableMouse, c, c.leelMouse) end
+        if off and c:IsShown() and #LootFrames() > 0 then
+            local any = false
+            for _, g in ipairs(LootFrames()) do if g:IsShown() then any = true end end
+            if not any then pcall(c.Hide, c) end
+        end
+    end
 end
 if hooksecurefunc and _G.GroupLootFrame_OpenNewFrame then
     hooksecurefunc("GroupLootFrame_OpenNewFrame", function(id)
@@ -1539,7 +1637,11 @@ local hideAfter = CreateFrame("Frame")
 hideAfter:RegisterEvent("START_LOOT_ROLL")
 hideAfter:SetScript("OnEvent", function()
     if not DB().on then return end
-    C_Timer.After(0, function() for _, g in ipairs(LootFrames()) do if g:IsShown() then g:SetAlpha(0); g:Hide() end end end)
+    C_Timer.After(0, function()
+        for _, g in ipairs(LootFrames()) do if g:IsShown() then g:SetAlpha(0); g:Hide() end end
+        local c = _G.GroupLootContainer
+        if c then c:SetAlpha(0); pcall(c.EnableMouse, c, false) end
+    end)
 end)
 
 function ns.RollApply()
@@ -2542,4 +2644,21 @@ SlashCmdList.LEELMOUSE = function()
         local w, h = f:GetSize()
         P(("%d. %s · %dx%d · 보임 %s · 투명도 %.2f"):format(i, tostring(name), w or 0, h or 0, tostring(f:IsVisible()), f:GetEffectiveAlpha() or 1))
     end
+    -- 화면을 크게 덮는데 안 보이는(투명한) 클릭 받는 창 찾기
+    local sw, sh = UIParent:GetWidth() * UIParent:GetEffectiveScale(), UIParent:GetHeight() * UIParent:GetEffectiveScale()
+    local n, f = 0, EnumerateFrames()
+    while f do
+        local ok, big = pcall(function()
+            if not (f:IsVisible() and f:IsMouseEnabled()) then return false end
+            local w, h = f:GetSize(); local sc = f:GetEffectiveScale()
+            return (w * sc) * (h * sc) > sw * sh * 0.25 and (f:GetEffectiveAlpha() or 1) < 0.1
+        end)
+        if ok and big then
+            n = n + 1
+            local nm = (f.GetDebugName and f:GetDebugName()) or (f.GetName and f:GetName()) or tostring(f)
+            P("투명한 큰 창: " .. tostring(nm))
+        end
+        f = EnumerateFrames(f)
+    end
+    if n == 0 then P("화면을 덮는 투명한 창은 없어요") end
 end

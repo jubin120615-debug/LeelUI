@@ -189,7 +189,7 @@ local function AuraBox(f, key, filter, max, size, shape, point, x, y)
         cont:SetPoint(point, f, point, x, y)
         if cont.SetFlowLayoutAnchorPoint then cont:SetFlowLayoutAnchorPoint(point) end
         if cont.SetFlowLayoutGrowthDirection and AnchorUtil and AnchorUtil.FlowDirection then
-            cont:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Left,
+            cont:SetFlowLayoutGrowthDirection(point:find("LEFT") and AnchorUtil.FlowDirection.Right or AnchorUtil.FlowDirection.Left,
                 point:find("TOP") and AnchorUtil.FlowDirection.Down or AnchorUtil.FlowDirection.Up)
         end
         cont:AddAuraGroup(key, filter, {
@@ -234,6 +234,11 @@ local function CreateMember(parent, i, unit)
     f:SetAttribute("unit", unit)
     f:SetAttribute("*type1", "target")
     f:SetAttribute("*type2", "togglemenu")
+    if unit ~= "player" then   -- Alt + 클릭 = 이 파티원 따라가기
+        f:SetAttribute("alt-type1", "macro")
+        f:SetAttribute("alt-macrotext1", "/follow " .. unit)
+    end
+    f:HookScript("PreClick", function(s2) if IsAltKeyDown() and ns.FollowPending then local ok, n = pcall(UnitName, s2.unit or unit); if ok then ns.FollowPending(n) end end end)
     f:RegisterForClicks("AnyUp")
 
     -- 바깥 빛 (체력 낮음): 테두리 바깥이라 흰/빨강 테두리와 같이 보임
@@ -296,7 +301,7 @@ local function CreateMember(parent, i, unit)
     f.dspBar:SetPoint("TOPLEFT", 0, -7); f.dspBar:SetPoint("BOTTOMLEFT", 0, 7)
     local rf = CreateFrame("Frame", nil, dsp)
     rf:SetSize(DSIZE + 12, DSIZE + 12)
-    rf:SetPoint("CENTER", f, "BOTTOMRIGHT", -(PAD - 2) - DSIZE / 2, PAD + 4 + DSIZE / 2)
+    rf:SetPoint("CENTER", f, "BOTTOMLEFT", PAD + DSIZE / 2, PAD + 4 + DSIZE / 2)
     rf:SetFrameLevel(lv + 3)   -- 디버프 아이콘 밑에 (링이 아이콘보다 커서 둘레만 보여요)
     f.dspRing = rf:CreateTexture(nil, "OVERLAY")
     f.dspRing:SetTexture(ns.MEDIA .. "ring"); f.dspRing:SetAllPoints()
@@ -357,15 +362,16 @@ local function CreateMember(parent, i, unit)
     f.name:SetJustifyH("LEFT")
     f.name:SetWordWrap(false)
 
-    f.val = ONum(top, 26)
-    f.val:SetPoint("BOTTOMLEFT", PAD, PAD + 1)
+    -- 체력 숫자: 오른쪽 아래 끝 · % 는 숫자 바로 뒤 (디버프는 왼쪽 아래, 해제 줄 옆)
     f.pct = ONum(top, 13)
     f.pct:SetText("%")
-    f.pct:SetPoint("BOTTOMLEFT", f.val, "BOTTOMRIGHT", 1, 2)
+    f.pct:SetPoint("BOTTOMRIGHT", top, "BOTTOMRIGHT", -PAD, PAD + 3)
+    f.val = ONum(top, 26)
+    f.val:SetPoint("BOTTOMRIGHT", f.pct, "BOTTOMLEFT", -1, -2)
 
     -- 쓰러짐 / 유령 / 끊김
     f.state = OFont(top, 15, { 0.78, 0.70, 0.67 })
-    f.state:SetPoint("BOTTOMLEFT", PAD, PAD + 3)
+    f.state:SetPoint("BOTTOMRIGHT", -PAD - 24, PAD + 3)
     f.state:Hide()
     f.mid = top:CreateTexture(nil, "OVERLAY")
     f.mid:SetSize(20, 20)
@@ -374,7 +380,7 @@ local function CreateMember(parent, i, unit)
 
     -- 힐러 마나 부족
     f.mana = OFont(top, 11, { 0.68, 0.76, 1 })
-    f.mana:SetPoint("BOTTOMRIGHT", -PAD, PAD + 1)
+    f.mana:SetPoint("BOTTOMRIGHT", f.pct, "TOPRIGHT", 0, 3)   -- 체력 숫자 위
     f.mana:Hide()
 
     -- 파티장 왕관 (왼쪽 위 모서리)
@@ -387,7 +393,7 @@ local function CreateMember(parent, i, unit)
 
     -- 내가 건 버프 (오른쪽 위), 해제할 디버프 (오른쪽 아래)
     f.buffs = AuraBox(f, "leelMine", "HELPFUL|PLAYER", 3, BSIZE, "mm_squircle", "TOPRIGHT", -PAD + 2, -PAD + 2)
-    f.debuffs = AuraBox(f, "leelDispel", "HARMFUL|RAID", 2, DSIZE, "mm_squircle", "BOTTOMRIGHT", -PAD + 2, PAD + 4)
+    f.debuffs = AuraBox(f, "leelDispel", "HARMFUL|RAID", 2, DSIZE, "mm_squircle", "BOTTOMLEFT", PAD, PAD + 4)
     return f
 end
 
@@ -417,7 +423,7 @@ local function UpdateHealth(f)
     if gone then
         f.hp:SetValue(0); f.heal:SetValue(0); f.pw:SetValue(0)
         f.glow:SetAlpha(0); f.pulse:Hide()
-        f.val:Hide(); f.pct:Hide(); f.mana:Hide()
+        f.val:Hide(); f.pct:SetText(""); f.mana:Hide()
         f.state:SetText(off and "접속 끊김" or (ghost and "유령" or "쓰러짐"))
         f.state:Show()
         f.name:SetTextColor(0.72, 0.66, 0.64)
@@ -433,7 +439,7 @@ local function UpdateHealth(f)
     end
 
     f.mid:Hide(); f.state:Hide()
-    f.val:Show(); f.pct:Show()
+    f.val:Show(); f.pct:SetText("%")
     f.name:SetTextColor(1, 0.97, 0.955)
     local col = Pastel(f.classFile)
     f.hp:SetStatusBarColor(col[1], col[2], col[3], 0.9)
@@ -443,18 +449,18 @@ local function UpdateHealth(f)
     -- 체력 글씨: % (기본) · 숫자 · 잃은 만큼 · 없음
     local mode = ns.db and ns.db.partyHp or "pct"
     if mode == "none" then
-        f.val:Hide(); f.pct:Hide()
+        f.val:Hide(); f.pct:SetText("")
     elseif mode == "num" then
-        f.pct:Hide(); ns.SetText(f.val, cur)
+        f.pct:SetText(""); ns.SetText(f.val, cur)
     elseif mode == "deficit" then
-        f.pct:Hide()
+        f.pct:SetText("")
         local okD = pcall(function()
             local miss = max - cur
             if miss > 0 then f.val:SetFormattedText("-%d", miss) else f.val:SetText("") end
         end)
         if not okD then
             local okM = UnitHealthMissing and pcall(function() f.val:SetFormattedText("-%d", UnitHealthMissing(u)) end)
-            if not okM then PctText(f.val, u, cur, max); f.pct:Show() end
+            if not okM then PctText(f.val, u, cur, max); f.pct:SetText("%") end
         end
     else
         PctText(f.val, u, cur, max)
@@ -841,7 +847,7 @@ local function Fake(f, d)
     f.name:SetText(name); f.name:SetTextColor(1, 0.97, 0.955)
     f.por:SetDesaturated(false); f.por:SetVertexColor(1, 1, 1)
     SetIcon(f)
-    f.mid:Hide(); f.state:Hide(); f.val:Show(); f.pct:Show()
+    f.mid:Hide(); f.state:Hide(); f.val:Show(); f.pct:SetText("%")
     local col = Pastel(file)
     f.hp:SetStatusBarColor(col[1], col[2], col[3], 0.9)
     f.hp:SetMinMaxValues(0, 1); f.hp:SetValue(hp)

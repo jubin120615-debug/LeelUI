@@ -1498,6 +1498,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.33", "따라가기 단추 · 주사위 결과 · 클릭 막힘 고침", "초상화 두 사람 아이콘 · 누가 뭘 눌러 먹었나 · 남은 시간 시계" },
     { "1.3.32", "전투 중 노란 번개", "금빛 토끼 귀 옆으로 빠직빠직" },
     { "1.3.31", "파티 5인 · 해제 알림 · 주사위 토끼", "직업 아이콘 · 역할 배지 · 전투 중 금빛 토끼 귀" },
     { "1.3.30", "화살통 칸에 남은 화살", "세로 게이지 · 200발 노랑 · 50발 빨강" },
@@ -1924,5 +1925,18 @@ ev:RegisterEvent("PLAYER_LOGIN")
 ev:SetScript("OnEvent", function()
     C_Timer.After(1, function()
         if ns.db then ns.db.hub = ns.db.hub or {}; ns:ApplyHubTidy() end
+    end)
+    -- 업데이트 알림: 버전이 바뀐 뒤 첫 접속에 채팅으로 한 번
+    C_Timer.After(4, function()
+        if not ns.db then return end
+        local v = Version("LeelUI")
+        if v == "" then return end
+        local last = ns.db.lastVer
+        ns.db.lastVer = v
+        if not last or last == v then return end
+        print(("|cfff2b3c2르엘 UI|r: |cffffd6e0v%s|r 버전으로 업데이트되었어요."):format(v))
+        local top = NEWS[1]
+        if top and top[1] == v then print("   |cffb9a6a0" .. top[2] .. "|r") end
+        print("   허브(|cffffd6e0/르엘|r)의 '새 소식'에서 바뀐 점을 확인하세요.")
     end)
 end)

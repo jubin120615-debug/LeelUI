@@ -695,14 +695,50 @@ local function CreateCenter(hud)
     c.Dots = Dots
 
     -- 토끼 귀 + 전투 중 각성: 귀가 금빛으로 쭉 서고, 숫자 뒤로 금빛 줄기가 솟아요
-    c.ear = c:CreateTexture(nil, "ARTWORK"); c.ear:SetTexture(ns.MEDIA .. "ear_pink")
-    c.ear:SetSize(34, 34); c.ear:SetPoint("BOTTOM", c, "TOP", 0, -12)
+    -- 평소: 짧은 회색 귀 (오른쪽 귀가 가끔 까딱) + 졸음 z
+    c.ear = c:CreateTexture(nil, "ARTWORK"); c.ear:SetTexture(ns.MEDIA .. "ear_short_l")
+    c.ear:SetSize(42, 42); c.ear:SetPoint("BOTTOM", c, "TOP", 0, -13)
+    c.earR = c:CreateTexture(nil, "ARTWORK"); c.earR:SetTexture(ns.MEDIA .. "ear_short_r")
+    c.earR:SetSize(42, 42); c.earR:SetPoint("BOTTOM", c, "TOP", 0, -13)
+    do
+        local ag = c.earR:CreateAnimationGroup(); ag:SetLooping("REPEAT")
+        local function Hold(d, o) local a = ag:CreateAnimation("Translation"); a:SetOffset(0, 0); a:SetDuration(d); a:SetOrder(o) end
+        local function Rot(deg, o) local a = ag:CreateAnimation("Rotation"); a:SetDegrees(deg); a:SetOrigin("BOTTOM", 6, 1); a:SetDuration(0.06); a:SetOrder(o) end
+        Hold(2.8, 1); Rot(-14, 2); Rot(14, 3); Hold(0.05, 4); Rot(-12, 5); Rot(12, 6); Hold(0.9, 7)
+        c.twitchAg = ag
+    end
+    c.zzz = {}
+    for i = 1, 3 do
+        local z = ns.Font(c, 10 + i, { 0.8, 0.73, 0.71 }); z:SetText("z"); z:SetAlpha(0)
+        z:SetPoint("BOTTOMLEFT", c, "TOP", 10, 2)
+        local ag = z:CreateAnimationGroup(); ag:SetLooping("REPEAT")
+        local mv = ag:CreateAnimation("Translation"); mv:SetOffset(18, 30); mv:SetDuration(3); mv:SetOrder(1)
+        local fi = ag:CreateAnimation("Alpha"); fi:SetFromAlpha(0); fi:SetToAlpha(0.8); fi:SetDuration(0.9); fi:SetOrder(1)
+        local fo = ag:CreateAnimation("Alpha"); fo:SetFromAlpha(0.8); fo:SetToAlpha(0); fo:SetStartDelay(1.8); fo:SetDuration(1.2); fo:SetOrder(1)
+        c.zzz[i] = { fs = z, ag = ag }
+    end
+    function c:IdleFx(on)
+        self.idleGen = (self.idleGen or 0) + 1
+        local gen = self.idleGen
+        if on then
+            self.ear:SetAlpha(1); self.earR:SetAlpha(1)   -- 까딱은 뺐어요 (가만히)
+            for i, z in ipairs(self.zzz) do
+                C_Timer.After((i - 1) * 1.0, function() if c.idleGen == gen then z.ag:Play() end end)
+            end
+        else
+            self.twitchAg:Stop(); self.ear:SetAlpha(0); self.earR:SetAlpha(0)
+            for _, z in ipairs(self.zzz) do z.ag:Stop(); z.fs:SetAlpha(0) end
+        end
+    end
     c.earG = c:CreateTexture(nil, "ARTWORK", nil, 1); c.earG:SetTexture(ns.MEDIA .. "ear_gold")
     c.earG:SetSize(36, 36); c.earG:SetPoint("BOTTOM", c, "TOP", 0, -12); c.earG:SetAlpha(0)
     do
         local ag = c.earG:CreateAnimationGroup()
-        local a1 = ag:CreateAnimation("Scale"); a1:SetScale(1, 1.3); a1:SetOrigin("BOTTOM", 0, 0); a1:SetDuration(0.1); a1:SetOrder(1); a1:SetSmoothing("OUT")
-        local a2 = ag:CreateAnimation("Scale"); a2:SetScale(1, 1 / 1.3); a2:SetOrigin("BOTTOM", 0, 0); a2:SetDuration(0.18); a2:SetOrder(2); a2:SetSmoothing("IN")
+        -- 짧은 귀에서 쭉 자라나요 (0.6 → 1.08 → 1)
+        local a1 = ag:CreateAnimation("Scale"); a1:SetOrigin("BOTTOM", 0, 0); a1:SetDuration(0.22); a1:SetOrder(1); a1:SetSmoothing("OUT")
+        if a1.SetScaleFrom then a1:SetScaleFrom(1, 0.7); a1:SetScaleTo(1, 1.08) else a1:SetScale(1, 1.08) end
+        local a2 = ag:CreateAnimation("Scale"); a2:SetOrigin("BOTTOM", 0, 0); a2:SetDuration(0.12); a2:SetOrder(2); a2:SetSmoothing("IN")
+        if a2.SetScaleFrom then a2:SetScaleFrom(1, 1.08); a2:SetScaleTo(1, 1) else a2:SetScale(1, 1 / 1.08) end
         c.earPop = ag
     end
     -- 번쩍
@@ -778,7 +814,7 @@ local function CreateCenter(hud)
         self.awake = on
         if on then
             self.fightStart = GetTime()
-            self.earOut:Stop(); self.ear:SetAlpha(0); self.earG:SetAlpha(1)
+            self.earOut:Stop(); self:IdleFx(false); self.earG:SetAlpha(1)
             self.earPop:Play(); self.flashAg:Stop(); self.flashAg:Play()
             Crackle(3); boltWait = 0.5; self.boltTick:Show()   -- 변신 순간 번개 세 갈래
             for _, st in ipairs(self.streaks) do
@@ -787,7 +823,7 @@ local function CreateCenter(hud)
         else
             for _, st in ipairs(self.streaks) do st.ag:Stop(); st.t:SetAlpha(0) end
             self.boltTick:Hide(); for _, b in ipairs(self.bolts) do b.ag:Stop(); b.t:SetAlpha(0) end
-            self.earOut:Play(); self.ear:SetAlpha(1)
+            self.earOut:Play(); self:IdleFx(true)
         end
         if self.ShowDist and UseDistFn and UseDistFn() and self:IsShown() then self:ShowDist() end
     end
@@ -923,6 +959,7 @@ local function CreateCenter(hud)
     pcall(sev.RegisterEvent, sev, "LEARNED_SPELL_IN_TAB")
     sev:SetScript("OnEvent", function() rangeDirty = true end)
 
+    c:IdleFx(true)
     c:Idle()
     return c
 end
@@ -1020,6 +1057,113 @@ local function CreatePet(hud)
         GameTooltip:Show()
     end)
     return f
+end
+
+----------------------------------------------------------------------
+-- 따라가는 중 표시: 대상 초상화 분홍 빛 맥박 + 두 사람 배지 + 아래 알약
+----------------------------------------------------------------------
+local function SetupFollow(f)
+    local por = f.portrait
+    local pending
+    local glow = por:CreateTexture(nil, "BACKGROUND", nil, -2)
+    glow:SetTexture(ns.MEDIA .. "soft_glow"); glow:SetBlendMode("ADD"); glow:SetVertexColor(1, 0.561, 0.639)
+    glow:SetPoint("TOPLEFT", -22, 22); glow:SetPoint("BOTTOMRIGHT", 22, -22); glow:SetAlpha(0)
+    local gag = glow:CreateAnimationGroup(); gag:SetLooping("BOUNCE")
+    local ga = gag:CreateAnimation("Alpha"); ga:SetFromAlpha(0.25); ga:SetToAlpha(0.9); ga:SetDuration(0.8); ga:SetSmoothing("IN_OUT")
+    -- 따라가기 단추 (두 사람 그림): 같은 편 플레이어가 대상이면 초상화 오른쪽 아래에 보여요 · 누르면 따라가기
+    local bf = CreateFrame("Button", "LeelUI_FollowBtn", f, "SecureActionButtonTemplate")
+    bf:SetSize(44, 44); bf:SetFrameLevel(por:GetFrameLevel() + 12)
+    bf:SetPoint("CENTER", por, "BOTTOMRIGHT", -2, 2)
+    bf:SetAttribute("type", "macro"); bf:SetAttribute("macrotext", "/follow target")
+    local down = GetCVarBool and GetCVarBool("ActionButtonUseKeyDown")
+    bf:RegisterForClicks(down and "AnyDown" or "AnyUp")
+    local bt = bf:CreateTexture(nil, "OVERLAY"); bt:SetTexture(ns.MEDIA .. "follow_badge"); bt:SetAllPoints()
+    -- 따라가는 중: 두 사람이 번갈아 콩콩 + 둘레 분홍 점선이 빙글
+    local live = CreateFrame("Frame", nil, bf); live:SetAllPoints(); live:Hide()
+    local lbg = live:CreateTexture(nil, "ARTWORK"); lbg:SetTexture(ns.MEDIA .. "follow_bg"); lbg:SetAllPoints()
+    local p2 = live:CreateTexture(nil, "OVERLAY", nil, 1); p2:SetTexture(ns.MEDIA .. "follow_p2"); p2:SetAllPoints()
+    local p1 = live:CreateTexture(nil, "OVERLAY", nil, 2); p1:SetTexture(ns.MEDIA .. "follow_p1"); p1:SetAllPoints()
+    local ring = live:CreateTexture(nil, "OVERLAY", nil, 3); ring:SetTexture(ns.MEDIA .. "follow_ring"); ring:SetAllPoints()
+    local function Hop(t)
+        local ag = t:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+        local a = ag:CreateAnimation("Translation"); a:SetOffset(0, 2.5); a:SetDuration(0.16); a:SetSmoothing("OUT")
+        return ag
+    end
+    local hop1, hop2 = Hop(p1), Hop(p2)
+    local rag = ring:CreateAnimationGroup(); rag:SetLooping("REPEAT")
+    local ra = rag:CreateAnimation("Rotation"); ra:SetDegrees(-360); ra:SetDuration(2.4)
+    local liveOn = false
+    local function Live(on)
+        if on == liveOn then return end
+        liveOn = on
+        if on then
+            bt:Hide(); live:Show(); hop1:Play(); rag:Play()
+            C_Timer.After(0.16, function() if liveOn then hop2:Play() end end)   -- 반 박자 늦게 = 번갈아 콩콩
+        else
+            hop1:Stop(); hop2:Stop(); rag:Stop(); live:Hide(); bt:Show()
+        end
+    end
+    local bag = bf:CreateAnimationGroup()
+    local b1 = bag:CreateAnimation("Scale"); b1:SetScale(1.35, 1.35); b1:SetDuration(0.12); b1:SetOrder(1); b1:SetSmoothing("OUT")
+    local b2 = bag:CreateAnimation("Scale"); b2:SetScale(1 / 1.35, 1 / 1.35); b2:SetDuration(0.16); b2:SetOrder(2); b2:SetSmoothing("IN")
+    bf:SetAlpha(0)
+    bf:HookScript("PreClick", function() local ok, n = pcall(UnitName, "target"); if ok then pending = n end end)
+    bf:SetScript("OnEnter", function(s2)
+        GameTooltip:SetOwner(s2, "ANCHOR_RIGHT"); GameTooltip:AddLine("따라가기", 1, 0.84, 0.88)
+        GameTooltip:AddLine("초상화 Alt + 클릭도 돼요 · 움직이면 멈춰요", 0.75, 0.68, 0.66); GameTooltip:Show()
+    end)
+    bf:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local pill = CreateFrame("Frame", nil, f); pill:SetHeight(20); pill:SetFrameLevel(por:GetFrameLevel() + 9)
+    pill:SetPoint("TOPRIGHT", por, "BOTTOMRIGHT", 0, -10)
+    pill.bg = ns.RoundRect(pill, 10, { 0.07, 0.047, 0.047 }, "BACKGROUND", 0, 0); pill.bg:SetColor({ 0.07, 0.047, 0.047 }, 0.9)
+    pill.rim = ns.RoundRect(pill, 10, { 1, 0.561, 0.639 }, "BACKGROUND", -1, -1); pill.rim:SetColor({ 1, 0.561, 0.639 }, 0.8)
+    pill.fs = ns.Font(pill, 11, { 1, 0.96, 0.95 }); pill.fs:SetPoint("CENTER", 0, 0)
+    pill:Hide()
+    local followName
+    -- 이름 비교: 와우 포에버는 "르엘 무이"처럼 띄어쓴 이름이 와서, 앞 단어만 같아도 같은 사람
+    local function First(n) if type(n) ~= "string" then return nil end; return (n:gsub("%-.*$", ""):match("^(%S+)")) end
+    local function Same(a, b)
+        local ok, r = pcall(function()
+            if a == nil or b == nil then return false end
+            if a == b then return true end
+            return First(a) ~= nil and First(a) == First(b)
+        end)
+        return ok and r
+    end
+    f:HookScript("PreClick", function(_, btn) if IsAltKeyDown() then local ok, n = pcall(UnitName, "target"); if ok then pending = n end end end)
+    ns.FollowPending = function(n) pending = n end
+    local function Paint()
+        local on = followName and UnitExists("target") and Same(UnitName("target"), followName)
+        local friend = UnitExists("target") and UnitIsPlayer("target") and UnitIsFriend("player", "target") and not UnitIsUnit("target", "player")
+        if on then
+            if bf:GetAlpha() < 1 then bag:Play() end
+            bf:SetAlpha(1); Live(true)
+            glow:Show(); gag:Play()
+            pill:Hide()   -- 글자 대신 아이콘이 움직여요
+        else
+            Live(false); bf:SetAlpha(friend and 0.9 or 0)   -- 같은 편 플레이어면 흐리게 보여서 누를 수 있다는 걸 알려줘요
+            gag:Stop(); glow:SetAlpha(0); pill:Hide()
+        end
+    end
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("AUTOFOLLOW_BEGIN"); ev:RegisterEvent("AUTOFOLLOW_END"); ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+    ev:SetScript("OnEvent", function(_, event, name)
+        if event == "AUTOFOLLOW_BEGIN" then
+            followName = (type(name) == "string" and name ~= "") and name or pending
+            if type(followName) == "string" then followName = followName:gsub("%-.*$", "") end
+            if ns.db and ns.db.followDbg then print("|cfff2b3c2[따라가기]|r 시작 이름=" .. tostring(name) .. " · 대상=" .. tostring(UnitName("target"))) end
+        elseif event == "AUTOFOLLOW_END" then
+            if followName then print("|cfff2b3c2르엘|r 따라가기 끝: " .. followName) end
+            followName = nil
+        end
+        Paint()
+    end)
+    ns.FollowName = function() return followName end
+    SLASH_LEELFOLLOW1 = "/르엘따라"
+    SlashCmdList.LEELFOLLOW = function()
+        ns.db.followDbg = not ns.db.followDbg
+        print("|cfff2b3c2[따라가기]|r 점검 " .. (ns.db.followDbg and "켬 · Alt+클릭으로 따라가 보세요" or "끔") .. " · 지금: " .. tostring(followName))
+    end
 end
 
 local function UpdatePet(f)
@@ -1151,6 +1295,10 @@ function ns:CreateHUD()
     -- 아래 줄 글씨가 만들어진 뒤라 글씨 강조를 한 번 더 (자원 · 마나 글씨까지)
     ns.ApplyHpTextSize(player); ns.ApplyHpTextSize(target)
     RegisterUnitWatch(target)
+    -- 따라가기: 대상 초상화를 Alt + 클릭
+    target:SetAttribute("alt-type1", "macro")
+    target:SetAttribute("alt-macrotext1", "/follow target")
+    SetupFollow(target)
     local center = CreateCenter(hud)
     local pet = CreatePet(hud)
     RegisterUnitWatch(pet)
@@ -1317,6 +1465,18 @@ function ns:CreateHUD()
     end
     pcall(petEv.RegisterEvent, petEv, "PET_UI_UPDATE")
     pcall(petEv.RegisterEvent, petEv, "UNIT_HAPPINESS")
+    -- 점검: /르엘펫검사 (만족도가 안 보일 때)
+    SLASH_LEELPETCHK1 = "/르엘펫검사"
+    SlashCmdList.LEELPETCHK = function()
+        local P = function(m) print("|cfff2b3c2[르엘 펫]|r " .. m) end
+        P("GetPetHappiness 함수: " .. tostring(type(GetPetHappiness)) .. " · 펫 있음: " .. tostring(UnitExists("pet")))
+        local ok, h, dmg, loy = pcall(GetPetHappiness)
+        local sec = issecretvalue and h ~= nil and issecretvalue(h)
+        P("결과: ok=" .. tostring(ok) .. " · 만족도=" .. (sec and "(숨김 값)" or tostring(h)) .. " · 피해=" .. tostring(not sec and dmg or "?") .. " · 충성=" .. tostring(not sec and loy or "?"))
+        P("펫 칸: " .. tostring(pet and pet:IsShown()) .. " · 얼굴 표시: " .. tostring(pet and pet.moodFrame and pet.moodFrame:IsShown()))
+        if C_PetInfo then P("C_PetInfo 있음") end
+        if PetFrameHappiness then P("블리자드 펫 만족도 그림: " .. tostring(PetFrameHappiness:IsShown())) end
+    end
     petEv:SetScript("OnEvent", function()
         if not ns.moving then UpdatePet(pet) end
     end)
