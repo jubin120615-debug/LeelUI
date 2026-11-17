@@ -131,6 +131,58 @@ local function Build(plate)
     f.glow:SetBlendMode("ADD")
     f.glow:SetPoint("TOPLEFT", -6, 6); f.glow:SetPoint("BOTTOMRIGHT", 6, -6)
     f.glow:Hide()
+    -- 내 대상: 바를 따라 하얀 빛이 스윽 지나가요 (바 안쪽만 보이게 자름)
+    local clip = CreateFrame("Frame", nil, f.hp)
+    clip:SetPoint("TOPLEFT", 1, -1); clip:SetPoint("BOTTOMRIGHT", -1, 1)
+    clip:SetClipsChildren(true); clip:SetFrameLevel(f.hp:GetFrameLevel() + 3)
+    local sh = clip:CreateTexture(nil, "OVERLAY")
+    sh:SetTexture(ns.MEDIA .. "soft_glow"); sh:SetBlendMode("ADD"); sh:SetVertexColor(1, 1, 1, 0.75)
+    sh:SetSize(30, H * 2.4)
+    clip.t = 0
+    clip:SetScript("OnUpdate", function(self, el)
+        self.t = (self.t + el) % 1.6
+        local w = self:GetWidth() or W
+        local x = -20 + (w + 40) * math.min(1, self.t / 1.1)   -- 1.1초 지나가고 0.5초 쉬어요
+        sh:ClearAllPoints(); sh:SetPoint("CENTER", self, "LEFT", x, 0)
+        sh:SetAlpha(self.t < 1.1 and 0.75 or 0)
+    end)
+    clip:Hide()
+    f.shine = clip
+    -- 내 대상 표시 (허브에서 고르기): 조준 = "착" 조여들고 천천히 돌아요 · 화살표 = 톡 떨어져 콩콩
+    local sw = CreateFrame("Frame", nil, f); sw:SetSize(26, 26); sw:SetFrameLevel(f.hp:GetFrameLevel() + 8)
+    sw.tex = sw:CreateTexture(nil, "OVERLAY"); sw.tex:SetAllPoints()
+    sw:Hide()
+    sw:SetScript("OnUpdate", function(self, el)
+        self.t = (self.t or 0) + el
+        local t = self.t
+        -- 색 = 이 적 체력바 색 (선공 빨강 · 비선공 크림 · 남의 몹 회색)
+        if f.tapped then self.tex:SetVertexColor(0.72, 0.69, 0.70)
+        elseif f.calm then self.tex:SetVertexColor(1.00, 0.86, 0.60)
+        else self.tex:SetVertexColor(0.949, 0.439, 0.498) end
+        if self.style == "arrow" then
+            local y, a = 0, 1
+            if t < 0.2 then local k = 1 - (1 - t / 0.2) ^ 3; y = 16 * (1 - k); a = k
+            else y = 4 * math.abs(math.sin((t - 0.2) * math.pi / 0.6)) end
+            self:SetScale(1); self:SetAlpha(a)
+            self:ClearAllPoints(); self:SetPoint("BOTTOM", f.hp, "TOP", 0, 22 + y)
+            self.tex:SetRotation(0)
+        else
+            local sc, a = 1, 1
+            if t < 0.2 then local k = 1 - (1 - t / 0.2) ^ 3; sc = 1.9 - 0.9 * k; a = k end
+            self:SetScale(sc); self:SetAlpha(a)
+            self:ClearAllPoints(); self:SetPoint("BOTTOM", f.hp, "TOP", 0, 20 / sc)
+            self.tex:SetRotation(-t * 2 * math.pi / 4)   -- 4초에 한 바퀴
+        end
+    end)
+    function sw:Stab()
+        self.style = ns.db.npMark or "aim"
+        self.ms = (tonumber(ns.db.npMarkScale) or 100) / 100   -- 허브 > 적 이름표 > 표시 크기
+        if self.style == "arrow" then self:SetSize(22 * self.ms, 16 * self.ms); self.tex:SetTexture(ns.MEDIA .. "np_arrow")
+        else self:SetSize(26 * self.ms, 26 * self.ms); self.tex:SetTexture(ns.MEDIA .. "np_aim") end
+        self.t = 0; self:Show()
+    end
+    function sw:Off() self:Hide() end
+    f.sword = sw
     -- 회색(레벨 낮은) 몹 아우라: 바는 회색, 둘레 빛으로 선공(빨강) · 비선공(노랑)
     f.aura = f.hp:CreateTexture(nil, "BACKGROUND", nil, -3)
     f.aura:SetTexture(ns.MEDIA .. "np_glow")          -- 가장자리가 흐려지는 빛 (부드럽게 번져요)
@@ -588,9 +640,17 @@ local function UpdateBorder(f, unit)
         c, a = C.dmg, 1
         f.glow:SetVertexColor(C.dmg[1], C.dmg[2], C.dmg[3], 0.45); f.glow:Show()
     elseif isTarget then
-        c, a = { 1, 1, 1 }, 1
-        f.glow:SetVertexColor(1, 0.84, 0.88, 0.4); f.glow:Show()
+        c, a = { 1, 0.561, 0.639 }, 1   -- 내 대상: 분홍 테 + 분홍 빛
+        f.glow:SetVertexColor(1, 0.561, 0.639, 0.6); f.glow:Show()
     end
+    if f.shine then
+        if isTarget and not f.dead then if not f.shine:IsShown() then f.shine.t = 0 end; f.shine:Show() else f.shine:Hide() end
+    end
+    if f.sword and (ns.db.npMark or "aim") ~= "off" then
+        local on = isTarget and not f.dead
+        if on and (not f.wasTarget or f.sword.style ~= (ns.db.npMark or "aim") or f.sword.ms ~= (tonumber(ns.db.npMarkScale) or 100) / 100) then f.sword:Stab() elseif not on and f.wasTarget then f.sword:Off() end
+        f.wasTarget = on
+    elseif f.sword and f.wasTarget then f.sword:Off(); f.wasTarget = false end
     f.hp.border:SetVertexColor(c[1], c[2], c[3], a)
     if isTarget then f.name:SetTextColor(1, 1, 1)
     elseif not f.tapped then
@@ -665,6 +725,10 @@ local function AttachAuras(f, plate)
     local af = uf and uf.AurasFrame
     if not af then return end
     f.auras = af
+    -- 이름표는 재활용돼요: 전에 우호 이름표(시체 줍기 등)로 쓰일 때 숨겨 둔 게 남아 있으면 풀기
+    if af.leelHidden then HideFrame(af, false) end
+    if af.DebuffListFrame and af.DebuffListFrame.leelHidden then HideFrame(af.DebuffListFrame, false) end
+    pcall(af.SetAlpha, af, 1)
     pcall(af.SetIgnoreParentAlpha, af, true)   -- 숨긴 블리자드 이름표와 달리 보이게
     local list = af.DebuffListFrame or af
     list.leelAnchor = f.debRow
@@ -947,6 +1011,16 @@ local function OnAdded(unit)
         return
     end
 
+    -- 우호 이름표로 쓰일 때 숨겨 둔 블리자드 조각(디버프 칸 포함)부터 되돌리기
+    local uf0 = plate.UnitFrame
+    if uf0 then
+        for _, ch in ipairs({ uf0:GetChildren() }) do
+            if ch.leelHidden then HideFrame(ch, false) end
+        end
+        for _, r in ipairs({ uf0:GetRegions() }) do
+            if r.leelHidden then HideFrame(r, false) end
+        end
+    end
     local f = plate.leel or Build(plate)
     f.unit = unit
     f.dead = nil
@@ -974,6 +1048,7 @@ local function OnRemoved(unit)
         DetachAuras(f:GetParent())
         DetachCast(f:GetParent())
         f.blizzCast = nil
+        if f.sword then f.sword:Off(); f.wasTarget = false end
         f:Hide()
         active[unit] = nil
     end
@@ -1068,4 +1143,20 @@ function ns:EnableNameplates()
         local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
         if u then OnAdded(u) end
     end
+end
+
+-- /르엘디버프 : 내 대상 이름표의 디버프 칸 상태 점검
+SLASH_LEELNPDEB1 = "/르엘디버프"
+SlashCmdList.LEELNPDEB = function()
+    local plate = C_NamePlate.GetNamePlateForUnit("target")
+    if not plate then print("|cffff8fab르엘|r 대상 이름표가 없어요 (적을 고르고 다시)") return end
+    local uf = plate.UnitFrame
+    local af = uf and uf.AurasFrame
+    if not af then print("|cffff8fab르엘|r 디버프 칸(AurasFrame)이 없어요") return end
+    local list = af.DebuffListFrame or af
+    local n, shown = 0, 0
+    for _, it in ipairs({ list:GetChildren() }) do n = n + 1; if it:IsShown() then shown = shown + 1 end end
+    print(("|cffff8fab르엘|r 디버프 칸: 보임=%s 투명도=%.2f 숨김표시=%s · 목록 보임=%s 투명도=%.2f · 아이콘 %d개(보임 %d) · CVar=%s"):format(
+        tostring(af:IsShown()), af:GetAlpha() or -1, tostring(af.leelHidden), tostring(list:IsShown()), list:GetAlpha() or -1, n, shown,
+        tostring(GetCVar("nameplateShowDebuffs"))))
 end

@@ -20,18 +20,22 @@ local GAP = 160
 ----------------------------------------------------------------------
 -- 한쪽(플레이어 또는 대상)
 ----------------------------------------------------------------------
-local function CreateSide(hud, unit, mirrored)
+local function CreateSide(hud, unit, mirrored, preview)
     local A  = mirrored and "TOPRIGHT" or "TOPLEFT"
     local sx = mirrored and -1 or 1
     local J  = mirrored and "RIGHT" or "LEFT"
 
-    local f = CreateFrame("Button", "LeelUI_" .. unit, hud, "SecureUnitButtonTemplate")
+    -- preview = 허브 미리 보기용 모형 (보통 프레임 · 클릭 없음, 생김새는 진짜와 같아요)
+    local f = preview and CreateFrame("Frame", nil, hud)
+        or CreateFrame("Button", "LeelUI_" .. unit, hud, "SecureUnitButtonTemplate")
     f:SetSize(SIDE_W, 140)
     f:SetPoint(A, hud, A, 0, 0)
-    f:SetAttribute("unit", unit)
-    f:SetAttribute("*type1", "target")
-    f:SetAttribute("*type2", "togglemenu")
-    f:RegisterForClicks("AnyUp")
+    if not preview then
+        f:SetAttribute("unit", unit)
+        f:SetAttribute("*type1", "target")
+        f:SetAttribute("*type2", "togglemenu")
+        f:RegisterForClicks("AnyUp")
+    end
     f.unit, f.mirrored = unit, mirrored
 
     -- 초상화
@@ -504,6 +508,48 @@ local function UpdatePower(f)
     end
 end
 
+-- 허브 미리 보기: 진짜 위쪽 HUD와 같은 코드로 그린 모형 (내 캐릭터 + 가짜 대상)
+function ns.BuildHudPreview(parent)
+    local hud = CreateFrame("Frame", nil, parent)
+    hud:SetSize(SIDE_W * 2 + GAP, POR_H + 14 + 64)
+    local p = CreateSide(hud, "player", false, true)
+    AddPlayerExtras(p)
+    local t = CreateSide(hud, "target", true, true)
+    AddTargetPower(t)
+    -- 가운데 금빛 귀 + 거리
+    local mid = CreateFrame("Frame", nil, hud)
+    mid:SetSize(GAP, 120); mid:SetPoint("TOP", hud, "TOP", 0, -6)
+    local e1 = mid:CreateTexture(nil, "ARTWORK"); e1:SetTexture(ns.MEDIA .. "ear_gold"); e1:SetSize(34, 62)
+    e1:SetPoint("BOTTOMRIGHT", mid, "TOP", -2, -64); e1:SetTexCoord(1, 0, 0, 1)
+    local e2 = mid:CreateTexture(nil, "ARTWORK"); e2:SetTexture(ns.MEDIA .. "ear_gold"); e2:SetSize(34, 62)
+    e2:SetPoint("BOTTOMLEFT", mid, "TOP", 2, -64)
+    local dist = ns.Num(mid, 40, { 1, 1, 1 }); dist:SetPoint("TOP", mid, "TOP", 0, -64)
+    local sub = ns.Font(mid, 12, C.tx2); sub:SetPoint("TOP", dist, "BOTTOM", 0, -2)
+    hud.p, hud.t = p, t
+    function hud:Refresh()
+        pcall(UpdateInfo, p); pcall(UpdateHealth, p); pcall(UpdatePower, p)
+        ns.SetText(t.name, "붉은갈기 노움"); t.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+        t.lv:SetText("36"); t.lv:SetTextColor(1, 0.82, 0.2)
+        t.cls:Hide()
+        t.portrait.tex:SetTexture("Interface\\Icons\\Ability_Hunter_Pet_Wolf")
+        pcall(ns.SetBar, t.hp.bar, 62, 100)
+        t.hpValue:SetText("1184"); t.hpPct:SetText("62%")
+        if t.tpower then
+            t.tpower:Show(); t.tpowerText:Show(); t.tpowerLabel:Show()
+            t.tpower:SetMinMaxValues(0, 1); t.tpower:SetValue(0.7)
+            t.tpower:SetStatusBarColor(C.mana[1], C.mana[2], C.mana[3])
+            t.tpowerText:SetText("540"); t.tpowerLabel:SetText("마나")
+        end
+        ns.ApplyHpTextSize(p); ns.ApplyHpTextSize(t)
+        local useDist = not (ns.db and ns.db.centerTime)
+        e1:SetShown(useDist); e2:SetShown(useDist)
+        dist:SetText(useDist and "5m" or "0:42"); sub:SetText(useDist and "대상과 거리" or "전투 시간")
+        self:SetScale(ns.db.scale or 0.7)
+    end
+    hud:Refresh()
+    return hud
+end
+
 ----------------------------------------------------------------------
 -- 가운데: 대상과 거리 (기본) 또는 전투 시간 (허브에서 고름)
 -- 와우는 정확한 거리를 안 알려줘서, 내 기술 사거리로 '~몇 m' 구간을 재요
@@ -939,6 +985,7 @@ local function CreateCenter(hud)
     -- /르엘각성 : 전투 없이 각성 모습 미리 보기 (한 번 더 = 끄기)
     SLASH_LEELAWAKE1 = "/르엘각성"
     SlashCmdList.LEELAWAKE = function() c:Awaken(not c.awake); if c.awake and not c:IsShown() then c:ShowDist() end end
+    ns.hudCenter = c   -- 르엘 허브: 위쪽 HUD를 고르면 각성 모습 미리 보기
     SLASH_LEELTOTEM1 = "/르엘토템"; SLASH_LEELTOTEM2 = "/leeltotem"
     SlashCmdList.LEELTOTEM = function(msg)
         msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")

@@ -230,6 +230,13 @@ local MODULES = {
             { t = "toggle", label = "선공 / 비선공 구별", hint = "선공은 분홍 바, 비선공은 크림색 바",
               get = function() return ns.db.npAggro ~= false end,
               set = function(v) ns.db.npAggro = v; if ns.RefreshPlateInfo then ns:RefreshPlateInfo() end end },
+            { t = "seg", label = "내 대상 표시", hint = "고른 적 이름 위 (분홍 테 · 흐르는 빛은 늘)",
+              options = { { "조준", "aim" }, { "화살표", "arrow" }, { "끄기", "off" } },
+              get = function() return ns.db.npMark or "aim" end,
+              set = function(v) ns.db.npMark = v; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
+            { t = "slider", label = "표시 크기", min = 50, max = 200,
+              get = function() return tonumber(ns.db.npMarkScale) or 100 end,
+              set = function(v) ns.db.npMarkScale = v; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
             { t = "toggle", label = "퀘스트 몹 표시", hint = "퀘스트 원 (Questie 없이도: 한 번 잡은 몹은 기억)",
               get = function() return ns.db.questCircle ~= false end,
               set = function(v) ns.db.questCircle = v; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
@@ -1498,6 +1505,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.35", "적 이름표 내 대상 표시 · 이동 모드 크기 줄", "조준 · 화살표 · 디버프 고침 · 지도 퀘 경험치 · 채팅창 크기" },
     { "1.3.34", "따라가기 아이콘 고침", "따라갈 때 아이콘이 위로 날아가던 것" },
     { "1.3.33", "따라가기 단추 · 주사위 결과 · 클릭 막힘 고침", "초상화 두 사람 아이콘 · 누가 뭘 눌러 먹었나 · 남은 시간 시계" },
     { "1.3.32", "전투 중 노란 번개", "금빛 토끼 귀 옆으로 빠직빠직" },

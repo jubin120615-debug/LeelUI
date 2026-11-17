@@ -642,6 +642,7 @@ local function Mover(frame, label, key, after)
     end
     local lab = ns.Font(m, 12, C.accHi)
     lab:SetPoint("BOTTOM", m, "TOP", 0, 4); lab:SetText(label)
+    if ns.MoveSizeHook then ns.MoveSizeHook(m, label .. " 크기", label) end
     m:SetScript("OnDragStart", function() if not InCombatLockdown() then frame:StartMoving() end end)
     m:SetScript("OnDragStop", function()
         frame:StopMovingOrSizing()

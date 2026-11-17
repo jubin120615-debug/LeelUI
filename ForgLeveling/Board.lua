@@ -224,6 +224,87 @@ local function RewardXP(id)
     if ok and type(xp) == "number" and xp > 0 then return xp end
 end
 
+local PinTooltip
+do
+-- 지도 핀 정보: 돈 · 보상 템 (퀘스트 로그에서 그 퀘를 잠깐 골라서 읽고 원래대로)
+local rewardCache = {}
+local function QuestRewards(e)
+    if not e or not e.index then return end
+    local key = (e.id or 0) .. ":" .. e.index
+    local c = rewardCache[key]
+    if c and GetTime() - c.t < 30 then return c end
+    c = { t = GetTime(), money = 0, items = {}, choices = {} }
+    local sel = GetQuestLogSelection and GetQuestLogSelection()
+    pcall(function()
+        if SelectQuestLogEntry then SelectQuestLogEntry(e.index) end
+        if GetQuestLogRewardMoney then c.money = GetQuestLogRewardMoney() or 0 end
+        for i = 1, (GetNumQuestLogRewards and GetNumQuestLogRewards() or 0) do
+            local _, tex, n = GetQuestLogRewardInfo(i)
+            if tex then c.items[#c.items + 1] = { tex = tex, n = n } end
+        end
+        for i = 1, (GetNumQuestLogChoices and GetNumQuestLogChoices() or 0) do
+            local _, tex, n = GetQuestLogChoiceInfo(i)
+            if tex then c.choices[#c.choices + 1] = { tex = tex, n = n } end
+        end
+    end)
+    if sel and SelectQuestLogEntry then pcall(SelectQuestLogEntry, sel) end
+    rewardCache[key] = c
+    return c
+end
+local function LvText(lv)
+    lv = tonumber(lv) or 0
+    if lv <= 0 then return "" end
+    local col = GetQuestDifficultyColor and GetQuestDifficultyColor(lv)
+    local hex = col and ("|cff%02x%02x%02x"):format(col.r * 255, col.g * 255, col.b * 255) or "|cffffffff"
+    return hex .. "Lv " .. lv .. "|r"
+end
+local function Comma(n) return BreakUpLargeNumbers and BreakUpLargeNumbers(n) or tostring(n) end
+local TAGTXT = { elite = "|cffffb15c정예|r", dungeon = "|cffc8b0ff던전|r", raid = "|cffff7a7a공격대|r" }
+PinTooltip = function(gg)
+    local multi = #gg.ns > 1
+    GameTooltip:SetText(multi and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
+    local sumXP, sumMoney = 0, 0
+    for i, num in ipairs(gg.ns) do
+        local e = gg.es[i]
+        if e then
+            local right = LvText(e.level) .. (e.tag and TAGTXT[e.tag] and ("  " .. TAGTXT[e.tag]) or "")
+            GameTooltip:AddDoubleLine(("|cfff2b3c2%d|r  %s"):format(num, e.title or "?"), right, 1, 1, 1, 1, 1, 1)
+            -- 진행: 반납 / 목표 (두 줄까지)
+            if e.done then
+                GameTooltip:AddLine("   |cffffd34d반납하러 가요|r")
+            else
+                for k, o in ipairs(e.objs or {}) do
+                    if k > 2 then break end
+                    local prog = (o.have and o.need) and (" " .. o.have .. "/" .. o.need) or ""
+                    local col = o.done and "|cff7fd67a" or "|cffcbbab5"
+                    GameTooltip:AddLine("   " .. col .. (o.text or "") .. prog .. "|r")
+                end
+            end
+            local rw = QuestRewards(e)
+            local money = rw and rw.money or 0
+            local xpTxt = e.xp and ("경험치 |cffffd6e0+" .. Comma(e.xp) .. "|r") or "경험치 |cff9a8a86?|r"
+            local moneyTxt = (money > 0 and GetCoinTextureString) and GetCoinTextureString(money) or ""
+            GameTooltip:AddDoubleLine("   " .. xpTxt, moneyTxt, 0.95, 0.88, 0.86, 1, 1, 1)
+            if rw and (#rw.items > 0 or #rw.choices > 0) then
+                local s = "   "
+                for _, it in ipairs(rw.items) do s = s .. "|T" .. it.tex .. ":20:20:0:0|t " end
+                if #rw.choices > 0 then
+                    if #rw.items > 0 then s = s .. " |cff9a8a86+|r " end
+                    for _, it in ipairs(rw.choices) do s = s .. "|T" .. it.tex .. ":20:20:0:0|t " end
+                    s = s .. " |cff9a8a86중 1개 고르기|r"
+                end
+                GameTooltip:AddLine(s)
+            end
+            sumXP = sumXP + (e.xp or 0); sumMoney = sumMoney + money
+            if multi and i < #gg.ns then GameTooltip:AddLine(" ") end
+        end
+    end
+    if multi and sumXP > 0 then
+        GameTooltip:AddDoubleLine("모두 하면 |cffffd6e0+" .. Comma(sumXP) .. "|r", (sumMoney > 0 and GetCoinTextureString) and GetCoinTextureString(sumMoney) or "", 1, 0.84, 0.88, 1, 1, 1)
+    end
+end
+end
+
 -- 정예 · 던전 · 공격대 퀘 알아내기 (Questie가 고친 값 → 게임 값)
 local TAG_KIND = { [1] = "elite", [81] = "dungeon", [62] = "raid", [88] = "raid", [89] = "raid", [85] = "dungeon" }
 local TAG_NAME = { elite = "정예", dungeon = "던전", raid = "공격대" }
@@ -4753,12 +4834,15 @@ local function PaintWorldMap()
                 local gg = self.leelG
                 if not gg then return end
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(#gg.ns > 1 and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
-                for i, num in ipairs(gg.ns) do
-                    local e = gg.es[i]
-                    local t = e and e.title or "?"
-                    if e and e.done then t = t .. " |cffffd34d(반납)|r" end
-                    GameTooltip:AddLine(("|cfff2b3c2%d|r  %s"):format(num, t), 1, 1, 1)
+                -- 레벨 · 진행 · 경험치 · 돈 · 보상 템 (문제가 생기면 예전처럼 이름만)
+                if not pcall(PinTooltip, gg) then
+                    GameTooltip:SetText(#gg.ns > 1 and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
+                    for i, num in ipairs(gg.ns) do
+                        local e = gg.es[i]
+                        local t = e and e.title or "?"
+                        if e and e.done then t = t .. " |cffffd34d(반납)|r" end
+                        GameTooltip:AddLine(("|cfff2b3c2%d|r  %s"):format(num, t), 1, 1, 1)
+                    end
                 end
                 GameTooltip:Show()
             end)
@@ -5301,3 +5385,134 @@ _G.LeelQuestRoute = function()
     return m, out
 end
 
+
+----------------------------------------------------------------------
+-- Questie 지도 아이콘(느낌표 · 물음표) 툴팁에 경험치 · 레벨 · 돈 · 보상 템 덧붙이기
+----------------------------------------------------------------------
+;(function()
+    local function Comma2(n) return BreakUpLargeNumbers and BreakUpLargeNumbers(n) or tostring(n) end
+    local function LvCol(lv)
+        local col = lv and lv > 0 and GetQuestDifficultyColor and GetQuestDifficultyColor(lv)
+        return col and ("|cff%02x%02x%02x"):format(col.r * 255, col.g * 255, col.b * 255) or "|cffffffff"
+    end
+    local function LogRewards(id)
+        local idx = GetQuestLogIndexByID and GetQuestLogIndexByID(id)
+        if not idx or idx == 0 or not SelectQuestLogEntry then return end
+        local out = { items = {}, choices = {} }
+        local sel = GetQuestLogSelection and GetQuestLogSelection()
+        pcall(function()
+            SelectQuestLogEntry(idx)
+            for i = 1, (GetNumQuestLogRewards and GetNumQuestLogRewards() or 0) do
+                local _, tex = GetQuestLogRewardInfo(i); if tex then out.items[#out.items + 1] = tex end
+            end
+            for i = 1, (GetNumQuestLogChoices and GetNumQuestLogChoices() or 0) do
+                local _, tex = GetQuestLogChoiceInfo(i); if tex then out.choices[#out.choices + 1] = tex end
+            end
+        end)
+        if sel then pcall(SelectQuestLogEntry, sel) end
+        return out
+    end
+    local dbg = false
+    local function D(...) if dbg then print("|cfff2b3c2[퀘핀]|r", ...) end end
+    local function AddInfo(icon, tip)
+        D("부름", tip == GameTooltip, icon and icon.data and tostring(icon.data.Id), icon and icon.data and tostring(icon.data.Type), tip.leelQAdded)
+        if tip ~= GameTooltip or not QuestieLoader then return end
+        if tip.leelQAdded then return end
+        tip.leelQAdded = true
+        local DB = QuestieLoader:ImportModule("QuestieDB")
+        local XP = QuestieLoader:ImportModule("QuestXP")
+        if not DB or not DB.QueryQuestSingle then return end
+        local ids, seen = {}, {}
+        local function add(d)
+            local id = d and d.Id
+            if type(id) == "number" and not seen[id] and #ids < 5 then seen[id] = true; ids[#ids + 1] = id end
+        end
+        add(icon and icon.data)
+        for _, ic in ipairs(tip._showIcons or {}) do add(ic.data) end
+        D("퀘 개수", #ids)
+        if #ids == 0 then return end
+        tip:AddLine(" ")
+        for _, id in ipairs(ids) do
+            local ok, lv = pcall(DB.QueryQuestSingle, id, "questLevel")
+            local _, req = pcall(DB.QueryQuestSingle, id, "requiredLevel")
+            local _, name = pcall(DB.QueryQuestSingle, id, "name")
+            lv = ok and tonumber(lv) or nil
+            local xp = 0
+            if XP and XP.GetQuestLogRewardXP then local okX, v = pcall(XP.GetQuestLogRewardXP, XP, id); if okX then xp = tonumber(v) or 0 end end
+            local money = 0
+            if XP and XP.GetQuestRewardMoney then local okM, v = pcall(XP.GetQuestRewardMoney, id); if okM then money = tonumber(v) or 0 end end
+            if #ids > 1 and type(name) == "string" then tip:AddLine(LvCol(lv) .. "[" .. (lv or "?") .. "]|r " .. name, 1, 1, 1) end
+            local left = (xp > 0) and ("경험치 |cffffd6e0+" .. Comma2(xp) .. "|r") or "경험치 |cff9a8a86?|r"
+            local right = (money > 0 and GetCoinTextureString) and GetCoinTextureString(money) or ""
+            tip:AddDoubleLine(left, right, 0.95, 0.88, 0.86, 1, 1, 1)
+            local info = (lv and (LvCol(lv) .. "퀘 레벨 " .. lv .. "|r") or "")
+            local myLv = UnitLevel("player") or 0
+            req = tonumber(req)
+            if req and req > 0 then
+                info = info .. (info ~= "" and "  ·  " or "") .. ((myLv < req) and ("|cffff7a7a" .. req .. "레벨부터|r") or ("|cff9a8a86받을 수 있음 " .. req .. "+|r"))
+            end
+            if info ~= "" then tip:AddLine(info) end
+            local rw = LogRewards(id)
+            if rw and (#rw.items > 0 or #rw.choices > 0) then
+                local s = ""
+                for _, tx in ipairs(rw.items) do s = s .. "|T" .. tx .. ":20:20:0:0|t " end
+                if #rw.choices > 0 then
+                    for _, tx in ipairs(rw.choices) do s = s .. "|T" .. tx .. ":20:20:0:0|t " end
+                    s = s .. " |cff9a8a86중 1개 고르기|r"
+                end
+                tip:AddLine(s)
+            end
+        end
+        tip:Show()
+    end
+    local hooked
+    local function TryHook()
+        if hooked or not QuestieLoader then return end
+        local ok, M = pcall(QuestieLoader.ImportModule, QuestieLoader, "MapIconTooltip")
+        if ok and M and M.ShowOnTooltip then
+            hooked = true
+            hooksecurefunc(M, "ShowOnTooltip", function(icon, tip) local ok, err = pcall(AddInfo, icon, tip); if not ok then D("오류", err) end end)
+        end
+    end
+    -- 다른 길로 그려도 꼭 붙게: Questie가 툴팁을 띄운 뒤(ShownAsMapIcon) 한 번
+    GameTooltip:HookScript("OnTooltipCleared", function(self) self.leelQAdded = nil end)
+    GameTooltip:HookScript("OnHide", function(self) self.leelQAdded = nil end)
+    -- 지도 위 퀘스트 아이콘이 어느 애드온 것이든 (Questie · OpenMap · 게임 기본 핀): 툴팁 주인에게서 퀘 번호 찾기
+    local function OnMap(f)
+        local n = 0
+        while f and n < 12 do
+            if f == WorldMapFrame or f == _G.OpenMapFrame then return true end
+            local nm = f.GetName and f:GetName()
+            if nm and (nm:find("^WorldMap") or nm:find("^OpenMap") or nm:find("^Questie") or nm:find("^LeelMap")) then return true end
+            f = f.GetParent and f:GetParent(); n = n + 1
+        end
+    end
+    local function QuestIdOf(own)
+        if not own then return end
+        local d = own.data
+        local id = own.questID or own.questId or (type(d) == "table" and (d.Id or d.id or d.questID))
+        if not id and own.GetQuestID then local ok, v = pcall(own.GetQuestID, own); if ok then id = v end end
+        return tonumber(id)
+    end
+    hooksecurefunc(GameTooltip, "Show", function(self)
+        if self.leelQAdded then return end
+        local own = self:GetOwner()
+        local id
+        if self.ShownAsMapIcon and self._showData and (own == self._owner or own == self._showOwner) then
+            id = self._showData.Id
+        elseif own and OnMap(own) then
+            id = QuestIdOf(own)
+        end
+        if dbg then D("툴팁", own and (own.GetName and own:GetName() or "이름없음") or "주인없음", "퀘", tostring(id), "지도", tostring(own and OnMap(own))) end
+        if not id then return end
+        local ok, err = pcall(AddInfo, { data = { Id = id } }, self); if not ok then D("오류", err) end
+    end)
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:SetScript("OnEvent", function() TryHook(); C_Timer.After(3, TryHook) end)
+    SLASH_LEELQPIN1 = "/르엘퀘핀"
+    SlashCmdList.LEELQPIN = function(msg)
+        if msg == "디버그" then dbg = not dbg; print("|cfff2b3c2르엘|r 퀘핀 디버그 " .. (dbg and "켜짐 · 지도 아이콘에 마우스를 올려 보세요" or "꺼짐")) return end
+        print("|cfff2b3c2르엘|r Questie 툴팁 연결: " .. tostring(hooked) .. " · Questie: " .. tostring(QuestieLoader ~= nil))
+    end
+end)()

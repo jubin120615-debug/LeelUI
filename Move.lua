@@ -236,6 +236,7 @@ function ns:CreateMover(hud)
 
     m:Hide(); bar:Hide()
     ns.mover, ns.moverBar = m, bar
+    C_Timer.After(0, function() if ns.MoveSizeHook then ns.MoveSizeHook(m, "위쪽 HUD 크기", "위쪽 HUD") end end)
 end
 
 ----------------------------------------------------------------------
@@ -324,6 +325,7 @@ local function BuildPartMovers()
             local lb = ns.Font(m, 12, C.accHi)
             lb:SetText(p.label)
             lb:SetPoint("BOTTOM", m, "TOP", 0, 2)
+            ns.MoveSizeHook(m, "위쪽 HUD 크기", "위쪽 HUD")
             m:SetScript("OnEnter", function()
                 tint:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.16)
                 GameTooltip:SetOwner(m, "ANCHOR_TOP")
@@ -547,4 +549,97 @@ ev:SetScript("OnEvent", function()
         ns:SetMoveMode(false)
         ns.Print("전투가 시작돼서 이동 모드를 끝냈어요.")
     end
+end)
+
+----------------------------------------------------------------------
+-- 이동 모드에서 고른 것 바로 위에 크기 조절 줄: − 82% + · 처음 크기
+-- (고르기 = 테두리를 누르기 · 끌기, 고른 테두리 위에서 휠 = 크기)
+----------------------------------------------------------------------
+local SIZE_DEFAULT = { ["위쪽 HUD 크기"] = function() return math.floor((ns.defaults.scale or 0.61) * 100 + 0.5) end,
+                       ["파티 프레임 크기"] = function() return math.floor((ns.defaults.partyScale or 0.75) * 100 + 0.5) end,
+                       ["액션바 크기"] = function() return 80 end, ["토끼 메뉴 크기"] = function() return 80 end }
+local function SizeItem(label)
+    for _, m in ipairs(ns.HUB_MODULES or {}) do
+        for _, it in ipairs(m.items or {}) do
+            if it.t == "slider" and it.label == label then return it end
+        end
+    end
+end
+local sizeBar, sizeSel
+local function SizePaint()
+    if not (sizeBar and sizeSel) then return end
+    local ok, v = pcall(sizeSel.it.get)
+    sizeBar.val:SetText((ok and v or "?") .. "%")
+end
+local function SizeSet(v)
+    local it = sizeSel and sizeSel.it
+    if not it then return end
+    v = math.max(it.min, math.min(it.max, math.floor(v + 0.5)))
+    pcall(it.set, v)
+    SizePaint()
+end
+local function SizeBuild()
+    local b = CreateFrame("Frame", nil, UIParent)
+    b:SetFrameStrata("FULLSCREEN_DIALOG"); b:SetHeight(36); b:SetClampedToScreen(true)
+    b:EnableMouse(true)
+    ns.RoundPlate(b, 18, { 0.11, 0.08, 0.075, 0.97 }, { 0.949, 0.702, 0.761, 0.85 })
+    b.title = ns.Font(b, 13.5); b.title:SetPoint("LEFT", 14, 0)
+    local x = b.title
+    local function Btn(text, fn, w)
+        local bt = ns.MakeButton(b, text, false, fn, w)
+        bt:SetHeight(26); bt:SetPoint("LEFT", x, "RIGHT", 8, 0); x = bt
+        return bt
+    end
+    b.minus = Btn("−", function() if sizeSel then local ok, v = pcall(sizeSel.it.get); if ok then SizeSet(v - 5) end end end, 30)
+    local hold = CreateFrame("Frame", nil, b); hold:SetSize(52, 20); hold:SetPoint("LEFT", x, "RIGHT", 6, 0); x = hold
+    b.val = ns.Num(hold, 19, C.accHi); b.val:SetPoint("CENTER")
+    b.plus = Btn("+", function() if sizeSel then local ok, v = pcall(sizeSel.it.get); if ok then SizeSet(v + 5) end end end, 30)
+    b.reset = Btn("처음 크기", function()
+        local d = sizeSel and SIZE_DEFAULT[sizeSel.label]
+        if d then SizeSet(d()) end
+    end)
+    b.close = Btn("✕", function() ns.MoveSelect(nil) end, 30)
+    b:SetScript("OnUpdate", function(self)
+        local w = 14 + self.title:GetStringWidth() + 8 + self.minus:GetWidth() + 6 + 52 + 8 + self.plus:GetWidth()
+            + (self.reset:IsShown() and (8 + self.reset:GetWidth()) or 0) + 8 + self.close:GetWidth() + 14
+        self:SetWidth(w)
+    end)
+    b:Hide()
+    sizeBar = b
+end
+
+-- mover = 이동 모드 테두리, label = 허브의 크기 슬라이더 이름, title = 보일 이름
+function ns.MoveSelect(mover, label, title)
+    if not mover then
+        sizeSel = nil
+        if sizeBar then sizeBar:Hide() end
+        return
+    end
+    local it = SizeItem(label)
+    if not it then return end
+    if not sizeBar then SizeBuild() end
+    sizeSel = { mover = mover, it = it, label = label }
+    sizeBar.title:SetText(title or label)
+    sizeBar.reset:SetShown(SIZE_DEFAULT[label] and true or false)
+    sizeBar:ClearAllPoints()
+    sizeBar:SetPoint("BOTTOM", mover, "TOP", 0, 24)
+    SizePaint()
+    sizeBar:Show()
+end
+
+-- 이동 모드 테두리에 붙이기: 누르면 고르고, 고른 상태에서 휠 = 크기
+function ns.MoveSizeHook(mover, label, title)
+    if not mover or mover.leelSize then return end
+    mover.leelSize = true
+    mover:HookScript("OnMouseDown", function(self) ns.MoveSelect(self, label, title) end)
+    mover:EnableMouseWheel(true)
+    mover:SetScript("OnMouseWheel", function(self, d)
+        if not (sizeSel and sizeSel.mover == self) then ns.MoveSelect(self, label, title) end
+        local ok, v = pcall(sizeSel.it.get)
+        if ok then SizeSet(v + d * (IsShiftKeyDown() and 1 or 5)) end
+    end)
+end
+
+hooksecurefunc(ns, "SetMoveMode", function()
+    if not ns.moving then ns.MoveSelect(nil) end
 end)

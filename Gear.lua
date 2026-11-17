@@ -692,3 +692,74 @@ SlashCmdList.LEELGEAR = function(msg)
         print("  /장비 끄기 · 켜기")
     end
 end
+
+----------------------------------------------------------------------
+-- 모자 보이기 / 숨기기: 캐릭터 창 머리 칸 오른쪽 위 작은 단추
+----------------------------------------------------------------------
+do
+    local function HelmShown()
+        if ShowingHelm then local ok, v = pcall(ShowingHelm); if ok then return v and true or false end end
+    end
+    local function MakeHelmButton()
+        local slot = _G.CharacterHeadSlot
+        if not slot or slot.leelHelm then return end
+        if not ShowHelm then return end   -- 이 게임 판에 모자 숨기기가 없으면 단추도 안 만들어요
+        local b = CreateFrame("Button", nil, slot)
+        b:SetSize(20, 20); b:SetPoint("CENTER", slot, "TOPRIGHT", -2, -2)
+        b:SetFrameLevel(slot:GetFrameLevel() + 5)
+        local bg = b:CreateTexture(nil, "BACKGROUND"); bg:SetTexture(ns.MEDIA .. "circle"); bg:SetAllPoints()
+        bg:SetVertexColor(0.11, 0.07, 0.07, 0.95)
+        local rim = b:CreateTexture(nil, "BORDER"); rim:SetTexture(ns.MEDIA .. "circle"); rim:SetPoint("TOPLEFT", -1.5, 1.5); rim:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+        rim:SetVertexColor(1, 0.561, 0.639, 1)
+        local ic = b:CreateTexture(nil, "ARTWORK"); ic:SetTexture("Interface\\Icons\\INV_Helmet_03")
+        ic:SetPoint("TOPLEFT", 2, -2); ic:SetPoint("BOTTOMRIGHT", -2, 2); ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local m = b:CreateMaskTexture(); m:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); m:SetAllPoints(ic); ic:AddMaskTexture(m)
+        local slash = b:CreateTexture(nil, "OVERLAY"); slash:SetTexture(ns.WHITE); slash:SetSize(22, 2.4)
+        slash:SetPoint("CENTER"); slash:SetRotation(math.rad(-45)); slash:SetVertexColor(1, 0.42, 0.5, 1)
+        local function Paint()
+            local on = HelmShown()
+            if on == nil then on = true end
+            ic:SetDesaturated(not on); ic:SetAlpha(on and 1 or 0.55); slash:SetShown(not on)
+            rim:SetVertexColor(on and 1 or 0.55, on and 0.561 or 0.5, on and 0.639 or 0.52, 1)
+        end
+        b:SetScript("OnClick", function()
+            local on = HelmShown(); if on == nil then on = true end
+            local ok, err = pcall(ShowHelm, not on)
+            if not ok then print("|cfff2b3c2[르엘 모자]|r 바꾸기 실패: " .. tostring(err)) end
+            C_Timer.After(0.1, Paint)
+            C_Timer.After(1.2, function()
+                Paint()
+                local now = HelmShown()
+                if now == on then
+                    print("|cfff2b3c2[르엘 모자]|r 눌렀는데 그대로예요 (전: " .. tostring(on) .. " · 지금: " .. tostring(now) .. ") · 이 게임 판에서는 서버가 모자 숨기기를 막는 것 같아요")
+                end
+            end)
+        end)
+        b:SetScript("OnEnter", function(s)
+            GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(HelmShown() == false and "모자 보이기" or "모자 숨기기", 1, 0.84, 0.88)
+            GameTooltip:AddLine("누르면 머리 장비를 캐릭터에서 보이게 / 안 보이게", 0.75, 0.68, 0.66)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        b:SetScript("OnShow", Paint)
+        slot.leelHelm = b
+        Paint()
+    end
+    local hev = CreateFrame("Frame")
+    hev:RegisterEvent("PLAYER_LOGIN")
+    pcall(hev.RegisterEvent, hev, "PLAYER_FLAGS_CHANGED")
+    hev:SetScript("OnEvent", function(_, e)
+        local slot = _G.CharacterHeadSlot
+        if e ~= "PLAYER_LOGIN" then if slot and slot.leelHelm then slot.leelHelm:GetScript("OnShow")() end return end
+        C_Timer.After(1, MakeHelmButton)
+        if _G.CharacterFrame then _G.CharacterFrame:HookScript("OnShow", MakeHelmButton) end
+    end)
+    SLASH_LEELHELM1 = "/모자"
+    SlashCmdList.LEELHELM = function()
+        if not ShowHelm then print("|cfff2b3c2[르엘]|r 이 게임 판에는 모자 숨기기 기능이 없어요") return end
+        local on = HelmShown(); if on == nil then on = true end
+        pcall(ShowHelm, not on)
+        print("|cfff2b3c2[르엘]|r 모자 " .. (on and "숨겼어요" or "보이게 했어요"))
+    end
+end

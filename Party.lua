@@ -226,11 +226,14 @@ local function MaskedBar(f, level)
     return b
 end
 
-local function CreateMember(parent, i, unit)
+local function CreateMember(parent, i, unit, preview)
     unit = unit or ("party" .. i)
-    local f = CreateFrame("Button", unit == "player" and "LeelUI_partyMe" or ("LeelUI_party" .. i), parent, "SecureUnitButtonTemplate")
+    -- preview = 허브 미리 보기용 모형 (이름 없는 보통 프레임 · 클릭 · 이벤트 없음, 생김새는 진짜와 같아요)
+    local f = preview and CreateFrame("Frame", nil, parent)
+        or CreateFrame("Button", unit == "player" and "LeelUI_partyMe" or ("LeelUI_party" .. i), parent, "SecureUnitButtonTemplate")
     f.unit = unit
     f:SetSize(CW(), CH())
+    if not preview then
     f:SetAttribute("unit", unit)
     f:SetAttribute("*type1", "target")
     f:SetAttribute("*type2", "togglemenu")
@@ -240,6 +243,7 @@ local function CreateMember(parent, i, unit)
     end
     f:HookScript("PreClick", function(s2) if IsAltKeyDown() and ns.FollowPending then local ok, n = pcall(UnitName, s2.unit or unit); if ok then ns.FollowPending(n) end end end)
     f:RegisterForClicks("AnyUp")
+    end
 
     -- 바깥 빛 (체력 낮음): 테두리 바깥이라 흰/빨강 테두리와 같이 보임
     f.glow = f:CreateTexture(nil, "BACKGROUND", nil, -8)
@@ -392,8 +396,10 @@ local function CreateMember(parent, i, unit)
     f.lead:Hide()
 
     -- 내가 건 버프 (오른쪽 위), 해제할 디버프 (오른쪽 아래)
+    if not preview then
     f.buffs = AuraBox(f, "leelMine", "HELPFUL|PLAYER", 3, BSIZE, "mm_squircle", "TOPRIGHT", -PAD + 2, -PAD + 2)
     f.debuffs = AuraBox(f, "leelDispel", "HARMFUL|RAID", 2, DSIZE, "mm_squircle", "BOTTOMLEFT", PAD, PAD + 4)
+    end
     return f
 end
 
@@ -681,13 +687,14 @@ local function ApplyMeDriver()
     end)
 end
 
-local function Layout()
-    local box, members = ns.party, ns.partyMembers
+local function Layout(pbox, pmembers, pme)
+    local box, members = pbox or ns.party, pmembers or ns.partyMembers
     if not box then return end
-    ns:RunOutOfCombat("partyLayout", function()
+    local run = pbox and function(_, fn) fn() end or function(_, fn) ns:RunOutOfCombat("partyLayout", fn) end
+    run(nil, function()
         local mode = ns.db.partyLayout or "row"
         local W, H, G = CW(), CH(), CG()
-        local party, me = {}, ns.partyMe
+        local party, me = {}, pbox and pme or ns.partyMe
         for i = 1, 4 do party[i] = members[i] end
         local list = {}
         if Five() and me then
@@ -734,7 +741,7 @@ local function Layout()
         box:SetSize(cols * W + (cols - 1) * G, rows * H + (rows - 1) * G)
     end)
 end
-ns.PartyLayout = Layout
+ns.PartyLayout = function() Layout() end
 
 function ns:ApplyPartyFive()
     ApplyMeDriver()
@@ -889,6 +896,32 @@ local function Fake(f, d)
     f:SetAlpha(1)
 end
 
+-- 허브 미리 보기: 진짜 파티 칸과 똑같이 생긴 모형 (가짜 파티원 · 설정 그대로)
+function ns.BuildPartyPreview(parent)
+    local box = CreateFrame("Frame", nil, parent)
+    box.preview = true
+    local members = {}
+    for i = 1, 4 do members[i] = CreateMember(box, i, nil, true) end
+    local me = CreateMember(box, 5, "player", true)
+    members[5] = me
+    function box:Refresh()
+        local W, H = CW(), CH()
+        for i, f in ipairs(members) do
+            f:SetSize(W, H); f.heal:SetSize(W, H)
+            f.name:SetWidth(math.max(30, W - PAD * 2 - 33))
+            local vs = math.max(14, math.min(26, math.floor(H * 0.34)))
+            f.val:SetFont(ns.NUM, vs, "OUTLINE")
+            pcall(Fake, f, FAKE[i])
+            f:Show()
+        end
+        me:SetShown(Five())
+        Layout(box, { members[1], members[2], members[3], members[4], me }, me)
+        self:SetScale(ns.db.partyScale or 0.75)
+    end
+    box:Refresh()
+    return box
+end
+
 local function CreatePartyMover(box)
     local m = CreateFrame("Frame", nil, box)
     m:SetPoint("TOPLEFT", -6, 6); m:SetPoint("BOTTOMRIGHT", 6, -6)
@@ -910,6 +943,7 @@ local function CreatePartyMover(box)
     local label = ns.Font(m, 13, C.accHi)
     label:SetText("파티 프레임")
     label:SetPoint("BOTTOMLEFT", m, "TOPLEFT", 4, 4)
+    if ns.MoveSizeHook then ns.MoveSizeHook(m, "파티 프레임 크기", "파티 프레임") end
 
     m:SetScript("OnDragStart", function()
         if not InCombatLockdown() then box:StartMoving() end

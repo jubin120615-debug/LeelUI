@@ -354,32 +354,25 @@ local function PaintRail()
         rail.plus:ClearAllPoints()
         rail.plus:SetPoint("TOP", rail, "TOP", 2, y)
     end
-    -- 탭이 늘어 기둥 아래 단추(친구 · 음성 · 메뉴)와 겹치면 채팅창을 위로 늘리고,
-    -- 탭이 줄면 늘렸던 만큼 다시 줄여요 (아래 끝은 그대로, 내가 정한 크기보다 작아지진 않아요)
+    -- 채팅창 크기는 내가 정한 그대로 (예전엔 탭 수에 따라 자동으로 늘렸다 줄여서 접속할 때마다 크기가 바뀌었어요)
+    --   넘치는 탭은 "···" 더보기로 들어가요. 예전에 자동으로 늘린 만큼은 한 번 되돌려요
     do
-        local f1 = ChatFrame1
-        local have, H = rail:GetHeight() or 0, f1:GetHeight() or 0
-        if have > 0 and H > 0 and not InCombatLockdown() then
-            local db = DB()
-            local extra = db.autoGrow or 0
-            if extra > H - 60 then extra = 0 end
-            local base = H - extra                          -- 내가 정한 크기
-            local need = -y + 30 + 10 + (RAIL - 12 + 8) * 3 + 8
-            local needH = need - (have - H)                 -- 단추가 안 겹치는 채팅창 높이
-            local target = math.max(base, needH)
-            db.autoGrow = target - base
-            if math.abs(target - H) > 0.5 then
-                local l, b = f1:GetLeft(), f1:GetBottom()
-                if l and b then
-                    pcall(function()
-                        f1:SetHeight(target)
-                        f1:ClearAllPoints()
-                        f1:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l, b)
-                        FCF_SavePositionAndDimensions(f1)
-                        if db.pos then db.pos[4] = math.floor(target + 0.5) end
-                    end)
-                end
+        local db = DB()
+        local extra = db.autoGrow or 0
+        if extra > 0 and not InCombatLockdown() then
+            local f1 = ChatFrame1
+            local H = f1:GetHeight() or 0
+            local l, bt = f1:GetLeft(), f1:GetBottom()
+            if H - extra >= 120 and l and bt then
+                pcall(function()
+                    f1:SetHeight(H - extra)
+                    f1:ClearAllPoints()
+                    f1:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l, bt)
+                    FCF_SavePositionAndDimensions(f1)
+                    if db.pos then db.pos[4] = math.floor(H - extra + 0.5) end
+                end)
             end
+            db.autoGrow = 0
         end
     end
     if head then
