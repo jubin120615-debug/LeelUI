@@ -1191,6 +1191,8 @@ local function Relayout()
         ns.RollPlace()
     end
     PaintBadge()
+    if ns.RollBlackPlace then ns.RollBlackPlace() end
+    if ns.RollGreetLayout then ns.RollGreetLayout() end
 end
 ns.RollRelayout = function() Relayout() end
 
@@ -1515,6 +1517,208 @@ local function RollDbg(kind, msg)
 end
 ns.RollDbg = RollDbg
 
+----------------------------------------------------------------------
+-- 블랙리스트 굴림 알림: 블랙리스트가 입찰/차비하면 주사위 창 위에 빨간 띠 + 경고음 (나만 보여요)
+----------------------------------------------------------------------
+do
+    local BH, BGAP, LIFE = 40, 4, 8
+    local holder, pool, shown = nil, {}, {}
+    local lastSnd = 0
+    local SOUNDS = { warn = "leel_black_warn.ogg", chime = "leel_black_chime.ogg",
+                     ding = function() return SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959 end,
+                     alarm = function() return (SOUNDKIT and SOUNDKIT.ALARM_CLOCK_WARNING_3) or 12889 end }
+    local function Opt()
+        local d = DB()
+        if d.blackAlert == nil then d.blackAlert = true end
+        if not d.blackSnd2 then d.blackSound = "warn"; d.blackSnd2 = true end   -- 르엘 경고음을 기본으로
+        return d
+    end
+    local function Sound(force)
+        local k = Opt().blackSound
+        if k == "off" or not SOUNDS[k] then return end
+        local now = GetTime()
+        if not force and now - lastSnd < 1.5 then return end
+        lastSnd = now
+        local snd = SOUNDS[k]
+        if type(snd) == "string" then
+            if PlaySoundFile then pcall(PlaySoundFile, ns.MEDIA .. snd, "Master") end
+        elseif PlaySound then pcall(PlaySound, snd(), "Master") end
+    end
+    ns.RollBlackSound = function() Sound(true) end
+
+    local function Place()
+        if not holder then return end
+        holder:ClearAllPoints()
+        local a = _G.LeelUI_RollAnchor
+        holder:SetScale(Scale())
+        if a and a:IsShown() then
+            holder:SetPoint("BOTTOMLEFT", a, "TOPLEFT", 0, 5)
+        elseif badge and badge:IsShown() then
+            holder:SetPoint("BOTTOM", badge, "TOP", 0, 6)
+        else
+            holder:SetPoint("CENTER", UIParent, "CENTER", 0, 160)
+        end
+    end
+    local function Layout()
+        Place()
+        local y = 0
+        for i = #shown, 1, -1 do   -- 새 띠가 아래(주사위 창 쪽)
+            local f = shown[i]
+            f:ClearAllPoints(); f:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 0, y)
+            y = y + BH + BGAP
+        end
+        holder:SetHeight(math.max(1, y))
+    end
+    local function Drop(f)
+        f:Hide(); f.key = nil
+        for i, x in ipairs(shown) do if x == f then table.remove(shown, i) break end end
+        pool[#pool + 1] = f
+        Layout()
+    end
+    local function New()
+        local f = table.remove(pool)
+        if f then return f end
+        f = CreateFrame("Button", nil, holder)
+        f:SetSize(W, BH)
+        -- 주사위 카드와 같은 판: 어두운 판 + 옅은 빨간 테 + 왼쪽에서 번지는 빨간 빛
+        f.rim = ns.RoundRect(f, 13, { 1, 0.42, 0.5 }, "BACKGROUND", -1, -1); f.rim:SetColor({ 1, 0.42, 0.5 }, 0.42)
+        f.bg = ns.RoundRect(f, 13, { 0.133, 0.094, 0.090 }, "BACKGROUND", 0, 0); f.bg:SetColor({ 0.133, 0.094, 0.090 }, 0.97)
+        f.wash = f:CreateTexture(nil, "BORDER"); f.wash:SetTexture(ns.WHITE)
+        f.wash:SetPoint("TOPLEFT", 2, -2); f.wash:SetPoint("BOTTOMLEFT", 2, 2); f.wash:SetWidth(120)
+        pcall(f.wash.SetGradient, f.wash, "HORIZONTAL", CreateColor(1, 0.42, 0.5, 0.16), CreateColor(1, 0.42, 0.5, 0))
+        -- 템 아이콘 (등급 색 가는 테)
+        f.ring = f:CreateTexture(nil, "ARTWORK"); f.ring:SetTexture(ns.MEDIA .. "circle"); f.ring:SetSize(29, 29); f.ring:SetPoint("LEFT", 7, 0)
+        f.ringIn = f:CreateTexture(nil, "ARTWORK", nil, 1); f.ringIn:SetTexture(ns.MEDIA .. "circle"); f.ringIn:SetSize(26, 26)
+        f.ringIn:SetPoint("CENTER", f.ring); f.ringIn:SetVertexColor(0.08, 0.06, 0.06, 1)
+        f.ic = f:CreateTexture(nil, "OVERLAY"); f.ic:SetSize(24, 24); f.ic:SetPoint("CENTER", f.ring)
+        if f.ic.SetMask then pcall(f.ic.SetMask, f.ic, ns.MEDIA .. "circle") end
+        -- 블랙 표시: 아이콘 오른쪽 아래 작은 빨간 동그라미
+        f.banBg = f:CreateTexture(nil, "OVERLAY", nil, 2); f.banBg:SetTexture(ns.MEDIA .. "circle"); f.banBg:SetSize(13, 13)
+        f.banBg:SetPoint("CENTER", f.ring, "BOTTOMRIGHT", -3, 3); f.banBg:SetVertexColor(1, 0.42, 0.5, 1)
+        f.ban = f:CreateTexture(nil, "OVERLAY", nil, 3); f.ban:SetTexture(ns.MEDIA .. "roll_ban"); f.ban:SetSize(9, 9)
+        f.ban:SetPoint("CENTER", f.banBg); f.ban:SetVertexColor(0.165, 0.063, 0.082)
+        -- 숫자 (주사위 카드 숫자와 같은 글꼴)
+        f.num = f:CreateFontString(nil, "OVERLAY"); f.num:SetFont(ns.NUM or ns.FONT, 20, ""); f.num:SetPoint("RIGHT", -10, 0)
+        f.num:SetShadowColor(0, 0, 0, 0.85); f.num:SetShadowOffset(1, -1)
+        f.top = ns.Font(f, 9.5, { 1, 0.56, 0.64 }); f.top:SetPoint("BOTTOM", f.num, "TOP", 0, -3)
+        -- 1줄: 이름 + 입찰/차비 칩 · 2줄: 템 이름 · 이유
+        f.who = ns.Font(f, 12.5, { 1, 0.56, 0.64 }); f.who:SetPoint("BOTTOMLEFT", f, "LEFT", 43, 1)
+        f.chip = CreateFrame("Frame", nil, f); f.chip:SetSize(30, 15); f.chip:SetPoint("LEFT", f.who, "RIGHT", 5, 0)
+        f.chip.bg = ns.RoundRect(f.chip, 5, { 1, 1, 1 }, "BACKGROUND", 0, 0)
+        f.chip.fs = ns.Font(f.chip, 10); f.chip.fs:SetPoint("CENTER", 0, 0)
+        f.why = ns.Font(f, 10, { 0.62, 0.54, 0.52 }); f.why:SetPoint("LEFT", f.chip, "RIGHT", 6, 0); f.why:SetJustifyH("LEFT"); f.why:SetWordWrap(false)
+        f.why:SetPoint("RIGHT", f.num, "LEFT", -8, 0)
+        f.item = ns.Font(f, 11); f.item:SetPoint("TOPLEFT", f, "LEFT", 43, -2); f.item:SetJustifyH("LEFT"); f.item:SetWordWrap(false)
+        f.item:SetPoint("RIGHT", f.num, "LEFT", -8, 0)
+        -- 남은 시간 (아래 가는 분홍 줄)
+        f.barbg = f:CreateTexture(nil, "ARTWORK"); f.barbg:SetTexture(ns.WHITE); f.barbg:SetHeight(1.5)
+        f.barbg:SetPoint("BOTTOMLEFT", 14, 2); f.barbg:SetPoint("BOTTOMRIGHT", -14, 2); f.barbg:SetVertexColor(1, 0.42, 0.5, 0.15)
+        f.bar = f:CreateTexture(nil, "OVERLAY"); f.bar:SetTexture(ns.WHITE); f.bar:SetHeight(1.5)
+        f.bar:SetPoint("BOTTOMLEFT", 14, 2); f.bar:SetVertexColor(1, 0.56, 0.64, 0.75)
+        f:RegisterForClicks("AnyUp")
+        f:SetScript("OnClick", function(s2) Drop(s2) end)
+        f:SetScript("OnEnter", function(s2)
+            s2.hold = true; s2.rim:SetColor({ 1, 0.42, 0.5 }, 0.8)
+            GameTooltip:SetOwner(s2, "ANCHOR_RIGHT")
+            if s2.link then pcall(GameTooltip.SetHyperlink, GameTooltip, s2.link) else GameTooltip:AddLine(s2.iname or "") end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cffff6b7f블랙리스트|r  " .. (s2.whoName or ""))
+            if s2.note then GameTooltip:AddLine(s2.note, 1, 0.6, 0.66, true) end
+            GameTooltip:AddLine("클릭 = 닫기", 0.6, 0.55, 0.53); GameTooltip:Show()
+        end)
+        f:SetScript("OnLeave", function(s2) s2.hold = nil; s2.rim:SetColor({ 1, 0.42, 0.5 }, 0.42); GameTooltip:Hide() end)
+        f:SetScript("OnUpdate", function(s2, el)
+            if s2.hold then s2:SetAlpha(1) return end
+            s2.left = (s2.left or LIFE) - el
+            local p = math.max(0, s2.left / LIFE)
+            s2.bar:SetWidth(math.max(0.01, (W - 28) * p))
+            -- 들어올 때 살짝 밀려 나오고, 끝날 때 흐려져요
+            local age = LIFE - s2.left
+            if age < 0.18 then s2:SetAlpha(age / 0.18) elseif s2.left < 0.6 then s2:SetAlpha(math.max(0, s2.left / 0.6)) else s2:SetAlpha(1) end
+            if s2.left <= 0 then Drop(s2) end
+        end)
+        return f
+    end
+
+    local function IsTop(e, who)
+        local best, bw
+        for name, r in pairs(e.rolls or {}) do
+            if r.n and r.t ~= "pass" then
+                local sc = (RANK[r.t] or 0) * 1000 + r.n
+                if not best or sc > best then best, bw = sc, name end
+            end
+        end
+        return bw == who
+    end
+
+    -- e = 경매 자료 (link · texture · quality · name) · who = 이름 · t = need/greed · n = 숫자
+    function ns.RollBlackAlert(e, who, t, n, force)
+        if not force and not Opt().blackAlert then return end
+        if t == "pass" or not n then return end
+        local b = ns.BlackGet and ns.BlackGet(who)
+        if not b and not force then return end
+        b = b or { note = "템 먹튀 (미리 보기)" }
+        -- A안: 화난 토끼가 말풍선으로 알려줘요 (토끼 단추가 없을 때만 예전 빨간 띠)
+        if ns.RollTalkBlackRoll then
+            local q = QColor(e.quality)
+            local said = ns.RollTalkBlackRoll({
+                key = (e.id or e.link or "") .. who, who = who, t = t, n = n, link = e.link,
+                item = "|cff" .. Hex(q) .. "[" .. (e.name or (e.link and e.link:match("%[(.-)%]")) or "템") .. "]|r",
+                top = IsTop(e, who), note = (b.note and b.note ~= "") and b.note or nil, cls = b.cls })
+            if said then
+                Sound()
+                if Opt().blackChat ~= false then
+                    local tc = (t == "need") and "8fe899" or "f3c55a"
+                    P(("|cffff6b7f블랙리스트 %s|r님이 %s |cff%s%s|r → |cffffffff%d|r%s"):format(who, e.link or (e.name or "템"), tc, TYPE_TXT[t] or "", n, (b.note and b.note ~= "") and ("  |cff998a86(" .. b.note .. ")|r") or ""))
+                end
+                return
+            end
+        end
+        if not holder then
+            holder = CreateFrame("Frame", "LeelUI_RollBlack", UIParent)
+            holder:SetSize(W, 1); holder:SetFrameStrata("DIALOG"); holder:SetFrameLevel(50)
+        end
+        local key = (e.id or e.link or "") .. who
+        local f
+        for _, x in ipairs(shown) do if x.key == key then f = x end end
+        if not f then f = New(); shown[#shown + 1] = f end
+        f.key, f.link, f.left = key, e.link, LIFE
+        f:SetAlpha(0)
+        local q = QColor(e.quality)
+        f.ring:SetVertexColor(q[1], q[2], q[3], 1)
+        f.ic:SetTexture(e.texture or 134400)
+        local need = (t == "need")
+        local cc = need and { 0.56, 0.91, 0.60 } or GOLD
+        f.who:SetText(who)
+        f.chip.fs:SetText(TYPE_TXT[t] or ""); f.chip.fs:SetTextColor(cc[1], cc[2], cc[3])
+        f.chip:SetWidth(f.chip.fs:GetStringWidth() + 10)
+        f.chip.bg:SetColor(cc, 0.16)
+        local top = IsTop(e, who)
+        local why = (b.note and b.note ~= "") and b.note or nil
+        f.why:SetText(why or "블랙리스트")
+        f.iname = e.name or (e.link and e.link:match("%[(.-)%]")) or "템"
+        f.item:SetText(f.iname); f.item:SetTextColor(q[1], q[2], q[3])
+        f.whoName, f.note = who, why
+        f.num:SetText(n)
+        f.top:SetText(top and "1등" or "")
+        if top then f.num:SetTextColor(1, 0.42, 0.5) else f.num:SetTextColor(1, 0.82, 0.85) end
+        f:Show()
+        Layout()
+        Sound()
+        if Opt().blackChat ~= false then
+            P(("|cffff6b7f블랙리스트 %s|r님이 %s |cff%s%s|r → |cffffffff%d|r%s"):format(who, e.link or (e.name or "템"), tc, TYPE_TXT[t] or "", n, why and ("  |cff998a86(" .. why .. ")|r") or ""))
+        end
+    end
+    ns.RollBlackPlace = Place
+    function ns.RollBlackTest()
+        local e = { id = "t" .. GetTime(), name = "소금선견자의 투구", quality = 2, texture = 133071, rolls = { ["슈엘"] = { t = "greed", n = 42 } } }
+        local first = shown[1]
+        ns.RollBlackAlert(e, "슈엘", "greed", 42, true)
+        local e2 = { id = "u" .. GetTime(), name = "용의 송곳니 단검", quality = 4, texture = 135641, rolls = { ["슈엘"] = { t = "need", n = 87 }, ["르엘"] = { t = "need", n = 64 } } }
+        C_Timer.After(0.6, function() ns.RollBlackAlert(e2, "슈엘", "need", 87, true) end)
+    end
+end
+
 local function OnLootMsg(msg)
     if not PATS then BuildPats() end
     local hit = false
@@ -1528,6 +1732,7 @@ local function OnLootMsg(msg)
                 local who = Short(a[3])
                 e.rolls[who] = { t = m.t, n = tonumber(a[1]) }
                 Refresh(e)
+                if ns.RollBlackAlert and m.t ~= "pass" then ns.RollBlackAlert(e, who, m.t, tonumber(a[1])) end
             elseif m.kind == "self" then
                 local e = FindEntry(a[1]); if not e then return end
                 local r = e.rolls[e.me] or {}
@@ -1551,6 +1756,7 @@ local function OnLootMsg(msg)
                 e.done = true
                 Refresh(e)
                 FinishLater(e, 10)   -- 누가 먹었는지 충분히 보이게
+                if mine and ns.RollGreetWin then ns.RollGreetWin(e, n or (e.rolls[e.me] and e.rolls[e.me].n)) end
             elseif m.kind == "got" or m.kind == "gotself" then
                 -- 굴림 중인 템일 때만 (그냥 주운 템은 무시)
                 local link = (m.kind == "gotself") and a[1] or a[2]
@@ -2136,7 +2342,7 @@ local function Toast(name, b)
     local w = math.max(toast.l1:GetStringWidth(), math.min(350, toast.l2:GetStringWidth())) + 50 + 22
     toast:SetWidth(math.max(240, w))
     toast:Show(); toast:SetAlpha(1); toast.ag:Stop(); toast.ag:Play()
-    if PlaySound then pcall(PlaySound, SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959) end
+    if ns.RollBlackSound then ns.RollBlackSound() end   -- 블랙리스트 굴림 알림과 같은 경고음 (허브에서 고른 소리)
 end
 
 local wasGroup   -- nil = 아직 모름 (로그인 · 리로드 땐 인사 안 함)
@@ -2203,10 +2409,24 @@ function GR.New()
     local f = table.remove(GR.pool)
     if f then return f end
     f = CreateFrame("Button", nil, UIParent)
-    f:SetFrameStrata("HIGH"); f:SetClampedToScreen(true)
+    f:SetFrameStrata("DIALOG"); f:SetFrameLevel(60); f:SetClampedToScreen(true)
     f.rim = ns.RoundRect(f, 12, GR_RIM, "BACKGROUND", 0, 0)
     f.bg = ns.RoundRect(f, 12, GR_BG, "BACKGROUND", 2, 1.5)
-    f.l1 = ns.Font(f, 12.5); f.l1:SetPoint("TOPLEFT", 12, -9); f.l1:SetJustifyH("LEFT")
+    -- D안: 표정 스티커 (풍선 왼쪽 위로 삐져나와요)
+    f.face = f:CreateTexture(nil, "OVERLAY", nil, 5); f.face:SetSize(50, 50); f.face:SetPoint("CENTER", f, "TOPLEFT", 14, -12)
+    local fa = f.face:CreateAnimationGroup()
+    local fs1 = fa:CreateAnimation("Scale"); fs1:SetDuration(0.16); fs1:SetOrder(1); fs1:SetSmoothing("OUT")
+    if fs1.SetScaleFrom then fs1:SetScaleFrom(0.3, 0.3); fs1:SetScaleTo(1.15, 1.15) else fs1:SetFromScale(0.3, 0.3); fs1:SetToScale(1.15, 1.15) end
+    local fs2 = fa:CreateAnimation("Scale"); fs2:SetDuration(0.1); fs2:SetOrder(2)
+    if fs2.SetScaleFrom then fs2:SetScaleFrom(1.15, 1.15); fs2:SetScaleTo(1, 1) else fs2:SetFromScale(1.15, 1.15); fs2:SetToScale(1, 1) end
+    f.facePop = fa
+    local sk = f.face:CreateAnimationGroup()   -- 화났을 때 부들부들
+    for i, dx in ipairs({ -3, 6, -6, 6, -3 }) do
+        local t = sk:CreateAnimation("Translation"); t:SetOffset(dx, 0); t:SetDuration(0.05); t:SetOrder(i)
+    end
+    sk:SetLooping("NONE"); f.faceShake = sk
+    f.l1 = ns.Font(f, 12.5); f.l1:SetPoint("TOPLEFT", 46, -9); f.l1:SetJustifyH("LEFT")
+    f.lm = ns.Font(f, 12.5); f.lm:SetPoint("TOPLEFT", f.l1, "BOTTOMLEFT", 0, -3); f.lm:SetJustifyH("LEFT")
     f.l2 = ns.Font(f, 10.5, { 0.73, 0.65, 0.63 }); f.l2:SetPoint("TOPLEFT", f.l1, "BOTTOMLEFT", 0, -3); f.l2:SetJustifyH("LEFT")
     f.chips = {}
     local CH = { { "roll_sub_dice", "굴림 추천" }, { "roll_sub_log", "주사위 기록장" }, { "roll_sub_ban", "블랙리스트" }, { "roll_sub_gear", "설정" } }
@@ -2214,7 +2434,7 @@ function GR.New()
         local ic = f:CreateTexture(nil, "ARTWORK"); ic:SetTexture(ns.MEDIA .. c[1]); ic:SetSize(20, 20)
         local fs = ns.Font(f, 11); fs:SetText(c[2]); fs:SetPoint("LEFT", ic, "RIGHT", 4, 0)
         local col, row = (i - 1) % 2, math.floor((i - 1) / 2)
-        ic:SetPoint("TOPLEFT", 12 + col * 108, -30 - row * 24)
+        ic:SetPoint("TOPLEFT", 46 + col * 108, -30 - row * 24)
         f.chips[i] = { ic, fs }
     end
     local ag = f:CreateAnimationGroup()
@@ -2226,8 +2446,14 @@ function GR.New()
     og:SetScript("OnFinished", function() f:Hide(); f:SetAlpha(1) end)
     f.outAg = og
     f:SetScript("OnClick", function() ns.RollGreetHide() end)
-    f:SetScript("OnEnter", function() GR.hold = true end)
-    f:SetScript("OnLeave", function() GR.hold = false end)
+    f:SetScript("OnEnter", function(s2)
+        GR.hold = true
+        if s2.kind == "broll" and s2.link then
+            GameTooltip:SetOwner(s2, "ANCHOR_TOP"); pcall(GameTooltip.SetHyperlink, GameTooltip, s2.link)
+            GameTooltip:AddLine("클릭 = 닫기", 0.6, 0.55, 0.53); GameTooltip:Show()
+        end
+    end)
+    f:SetScript("OnLeave", function() GR.hold = false; GameTooltip:Hide() end)
     return f
 end
 
@@ -2236,16 +2462,42 @@ function GR.Fill(f, kind, x)
     local intro = kind == "intro"
     for _, c in ipairs(f.chips) do c[1]:SetShown(intro); c[2]:SetShown(intro) end
     f.l2:SetText(""); f.l2:SetWidth(0); f.l1:SetWidth(0)
-    local red = kind == "black"
+    local red = kind == "black" or kind == "broll"
+    local FACE = { hi = "happy", intro = "wink", black = "angry", broll = "angry", win = "star" }
+    f.lm:SetText(""); f.lm:Hide(); f.link = nil
+    f.l2:ClearAllPoints(); f.l2:SetPoint("TOPLEFT", f.l1, "BOTTOMLEFT", 0, -3)
+    f.face:SetTexture(ns.MEDIA .. "roll_face_" .. (FACE[kind] or "happy"))
+    f.l2:SetTextColor(0.73, 0.65, 0.63)
     f.bg:SetColor(red and GR_RBG or GR_BG); f.rim:SetColor(red and GR_RRIM or GR_RIM)
     f.col, f.rimc = red and GR_RBG or GR_BG, red and GR_RRIM or GR_RIM
     if kind == "hi" then
         local n = GetNumGroupMembers and GetNumGroupMembers() or 0
         f.l1:SetText("안녕! 같이 가자" .. ((n and n > 1) and (" |cffb9a6a0· " .. n .. "명 " .. ((IsInRaid and IsInRaid()) and "공격대" or "파티") .. "|r") or ""))
-        f:SetSize(f.l1:GetStringWidth() + 26, 30)
+        f.l2:SetText("내가 주사위 봐줄게")
+        f:SetSize(math.max(f.l1:GetStringWidth(), f.l2:GetStringWidth()) + 60, 44)
     elseif intro then
         f.l1:SetText("내가 하는 일 |cffb9a6a0(나를 누르면 펼쳐져)|r")
-        f:SetSize(math.max(232, f.l1:GetStringWidth() + 26), 84)
+        f:SetSize(math.max(266, f.l1:GetStringWidth() + 60), 84)
+    elseif kind == "broll" then
+        -- "잠깐! 블랙리스트 슈엘이 / [투구]에 차비 눌렀어 → 42 / 지금 슈엘이 1등이야 · 메모: 템 먹튀"
+        f.key, f.link = x.key, x.link
+        local cc = x.cls and Hex(ClassHex(x.cls)) or "ffffff"
+        f.l1:SetText(("|cffff8fab잠깐!|r 블랙리스트 |cff%s%s|r이"):format(cc, x.who))
+        local tc = (x.t == "need") and "8fe899" or "f3c55a"
+        f.lm:SetText(("%s에 |cff%s%s|r 눌렀어 → |cff%s%d|r"):format(x.item, tc, TYPE_TXT[x.t] or "", x.top and "ff6b7f" or "ffffff", x.n))
+        f.lm:Show()
+        f.l2:ClearAllPoints(); f.l2:SetPoint("TOPLEFT", f.lm, "BOTTOMLEFT", 0, -3)
+        local tail = {}
+        if x.top then tail[#tail + 1] = "지금 " .. x.who .. "이 1등이야" end
+        if x.note then tail[#tail + 1] = "메모: " .. x.note end
+        f.l2:SetText(table.concat(tail, " · ")); f.l2:SetTextColor(0.91, 0.73, 0.75)
+        local w = math.min(320, math.max(f.l1:GetStringWidth(), f.lm:GetStringWidth(), f.l2:GetStringWidth()))
+        f:SetSize(w + 60, 18 + f.l1:GetStringHeight() + 3 + f.lm:GetStringHeight() + ((#tail > 0) and (3 + f.l2:GetStringHeight()) or 0))
+    elseif kind == "win" then
+        f.l1:SetText("|cfff3c55a획득!|r " .. (x.link or x.name or "템"))
+        f.l2:SetText(x.n and ("주사위 " .. x.n .. " · 축하해!") or "축하해!")
+        f.l2:SetTextColor(1, 0.86, 0.55)
+        f:SetSize(math.min(330, math.max(f.l1:GetStringWidth(), f.l2:GetStringWidth())) + 60, 44)
     else
         local b = x.b or {}
         f.l1:SetText(("|cffff8fab잠깐!|r 블랙리스트 |cff%s%s|r 님이 있어"):format(Hex(ClassHex(b.cls)), x.name))
@@ -2253,7 +2505,7 @@ function GR.Fill(f, kind, x)
         f.l2:SetText(note .. (b.met or 1) .. "번째 만남"); f.l2:SetTextColor(0.91, 0.73, 0.75)
         local w = math.min(250, math.max(f.l1:GetStringWidth(), f.l2:GetStringWidth()))
         f.l2:SetWidth(w); f.l2:SetWordWrap(true)
-        f:SetSize(w + 26, 18 + f.l1:GetStringHeight() + 3 + f.l2:GetStringHeight())
+        f:SetSize(w + 60, math.max(44, 18 + f.l1:GetStringHeight() + 3 + f.l2:GetStringHeight()))
     end
 end
 
@@ -2269,24 +2521,32 @@ function GR.Layout()
     for i, f in ipairs(GR.list) do
         f:SetScale(badge:GetEffectiveScale() / UIParent:GetEffectiveScale())
         f:ClearAllPoints()
-        f:SetAlpha((i == n or f.kind == "black") and 1 or 0.6)
+        f:SetAlpha((i == n or f.kind == "black" or f.kind == "broll") and 1 or 0.6)
     end
     if n == 0 then return end
+    -- 주사위 창이 열려 있으면 창 위로 쌓아요 (창에 가려지지 않게) · 새 말이 창 쪽(아래)
+    if anchor and anchor:IsShown() then
+        GR.list[n]:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 14, 8)
+        for i = n - 1, 1, -1 do GR.list[i]:SetPoint("BOTTOMLEFT", GR.list[i + 1], "TOPLEFT", 0, 16) end
+        for _, f in ipairs(GR.list) do GR.Corner(f, nil) end
+        return
+    end
     -- 채팅 순서: 오래된 건 위, 새것은 아래. 토끼에 가장 가까운 풍선만 토끼 쪽 모서리가 각져요
     local side, dx = right and "RIGHT" or "LEFT", right and -8 or 8
     local near
     if low then
         near = GR.list[n]
         near:SetPoint("BOTTOM" .. side, badge, "BOTTOM" .. (right and "LEFT" or "RIGHT"), dx, 6)
-        for i = n - 1, 1, -1 do GR.list[i]:SetPoint("BOTTOM" .. side, GR.list[i + 1], "TOP" .. side, 0, 5) end
+        for i = n - 1, 1, -1 do GR.list[i]:SetPoint("BOTTOM" .. side, GR.list[i + 1], "TOP" .. side, 0, 16) end
     else
         near = GR.list[1]
         near:SetPoint("TOP" .. side, badge, "TOP" .. (right and "LEFT" or "RIGHT"), dx, -6)
-        for i = 2, n do GR.list[i]:SetPoint("TOP" .. side, GR.list[i - 1], "BOTTOM" .. side, 0, -5) end
+        for i = 2, n do GR.list[i]:SetPoint("TOP" .. side, GR.list[i - 1], "BOTTOM" .. side, 0, -16) end
     end
     for _, f in ipairs(GR.list) do GR.Corner(f, f == near and ((low and "BOTTOM" or "TOP") .. side) or nil) end
 end
 
+ns.RollGreetLayout = function() GR.Layout() end
 function GR.Talk()
     if not badge then return end
     if not badge.talkAg then
@@ -2305,9 +2565,13 @@ function GR.Push(kind, x)
     if #GR.list > 5 then local o = table.remove(GR.list, 1); o:Hide(); GR.pool[#GR.pool + 1] = o end
     f:Show(); f.outAg:Stop(); f.inAg:Stop(); f.inAg:Play()
     GR.Layout(); GR.Talk()
-    if kind == "black" then
+    f.facePop:Stop(); f.faceShake:Stop(); f.facePop:Play()
+    if kind == "broll" then
+        C_Timer.After(0.28, function() if f:IsShown() and f.kind == "broll" then f.faceShake:Play() end end)
+    elseif kind == "black" then
         GR.sticky = true
-        if PlaySound then pcall(PlaySound, SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959) end
+        C_Timer.After(0.28, function() if f:IsShown() and f.kind == "black" then f.faceShake:Play() end end)
+        if ns.RollBlackSound then ns.RollBlackSound() end
     elseif PlaySound then pcall(PlaySound, SOUNDKIT and SOUNDKIT.TELL_MESSAGE or 3081) end
     GR.left = 8
 end
@@ -2359,6 +2623,36 @@ function ns.RollGreet(joined, fresh, force)
     return true
 end
 
+-- 블랙리스트가 굴리면 화난 토끼가 바로 말해요 (같은 사람 · 같은 템은 풍선 하나를 고쳐 써요)
+function ns.RollTalkBlackRoll(x)
+    if not DB().on then return false end
+    Anchor(); PaintBadge()
+    if not badge then return false end
+    talking = true; PaintBadge()
+    for _, f in ipairs(GR.list) do
+        if f.kind == "broll" and f.key == x.key then
+            GR.Fill(f, "broll", x); GR.Layout(); GR.Talk()
+            f.facePop:Stop(); f.faceShake:Stop(); f.faceShake:Play()
+            GR.left = 8
+            return true
+        end
+    end
+    GR.Push("broll", x)
+    GR.Step()
+    return true
+end
+
+-- 템을 먹으면 반짝 토끼가 축하
+function ns.RollGreetWin(e, n)
+    local d = DB()
+    if not d.on or d.greet == "off" then return end
+    Anchor(); PaintBadge()
+    if not badge then return end
+    talking = true; PaintBadge()
+    GR.queue[#GR.queue + 1] = { "win", { link = e.link, name = e.name, n = n } }
+    GR.Step()
+end
+
 function ns.RollGreetHide(now)
     GR.queue = {}; GR.sticky = false; GR.hold = false
     for _, f in ipairs(GR.list) do
@@ -2372,6 +2666,7 @@ end
 function ns.RollGreetTest()
     ns.RollGreetHide(true)
     ns.RollGreet(true, { { name = "나쁜토끼", b = { note = "주사위 먹튀", met = 3, cls = "ROGUE" } } }, true)
+    GR.queue[#GR.queue + 1] = { "win", { name = "|cff1eff00[소금선견자의 투구]|r", n = 42 } }
 end
 
 -- 블랙리스트 창

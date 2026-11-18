@@ -340,6 +340,8 @@ local MODULES = {
               get = function() return MapDB().gHideInst ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.gHideInst = v and true or false; if LeelMapGuild then LeelMapGuild.Send() end end end },
             { t = "button", label = "지도 위치 초기화", cmd = "위치" },
+            { t = "button", label = "퀘스티 르엘 추천 설정", hint = "지도엔 받을 퀘 ! + 진행 목표 · 반납 아이콘만 끄기",
+              run = function() if ns.QuestiePresetAsk then ns.QuestiePresetAsk() end end },
         },
     },
     {
@@ -413,6 +415,18 @@ local MODULES = {
               get = function() return ns.RollDB and ns.RollDB().greet or "all" end,
               set = function(v) ns.RollDB().greet = v end },
             { t = "button", label = "인사 미리 보기", run = function() if ns.RollGreetTest then ns.RollGreetTest() end end },
+            { t = "toggle", label = "블랙리스트 굴림 알림", hint = "블랙리스트가 입찰 · 차비하면 주사위 창 위에 빨간 띠 (나만 보여요)",
+              get = function() local d = ns.RollDB and ns.RollDB(); return d and d.blackAlert ~= false end,
+              set = function(v) ns.RollDB().blackAlert = v and true or false end },
+            { t = "choice", label = "경고음", hint = "블랙리스트가 파티에 들어올 때 · 입찰/차비할 때", child = true, depOn = function() local d = ns.RollDB and ns.RollDB(); return d and d.blackAlert ~= false end,
+              options = function() return { { key = "warn", label = "르엘 경고 (띠디 띠디)" }, { key = "chime", label = "르엘 종 (맑은 두 음)" },
+                          { key = "ding", label = "게임 공격대 경보" }, { key = "alarm", label = "게임 알람" }, { key = "off", label = "끔" } } end,
+              get = function() local d = ns.RollDB and ns.RollDB(); return d and d.blackSound or "warn" end,
+              set = function(v) ns.RollDB().blackSound = v; if ns.RollBlackSound then ns.RollBlackSound() end end },
+            { t = "toggle", label = "채팅창에도 한 줄", child = true, depOn = function() local d = ns.RollDB and ns.RollDB(); return d and d.blackAlert ~= false end,
+              get = function() local d = ns.RollDB and ns.RollDB(); return d and d.blackChat ~= false end,
+              set = function(v) ns.RollDB().blackChat = v and true or false end },
+            { t = "button", label = "블랙리스트 알림 미리 보기", run = function() if ns.RollBlackTest then ns.RollBlackTest() end end },
             { t = "button", label = "토끼 단추 옮기기", run = function() if ns.RollUnlock then ns.RollUnlock(true) end end },
             { t = "button", label = "주사위 기록장", run = function() if ns.RollLog then ns.RollLog(true) end end },
             { t = "button", label = "블랙리스트", run = function() if ns.BlackOpen then ns.BlackOpen(true) end end },
@@ -1505,6 +1519,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.36", "블랙리스트 굴림 알림 · 파티와 같은 퀘", "화난 토끼 · 르엘 경고음 · 토끼 표정 · 회색 정예 · 퀘스티 추천 설정" },
     { "1.3.35", "적 이름표 내 대상 표시 · 이동 모드 크기 줄", "조준 · 화살표 · 디버프 고침 · 지도 퀘 경험치 · 채팅창 크기" },
     { "1.3.34", "따라가기 아이콘 고침", "따라갈 때 아이콘이 위로 날아가던 것" },
     { "1.3.33", "따라가기 단추 · 주사위 결과 · 클릭 막힘 고침", "초상화 두 사람 아이콘 · 누가 뭘 눌러 먹었나 · 남은 시간 시계" },

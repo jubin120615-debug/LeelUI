@@ -179,3 +179,54 @@ SLASH_LEELPROFILE1 = "/르엘설정"
 SlashCmdList.LEELPROFILE = function(msg)
     if (msg or ""):find("가져") then ns:ShowProfileImport() else ns:ShowProfileExport() end
 end
+
+----------------------------------------------------------------------
+-- 퀘스티 르엘 추천 설정: 지도 · 미니맵엔 받을 퀘 "!" + 진행 목표(잡을 몹 · 드랍 아이템) (반납 아이콘만 끄기)
+--   퀘스티 추적기 · 이름표 표시는 끄기 (르엘 UI 것을 써요)
+--   내가 눌러야만 바뀌어요. 처음 한 번만 물어봐요 (ns.db.questiePresetAsked)
+----------------------------------------------------------------------
+local QP = {
+    enabled = true, enableMapIcons = true, enableMiniMapIcons = true,
+    enableAvailable = true, enableObjectives = true, enableTurnins = false,
+    trackerEnabled = false, nameplateEnabled = false,
+}
+local function QProfile()
+    local Q = _G.Questie
+    return Q and Q.db and Q.db.profile
+end
+function ns.QuestieIsPreset()
+    local p = QProfile()
+    if not p then return false end
+    for k, v in pairs(QP) do if (p[k] ~= false) ~= v then return false end end
+    return true
+end
+function ns.QuestiePresetApply()
+    local p = QProfile()
+    if not p then ns.Print("퀘스티가 없거나 아직 켜지는 중이에요.") return end
+    for k, v in pairs(QP) do p[k] = v end
+    ReloadUI()
+end
+StaticPopupDialogs["LEELUI_QUESTIE_PRESET"] = {
+    text = "퀘스티를 르엘 추천대로 맞출까요?\n\n지도 · 미니맵엔 받을 퀘 |cfffac74d!|r 와 진행 목표(잡을 몹 · 드랍 아이템)가 보이고\n반납 아이콘, 퀘스티 추적기 · 이름표 표시는 꺼져요.\n\n바꾸면 다시 불러와요. (나중에 /questie 에서 언제든 되돌릴 수 있어요)",
+    button1 = "맞추기", button2 = "그대로",
+    OnAccept = function() if ns.db then ns.db.questiePresetAsked = true end; ns.QuestiePresetApply() end,
+    OnCancel = function() if ns.db then ns.db.questiePresetAsked = true end end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+function ns.QuestiePresetAsk()
+    if not QProfile() then ns.Print("퀘스티가 없거나 아직 켜지는 중이에요.") return end
+    if ns.QuestieIsPreset() then ns.Print("퀘스티가 이미 르엘 추천 설정이에요.") return end
+    StaticPopup_Show("LEELUI_QUESTIE_PRESET")
+end
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function()
+        C_Timer.After(10, function()
+            if not ns.db or ns.db.questiePresetAsked then return end
+            if not QProfile() or ns.QuestieIsPreset() then return end
+            if InCombatLockdown() then return end
+            StaticPopup_Show("LEELUI_QUESTIE_PRESET")
+        end)
+    end)
+end

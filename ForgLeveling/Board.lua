@@ -817,8 +817,12 @@ local function Diff(e)
     local me = UnitLevel("player") or 1
     local d = lv - me
     local txt = lv > 0 and ("Lv " .. lv) or "Lv ?"
-    if e.tag then return txt .. " · " .. (TAG_NAME[e.tag] or "정예"), "hard", "red" end
-    if e.group and e.group > 1 then return txt .. " · 파티", "hard", "red" end
+    -- 정예 · 던전 · 파티 퀘: 보통은 빨강, 내 레벨에 회색(경험치 적음)이면 회색
+    if e.tag or (e.group and e.group > 1) then
+        local t2 = txt .. " · " .. (e.tag and (TAG_NAME[e.tag] or "정예") or "파티")
+        if lv > 0 and GameColor(lv, tonumber(e.id)) == "grey" then return t2, "hard", "grey" end
+        return t2, "hard", "red"
+    end
     local col = GameColor(lv, tonumber(e.id))
     if d >= 3 then return txt, "hard", col end
     if d >= 1 then return txt, "mid", col end
@@ -1138,6 +1142,7 @@ end
 
 -- 고른 지역 (안 골랐으면: 지금 지역에 퀘가 있으면 거기, 없으면 할 일이 가장 많은 지역)
 local function CurZone()
+    if zoneSel and zoneSel:find("^party") and not (IsInGroup and IsInGroup()) then zoneSel = nil end
     if zoneSel then return zoneSel end
     local z, order = ZoneStats()
     local here = HereName()
@@ -1193,7 +1198,9 @@ local function BuildItems()
     local todo, done, fails = {}, {}, {}
     for _, e in ipairs(log) do
         if Visible(e, m) then
-            local inSel = sel == "all" or sel == "turnin" or ZoneKey(e) == sel
+            local inSel
+            if sel:find("^party") then inSel = ns.PQ and ns.PQ.Has(e, sel:match("^party:(.+)$")) or false
+            else inSel = sel == "all" or sel == "turnin" or ZoneKey(e) == sel end
             if inSel and not (sel == "turnin" and not e.done) then
                 local x, y, src = QuestPos(e, m)
                 e._x, e._y, e._src = x, y, src
@@ -1225,7 +1232,8 @@ local function BuildItems()
         items[#items + 1] = { sec = t, count = #list }
         for _, e in ipairs(list) do items[#items + 1] = { e = e } end
     end
-    local label = (sel == "all" and "모든 지역") or (sel == "turnin" and nil) or sel
+    local label = (sel == "all" and "모든 지역") or (sel == "turnin" and nil) or (sel == "party" and "파티와 같은 퀘")
+        or (sel:find("^party:") and (sel:sub(7) .. "와 같은 퀘")) or sel
     if sel == "turnin" then
         sec("완료한 퀘", done)
     else
@@ -1237,6 +1245,140 @@ local function BuildItems()
 end
 
 local RefreshBoard, RefreshTracker
+
+----------------------------------------------------------------------
+-- 파티원과 같은 퀘 (A: 줄에 파티원 얼굴 · B: 왼쪽 "파티와 같은 퀘" 칸)
+--   같은 퀘인지는 게임이 알려줘요 (상대 애드온 없어도) · 진행도(3/8)는 상대도 르엘 UI면
+--   파티 애드온 채널로 조용히 주고받아요 (채팅창엔 안 보여요)
+----------------------------------------------------------------------
+do
+    local PQ = { cache = {}, at = 0, remote = {}, members = {} }
+    ns.PQ = PQ
+    local PREFIX = "LeelQP"
+    local function Short(n) return type(n) == "string" and (n:gsub("%-.*$", "")) or nil end
+    local function Secret(v) return issecretvalue and issecretvalue(v) end
+    local function OnQuest(unit, e)
+        if C_QuestLog and C_QuestLog.IsUnitOnQuest and e.id then
+            local ok, r = pcall(C_QuestLog.IsUnitOnQuest, unit, e.id)
+            if ok and r ~= nil then return r and true or false end
+        end
+        if IsUnitOnQuest then
+            local idx = e.index
+            if e.id and GetQuestLogIndexByID then local ok, r = pcall(GetQuestLogIndexByID, e.id); if ok and r and r > 0 then idx = r end end
+            if idx then local ok, r = pcall(IsUnitOnQuest, idx, unit); if ok and r ~= nil then return r == 1 or r == true end end
+        end
+        local rq = PQ.remote[Short(UnitName(unit)) or ""]
+        return (rq and e.id and rq.q[e.id] ~= nil) or false
+    end
+    function PQ.Build(force)
+        local now = GetTime()
+        if not force and now - PQ.at < 1 then return end
+        PQ.at = now; PQ.cache = {}; PQ.members = {}
+        if not (IsInGroup and IsInGroup()) or (IsInRaid and IsInRaid()) then return end
+        for i = 1, 4 do
+            local un = "party" .. i
+            local nm = UnitExists(un) and UnitName(un)
+            if nm and not Secret(nm) then
+                local _, cls = UnitClass(un)
+                local m = { unit = un, name = Short(nm), cls = cls, todo = 0, done = 0 }
+                PQ.members[#PQ.members + 1] = m
+                for _, e in ipairs(log) do
+                    if e.id and not e.failed and OnQuest(un, e) then
+                        PQ.cache[e.id] = PQ.cache[e.id] or {}
+                        table.insert(PQ.cache[e.id], m)
+                        if e.done then m.done = m.done + 1 else m.todo = m.todo + 1 end
+                    end
+                end
+            end
+        end
+    end
+    function PQ.Of(e) PQ.Build(); return e and e.id and PQ.cache[e.id] or nil end
+    function PQ.Has(e, name)
+        local l = PQ.Of(e)
+        if not l then return false end
+        if not name then return #l > 0 end
+        for _, m in ipairs(l) do if m.name == name then return true end end
+        return false
+    end
+    function PQ.Prog(m, id)
+        local r = PQ.remote[m.name]
+        local q = r and r.q[id]
+        if not q then return nil end
+        if q.done then return "|cff8fe899완료|r" end
+        return (q.prog and q.prog ~= "") and q.prog or "하는 중"
+    end
+    function PQ.ClassCol(cls)
+        local c = cls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls]
+        return c and { c.r, c.g, c.b } or { 0.8, 0.75, 0.72 }
+    end
+    -- 진행도 보내기 (2초에 한 번 몰아서)
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX) end
+    local function Chan()
+        if IsInGroup and LE_PARTY_CATEGORY_INSTANCE and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and not IsInGroup(LE_PARTY_CATEGORY_HOME) then return "INSTANCE_CHAT" end
+        return "PARTY"
+    end
+    function PQ.Send()
+        if not (IsInGroup and IsInGroup()) or (IsInRaid and IsInRaid()) then return end
+        if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
+        local parts = {}
+        for _, e in ipairs(log) do
+            if e.id and not e.failed then
+                local t = e.id .. ":" .. (e.done and "1" or "0")
+                if not e.done then
+                    local pr = {}
+                    for _, o in ipairs(e.objs or {}) do if o.have and o.need then pr[#pr + 1] = o.have .. "/" .. o.need end end
+                    if #pr > 0 then t = t .. ":" .. table.concat(pr, ",") end
+                end
+                parts[#parts + 1] = t
+            end
+        end
+        local msgs, cur = {}, ""
+        for _, t in ipairs(parts) do
+            if #cur + #t + 1 > 230 then msgs[#msgs + 1] = cur; cur = "" end
+            cur = (cur == "") and t or (cur .. ";" .. t)
+        end
+        msgs[#msgs + 1] = cur
+        local ch = Chan()
+        for i, m in ipairs(msgs) do pcall(C_ChatInfo.SendAddonMessage, PREFIX, (i == 1 and "N" or "A") .. "|" .. m, ch) end
+    end
+    local pend
+    function PQ.SoonSend()
+        if pend then return end
+        pend = true
+        C_Timer.After(2, function() pend = nil; PQ.Send() end)
+    end
+    local function Repaint()
+        PQ.at = 0
+        if board and board:IsShown() and RefreshBoard then RefreshBoard() end
+    end
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("CHAT_MSG_ADDON")
+    f:RegisterEvent("GROUP_ROSTER_UPDATE")
+    f:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
+    f:SetScript("OnEvent", function(_, ev, a1, a2, _, a4)
+        if ev == "CHAT_MSG_ADDON" then
+            if a1 ~= PREFIX or type(a2) ~= "string" then return end
+            local who = Short(a4)
+            if not who or who == Short(UnitName("player")) then return end
+            local kind, data = a2:match("^(%a)|(.*)$")
+            if not kind then return end
+            local r = PQ.remote[who]
+            if kind == "N" or not r then r = { q = {} }; PQ.remote[who] = r end
+            for t in data:gmatch("[^;]+") do
+                local id, d, rest = t:match("^(%d+):(%d)(.*)$")
+                if id then r.q[tonumber(id)] = { done = d == "1", prog = (rest:gsub("^:", ""):gsub(",", " · ")) } end
+            end
+            Repaint()
+        elseif ev == "GROUP_ROSTER_UPDATE" then
+            local keep = {}
+            for i = 1, 4 do local nm = Short(UnitExists("party" .. i) and UnitName("party" .. i)); if nm then keep[nm] = true end end
+            for nm in pairs(PQ.remote) do if not keep[nm] then PQ.remote[nm] = nil end end
+            PQ.SoonSend(); Repaint()
+        else
+            C_Timer.After(0.3, Repaint)
+        end
+    end)
+end
 
 -- 퀘스트 포기 (확인 창을 한 번 거쳐요)
 local function LeelAbandon(e)
@@ -1338,6 +1480,15 @@ local function Row(i)
         end
         if e.done then GameTooltip:AddLine("완료했어요 · 반납하러 가요", 0.95, 0.7, 0.76) end
         if e.xp then GameTooltip:AddLine("경험치 +" .. (BreakUpLargeNumbers and BreakUpLargeNumbers(e.xp) or e.xp), 1, 0.84, 0.88) end
+        local pm = ns.PQ and ns.PQ.Of(e)
+        if pm and #pm > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine(("파티 %d명도 하는 중"):format(#pm), 0.95, 0.7, 0.76)
+            for _, m in ipairs(pm) do
+                local c = ns.PQ.ClassCol(m.cls)
+                GameTooltip:AddDoubleLine(m.name, ns.PQ.Prog(m, e.id) or "하는 중", c[1], c[2], c[3], 0.85, 0.8, 0.78)
+            end
+        end
         local g = guide[e.key]
         if g and g.npc then GameTooltip:AddLine(("준 사람: %s (%s %.0f, %.0f)"):format(g.npc, g.zone or "", g.x or 0, g.y or 0), 0.7, 0.7, 0.7) end
         GameTooltip:AddLine("위치: " .. SRC[e._src or "none"], 0.7, 0.7, 0.7)
@@ -1360,6 +1511,7 @@ local function PaintRow(r, it, w)
         r:SetHeight(SEC_H)
         for _, t in ipairs(r.sel.tex) do t:Hide() end
         r.c1:Hide(); r.c2:Hide(); r.qi:Hide(); r.ab:Hide()
+        for _, a in ipairs(r.pav or {}) do a:Hide() end   -- 섹션 머리엔 파티원 얼굴 없음
         r.secText:SetText(it.sec)
         r.secN:ClearAllPoints(); r.secN:SetPoint("LEFT", r.secText, "RIGHT", 6, 0)
         r.secN:Set(tostring(it.count), "grey")
@@ -1389,7 +1541,7 @@ local function PaintRow(r, it, w)
         local okN, iname = pcall(GetInstanceInfo)
         if ok and ii and okN and iname and e.zone == iname then where = "던전 안" end
     end
-    if CurZone() == "all" or CurZone() == "turnin" then where = ZoneKey(e) end
+    if CurZone() == "all" or CurZone() == "turnin" or CurZone():find("^party") then where = ZoneKey(e) end
     r.sub:SetText((prog ~= "" and (prog .. " · ") or "") .. where)
     r.xp:SetText("")       -- 목록이 좁아서 경험치는 마우스를 올리면 (툴팁)
     local dt, dk, dc = Diff(e)
@@ -1400,6 +1552,14 @@ local function PaintRow(r, it, w)
         r.c2:Hide()
         r.qi:ClearAllPoints(); r.qi:SetPoint("RIGHT", r.c1, "LEFT", -5, 0); r.qi:Show()
     else r.c2:Hide(); r.qi:Hide() end
+    -- 회색 퀘(경험치 적음): 줄을 흐리게 · 정예 · 던전 · 파티면 "버려도 돼요"
+    local grey = (dc == "grey") and not e.failed
+    local junk = grey and not e.done and (e.tag or (e.group and e.group > 1)) and true or false
+    if junk then
+        r.c2:SetRaw("버려도 돼요", { 0.30, 0.13, 0.15 }, { 1, 0.62, 0.66 })
+        r.c2:ClearAllPoints(); r.c2:SetPoint("RIGHT", r.c1, "LEFT", -4, 0)
+        r.sub:SetText("|cffa39a96경험치 적음" .. ((e.tag == "dungeon" or e.tag == "raid" or (e.group and e.group > 1)) and " · 파티 필요" or "") .. "|r · " .. r.sub:GetText())
+    end
     -- 직업 퀘면 직업 색 알약 + 직업 아이콘
     local cq = ClassQuest(e.id)
     if cq then
@@ -1408,13 +1568,42 @@ local function PaintRow(r, it, w)
         r.cls:SetIcon("Interface\\TargetingFrame\\UI-Classes-Circles", CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[cq.file])
         r.cls:SetRaw(cq.name, { cr * 0.32, cg * 0.32, cb * 0.32 }, { 0.55 + cr * 0.45, 0.55 + cg * 0.45, 0.55 + cb * 0.45 })
         r.cls:ClearAllPoints()
-        r.cls:SetPoint("RIGHT", r.qi:IsShown() and r.qi or r.c1, "LEFT", -5, 0)
+        r.cls:SetPoint("RIGHT", r.qi:IsShown() and r.qi or (r.c2:IsShown() and r.c2 or r.c1), "LEFT", -5, 0)
     else
         r.cls:Hide()
     end
-    local right = 30 + r.c1:GetWidth() + (r.qi:IsShown() and 24 or 0) + (r.cls:IsShown() and (r.cls:GetWidth() + 5) or 0) + 10
+    -- 같은 퀘를 하는 파티원 얼굴 (직업 색 동그라미 + 이름 첫 글자)
+    r.pav = r.pav or {}
+    local pm = ns.PQ and ns.PQ.Of(e) or {}
+    local anchor = r.cls:IsShown() and r.cls or (r.qi:IsShown() and r.qi or (r.c2:IsShown() and r.c2 or r.c1))
+    local pw = 0
+    for i = 1, 4 do
+        local a = r.pav[i]
+        local m = pm[i]
+        if m and not e.failed then
+            if not a then
+                a = CreateFrame("Frame", nil, r); a:SetSize(18, 18); a:SetFrameLevel(r:GetFrameLevel() + 2 + (5 - i))
+                a.rim = a:CreateTexture(nil, "ARTWORK"); a.rim:SetTexture(MEDIA .. "circle"); a.rim:SetPoint("TOPLEFT", -1.5, 1.5); a.rim:SetPoint("BOTTOMRIGHT", 1.5, -1.5)
+                a.rim:SetVertexColor(0.12, 0.09, 0.085, 1)
+                a.disc = a:CreateTexture(nil, "ARTWORK", nil, 1); a.disc:SetTexture(MEDIA .. "circle"); a.disc:SetAllPoints()
+                a.fs = Font(a, 10, P.ink); a.fs:SetPoint("CENTER", 0, 0); a.fs:SetShadowColor(0, 0, 0, 0)
+                r.pav[i] = a
+            end
+            local c = ns.PQ.ClassCol(m.cls)
+            a.disc:SetVertexColor(c[1], c[2], c[3], 1)
+            a.fs:SetText(m.name:match("^[%z\1-\127\194-\244][\128-\191]*") or "")
+            a:ClearAllPoints()
+            if i == 1 then a:SetPoint("RIGHT", anchor, "LEFT", -6, 0) else a:SetPoint("RIGHT", r.pav[i - 1], "LEFT", 5, 0) end
+            a:Show()
+            pw = pw + ((i == 1) and 24 or 13)
+        elseif a then
+            a:Hide()
+        end
+    end
+    local right = 30 + r.c1:GetWidth() + (r.qi:IsShown() and 24 or 0) + (r.cls:IsShown() and (r.cls:GetWidth() + 5) or 0) + 10 + pw
+        + (r.c2:IsShown() and (r.c2:GetWidth() + 4) or 0)
     r.title:SetWidth(w - 40 - right); r.sub:SetWidth(w - 40 - right)
-    r:SetAlpha(1)
+    r:SetAlpha(grey and 0.6 or 1)
     if e.failed then
         -- 실패: 빨간 "실패" · 흐린 이름 · 네모는 못 눌러요 (펼치면 [포기])
         r.c1:Set("실패", "red")
@@ -2453,6 +2642,23 @@ local function PaintZones()
     for _, v in ipairs(order) do tTodo = tTodo + v.todo; tDone = tDone + v.done end
     list[#list + 1] = { key = "all", name = "모든 지역", todo = tTodo, done = tDone, dot = { 0.79, 0.7, 0.67 } }
     list[#list + 1] = { key = "turnin", name = "완료한 퀘만", todo = 0, done = tDone, dot = { 0.945, 0.851, 0.541 }, yellow = true }
+    -- 파티와 같은 퀘 (파티일 때만) · 파티원이 둘 이상이면 파티원별 칸도
+    if ns.PQ and IsInGroup and IsInGroup() and not (IsInRaid and IsInRaid()) then
+        local PQ = ns.PQ
+        PQ.Build()
+        local st, sd = 0, 0
+        for _, e in ipairs(log) do
+            if e.id and not e.failed and PQ.cache[e.id] then if e.done then sd = sd + 1 else st = st + 1 end end
+        end
+        list[#list + 1] = { key = "party", name = "파티와 같은 퀘", todo = st, done = sd, dot = { 1, 0.56, 0.64 } }
+        if #PQ.members > 1 then
+            for _, m in ipairs(PQ.members) do
+                if m.todo + m.done > 0 then
+                    list[#list + 1] = { key = "party:" .. m.name, name = m.name, todo = m.todo, done = m.done, dot = PQ.ClassCol(m.cls) }
+                end
+            end
+        end
+    end
     -- 지금 있는 곳: 맨 위 따로 칸 (퀘가 없어도 보여요), 아래 목록에는 다시 안 나와요
     local hv = z[here] or { name = here, todo = 0, done = 0 }
     list[#list + 1] = { head = "지금 있는 곳" }
@@ -5310,6 +5516,7 @@ ev:SetScript("OnEvent", function(_, e, a1, a2)
         C_Timer.After(0.8, AutoRoute)
     else
         SoonRefresh()
+        if ns.PQ then ns.PQ.at = 0; ns.PQ.SoonSend() end
     end
 end)
 
