@@ -296,6 +296,12 @@ local MODULES = {
             { t = "toggle", label = "탭 따로 띄우기 허용", hint = "끄면 채팅창에서 떨어져 나온 탭을 기둥으로 다시 붙여요",
               get = function() return ns.ChatDB and ns.ChatDB().allowFloat and true or false end,
               set = function(v) if ns.ChatDB then ns.ChatDB().allowFloat = v and true or nil; if not v and ns.ChatRedock then ns.ChatRedock() end end end },
+            { t = "toggle", label = "보낸 말 다시 쓰기", hint = "입력칸에서 ↑ = 최근 보낸 말 목록 · ↑ ↓ 고르고 Enter 로 보내기 (채널도 같이)",
+              get = function() return ns.ChatDB and ns.ChatDB().histOn ~= false end,
+              set = function(v) if ns.ChatDB then ns.ChatDB().histOn = v and true or false; if ns.ChatHistApply then ns.ChatHistApply() end end end },
+            { t = "toggle", label = "파티원 말풍선 직업 색", hint = "파티 중 파티원(나 포함) 말풍선 윗변에 직업 색 띠 · 던전 안에서는 게임이 막아서 기본 그대로",
+              get = function() return ns.ChatDB and ns.ChatDB().bubbleCls ~= false end,
+              set = function(v) if ns.ChatDB then ns.ChatDB().bubbleCls = v and true or false; if ns.ChatBubbleRefresh then ns.ChatBubbleRefresh() end end end },
             { t = "button", label = "떨어진 탭 다시 붙이기",
               run = function() if ns.ChatRedock then local a = ns.ChatDB().allowFloat; ns.ChatDB().allowFloat = nil; ns.ChatRedock(); ns.ChatDB().allowFloat = a end end },
         },
@@ -1519,6 +1525,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.37", "채팅: 보낸 말 다시 쓰기 · 파티원 말풍선 직업 색", "입력칸에서 ↑ · 최근 5개 · 말풍선 윗변 직업 색 띠" },
     { "1.3.36", "블랙리스트 굴림 알림 · 파티와 같은 퀘", "화난 토끼 · 르엘 경고음 · 토끼 표정 · 회색 정예 · 퀘스티 추천 설정" },
     { "1.3.35", "적 이름표 내 대상 표시 · 이동 모드 크기 줄", "조준 · 화살표 · 디버프 고침 · 지도 퀘 경험치 · 채팅창 크기" },
     { "1.3.34", "따라가기 아이콘 고침", "따라갈 때 아이콘이 위로 날아가던 것" },

@@ -999,3 +999,366 @@ boot:SetScript("OnEvent", function(_, e)
     end
     if ns.db and DB().on ~= false then C_Timer.After(0.2, function() pcall(ApplyPos) end) end
 end)
+
+----------------------------------------------------------------------
+-- 보낸 말 다시 쓰기 (B안): 입력칸에서 ↑ = 최근 보낸 말 목록이 입력칸 위로
+--   ↑ ↓ 로 고르면 입력칸에 바로 들어가요 (채널도 같이) · Enter = 보내기
+--   ← → 나 글을 고치면 목록만 닫혀요 · ↓ 를 끝까지 = 쓰던 글로 돌아가기 · Alt + ↑ 는 게임 기본 그대로
+--   최근 5개 기억 (ns.db.chat.hist, 접속을 끊어도 남아요) · 허브 > 채팅창 > 보낸 말 다시 쓰기
+----------------------------------------------------------------------
+do
+    local MAXH, SHOW, RH = 5, 5, 22   -- 최근 5개만 기억 · 5줄
+    local pop, cur, draft, owner, filling = nil, 0, nil, nil, false
+    local function H()
+        local d = DB(); d.hist = d.hist or {}
+        while #d.hist > MAXH do table.remove(d.hist) end   -- 예전에 20개까지 쌓인 것도 5개로
+        return d.hist
+    end
+    local function On() return DB().histOn ~= false end
+    local NAME = { SAY = "일반", PARTY = "파티", PARTY_LEADER = "파티", GUILD = "길드", OFFICER = "관리자", RAID = "공격대",
+                   RAID_LEADER = "공격대", RAID_WARNING = "공격대 경보", INSTANCE_CHAT = "인스턴스", YELL = "외침", EMOTE = "감정",
+                   WHISPER = "귓속말", BN_WHISPER = "귓속말" }
+    local function Label(h)
+        if h.text:sub(1, 1) == "/" then return "명령", { 0.8, 0.75, 0.72 } end
+        local info = ChatTypeInfo and ChatTypeInfo[h.t or "SAY"]
+        if h.t == "CHANNEL" and h.ch then info = ChatTypeInfo and ChatTypeInfo["CHANNEL" .. h.ch] or info end
+        local c = (info and info.r) and { info.r, info.g, info.b } or { 1, 1, 1 }
+        local n = NAME[h.t or "SAY"] or h.t or "일반"
+        if h.t == "CHANNEL" then n = h.chName or ("채널 " .. (h.ch or "")) end
+        if (h.t == "WHISPER" or h.t == "BN_WHISPER") and h.tell then n = "귓속말 · " .. h.tell end
+        return n, c
+    end
+    -- 보낸 말 기억
+    local function Remember(eb, text)
+        if not On() or type(text) ~= "string" or not text:find("%S") then return end
+        if issecretvalue and issecretvalue(text) then return end
+        local t = eb:GetAttribute("chatType")
+        local h = { text = text, t = t, at = time() }
+        if t == "CHANNEL" then
+            h.ch = eb:GetAttribute("channelTarget")
+            local okN, _, nm = pcall(GetChannelName, h.ch or 0)
+            if okN and type(nm) == "string" then h.chName = (nm:gsub("%s*%-.*$", "")) end
+        elseif t == "WHISPER" or t == "BN_WHISPER" then
+            h.tell = eb:GetAttribute("tellTarget")
+        end
+        local list = H()
+        for i = #list, 1, -1 do if list[i].text == text and list[i].t == t then table.remove(list, i) end end
+        table.insert(list, 1, h)
+        while #list > MAXH do table.remove(list) end
+    end
+
+    local Close
+    local function Fill(eb, h)
+        filling = true
+        if h.text:sub(1, 1) ~= "/" and h.t and h.t ~= eb:GetAttribute("chatType") then
+            pcall(eb.SetAttribute, eb, "chatType", h.t)
+            if h.t == "CHANNEL" and h.ch then pcall(eb.SetAttribute, eb, "channelTarget", h.ch) end
+            if (h.t == "WHISPER" or h.t == "BN_WHISPER") and h.tell then pcall(eb.SetAttribute, eb, "tellTarget", h.tell) end
+            if ChatEdit_UpdateHeader then pcall(ChatEdit_UpdateHeader, eb) end
+        end
+        eb:SetText(h.text); eb:SetCursorPosition(#h.text)
+        filling = false
+    end
+    -- A안: 조용한 목록 · 왼쪽 얇은 채널 색 줄 · 오른쪽 보낸 시간 · 고른 줄은 옅은 분홍 + 얇은 테
+    local PANEL = { 0.118, 0.086, 0.078 }
+    local SELF = { 0.215, 0.160, 0.158 }
+    local function Ago(at)
+        if not at then return "" end
+        local d = time() - at
+        if d < 60 then return "방금" elseif d < 3600 then return math.floor(d / 60) .. "분"
+        elseif d < 86400 then return math.floor(d / 3600) .. "시간" end
+        return math.floor(d / 86400) .. "일"
+    end
+    local function Key(parent, text)
+        local k = CreateFrame("Frame", nil, parent)
+        k:SetHeight(15)
+        k.edge = ns.RoundRect(k, 4, { 0.42, 0.33, 0.31 }, "BACKGROUND", 0, 0)
+        k.bg = ns.RoundRect(k, 4, { 0.227, 0.18, 0.169 }, "BACKGROUND", 1, 1)
+        k.fs = ns.Font(k, 9.5, { 0.85, 0.78, 0.76 }); k.fs:SetPoint("CENTER", 0, 0.5); k.fs:SetText(text)
+        k:SetWidth(math.max(15, k.fs:GetStringWidth() + 9))
+        return k
+    end
+    local function Row(i)
+        local r = pop.rows[i]
+        if r then return r end
+        r = CreateFrame("Button", nil, pop)
+        r:SetHeight(RH)
+        r.rim = ns.RoundRect(r, 9, { 0.949, 0.702, 0.761 }, "BACKGROUND", 0, 0); r.rim:SetColor({ 0.949, 0.702, 0.761 }, 0.45)
+        r.fill = ns.RoundRect(r, 9, SELF, "BACKGROUND", 1, 1); r.fill:SetColor(SELF, 1)
+        r.bar = r:CreateTexture(nil, "ARTWORK"); r.bar:SetTexture(ns.WHITE or "Interface\\Buttons\\WHITE8X8")
+        r.bar:SetWidth(2.5); r.bar:SetPoint("TOPLEFT", 4, -5); r.bar:SetPoint("BOTTOMLEFT", 4, 5)
+        r.ago = ns.Font(r, 10, { 0.49, 0.42, 0.40 }); r.ago:SetPoint("RIGHT", -10, 0); r.ago:SetJustifyH("RIGHT")
+        r.fs = ns.Font(r, 12.5); r.fs:SetPoint("LEFT", 14, 0); r.fs:SetPoint("RIGHT", r.ago, "LEFT", -8, 0)
+        r.fs:SetJustifyH("LEFT"); r.fs:SetWordWrap(false)
+        r:SetScript("OnClick", function(self)
+            if not owner or not self.h then return end
+            cur = self.i; Fill(owner, self.h); pop.Paint(); owner:SetFocus()
+        end)
+        r:SetScript("OnEnter", function(self) if self.i ~= cur then for _, t in ipairs(self.fill.tex) do t:Show() end; self.fill:SetColor({ 0.16, 0.12, 0.115 }, 1) end end)
+        r:SetScript("OnLeave", function() if pop.Paint then pop.Paint() end end)
+        pop.rows[i] = r
+        return r
+    end
+    local HEAD = 24
+    local function Make()
+        pop = CreateFrame("Frame", "LeelUI_ChatHistory", UIParent)
+        pop:SetFrameStrata("DIALOG"); pop:SetClampedToScreen(true)
+        pop.edge = ns.RoundRect(pop, 14, { 0.30, 0.22, 0.21 }, "BACKGROUND", -1, -1); pop.edge:SetColor({ 0.30, 0.22, 0.21 }, 0.9)
+        pop.bg = ns.RoundRect(pop, 14, PANEL, "BACKGROUND", 0, 0); pop.bg:SetColor(PANEL, 0.96)
+        pop.title = ns.Font(pop, 10.5, { 0.54, 0.46, 0.45 }); pop.title:SetPoint("TOPLEFT", 14, -8); pop.title:SetText("보낸 말")
+        -- 오른쪽 위: [↑] [↓] 고르기  [Enter] 보내기
+        local send = ns.Font(pop, 10.5, { 0.54, 0.46, 0.45 }); send:SetPoint("TOPRIGHT", -12, -8); send:SetText("보내기")
+        local kE = Key(pop, "Enter"); kE:SetPoint("RIGHT", send, "LEFT", -4, 0)
+        local pick = ns.Font(pop, 10.5, { 0.54, 0.46, 0.45 }); pick:SetPoint("RIGHT", kE, "LEFT", -10, 0); pick:SetText("고르기")
+        local kD = Key(pop, "↓"); kD:SetPoint("RIGHT", pick, "LEFT", -4, 0)
+        local kU = Key(pop, "↑"); kU:SetPoint("RIGHT", kD, "LEFT", -3, 0)
+        pop.line = pop:CreateTexture(nil, "ARTWORK"); pop.line:SetTexture(ns.WHITE or "Interface\\Buttons\\WHITE8X8")
+        pop.line:SetHeight(1); pop.line:SetPoint("TOPLEFT", 8, -HEAD); pop.line:SetPoint("TOPRIGHT", -8, -HEAD)
+        pop.line:SetVertexColor(1, 1, 1, 0.05)
+        pop.rows = {}
+        function pop.Paint()
+            local list = H()
+            local n = math.min(SHOW, #list)
+            local top = math.max(1, math.min(cur - SHOW + 1, #list - n + 1))
+            if cur < top then top = cur end
+            for i = 1, SHOW do
+                local r = Row(i)
+                local idx = top + n - i     -- 오래된 말이 위, 최근 말이 아래 (입력칸 쪽)
+                local h = (i <= n) and list[idx] or nil
+                if h then
+                    r.h, r.i = h, idx
+                    local _, c = Label(h)
+                    local on = (idx == cur)
+                    for _, t in ipairs(r.rim.tex) do t:SetShown(on) end
+                    for _, t in ipairs(r.fill.tex) do t:SetShown(on) end
+                    r.fill:SetColor(SELF, 1)
+                    r.bar:SetVertexColor(c[1], c[2], c[3], on and 1 or 0.85)
+                    local txt = h.text
+                    if (h.t == "WHISPER" or h.t == "BN_WHISPER") and h.tell and h.text:sub(1, 1) ~= "/" then
+                        txt = txt .. "  |cff8a7672→ " .. h.tell .. "|r"
+                    elseif h.t == "CHANNEL" and h.chName then
+                        txt = txt .. "  |cff8a7672" .. h.chName .. "|r"
+                    end
+                    r.fs:SetText(txt)
+                    if on then r.fs:SetTextColor(1, 0.97, 0.96) else r.fs:SetTextColor(0.91, 0.86, 0.85) end
+                    r.ago:SetText(Ago(h.at))
+                    r:ClearAllPoints()
+                    r:SetPoint("TOPLEFT", 6, -HEAD - 4 - (i - 1) * RH); r:SetPoint("TOPRIGHT", -6, -HEAD - 4 - (i - 1) * RH)
+                    r:Show()
+                else
+                    r:Hide()
+                end
+            end
+            pop:SetHeight(HEAD + 8 + n * RH)
+        end
+    end
+    Close = function(restore)
+        if not pop or not pop:IsShown() then return end
+        pop:Hide()
+        if restore and owner and draft then filling = true; owner:SetText(draft); owner:SetCursorPosition(#draft); filling = false end
+        cur, draft = 0, nil
+    end
+    local function Open(eb)
+        local list = H()
+        if #list == 0 then return end
+        if not pop then Make() end
+        owner, draft, cur = eb, eb:GetText() or "", 1
+        pop:ClearAllPoints()
+        pop:SetPoint("BOTTOMLEFT", eb, "TOPLEFT", 0, 6)
+        pop:SetWidth(math.max(260, eb:GetWidth()))
+        pop:SetScale(eb:GetEffectiveScale() / UIParent:GetEffectiveScale())
+        pop:Show(); pop.Paint()
+        Fill(eb, list[cur])
+    end
+    local lastKey = 0
+    -- 게임 기본 기록도 ↑ ↓ 에 글을 바꿔서, 한 박자 뒤에 우리 글로 다시 덮어요
+    local function Later(eb, fn)
+        eb.leelArrowAt = GetTime()
+        fn()
+        C_Timer.After(0, function() eb.leelArrowAt = GetTime(); fn() end)
+    end
+    local function OnArrow(eb, key)
+        if not On() or (IsAltKeyDown and IsAltKeyDown()) then return end
+        local now = GetTime()
+        if now == lastKey then return end   -- 같은 누름이 두 번 오지 않게
+        lastKey = now
+        local open = pop and pop:IsShown() and owner == eb
+        if key == "UP" then
+            if not open then Open(eb)
+            elseif cur < #H() then cur = cur + 1; pop.Paint() end
+            if pop and pop:IsShown() then local h = H()[cur]; Later(eb, function() if h then Fill(eb, h) end end) end
+        elseif key == "DOWN" then
+            if not open then
+                local t = eb:GetText()   -- 기본 기록이 바꾼 글은 그대로 두지 않고 되돌려요
+                Later(eb, function() if eb:GetText() ~= t then filling = true; eb:SetText(t); eb:SetCursorPosition(#t); filling = false end end)
+                return
+            end
+            if cur <= 1 then
+                local d = draft or ""
+                Close(false)
+                Later(eb, function() filling = true; eb:SetText(d); eb:SetCursorPosition(#d); filling = false end)
+            else
+                cur = cur - 1; pop.Paint()
+                local h = H()[cur]
+                Later(eb, function() Fill(eb, h) end)
+            end
+        elseif key == "LEFT" or key == "RIGHT" then
+            if open then Close(false) end
+        end
+    end
+    local function Hook(eb)
+        if not eb or eb.leelHist then return end
+        eb.leelHist = true
+        -- 화살표를 입력칸이 받게 (Alt 없이) · 끄면 게임 기본(Alt + 화살표)으로
+        if On() and eb.SetAltArrowKeyMode then pcall(eb.SetAltArrowKeyMode, eb, false) end
+        eb:HookScript("OnKeyDown", function(self, key) OnArrow(self, key) end)
+        pcall(eb.HookScript, eb, "OnArrowPressed", function(self, key) OnArrow(self, key) end)
+        eb:HookScript("OnTextChanged", function(self, user)
+            local t = self:GetText() or ""
+            if user and not filling and not (self.leelArrowAt and GetTime() - self.leelArrowAt < 0.2)
+                and pop and pop:IsShown() and owner == self then Close(false) end
+            if t ~= "" then self.leelHistLast = t else self.leelHistClr = GetTime() end
+            self.leelHistTxt = t
+        end)
+        -- 보낸 말 기억: Enter 뒤 (지워지기 직전 글)
+        -- (게임이 글을 지우는 때가 Enter 뒤일 수도, 앞일 수도 있어서 마지막으로 쓰여 있던 글을 기억해요)
+        eb:HookScript("OnEnterPressed", function(self)
+            local t = self.leelHistLast
+            local sent = (self.leelHistTxt or "") ~= "" or (self.leelHistClr and GetTime() - self.leelHistClr < 0.1)
+            self.leelHistLast = nil
+            if pop and pop:IsShown() then Close(false) end
+            if self.leelHistSent and GetTime() - self.leelHistSent < 0.2 then return end
+            if sent and t and t ~= "" then Remember(self, t) end
+        end)
+        eb:HookScript("OnHide", function(self) if owner == self then Close(false) end end)
+        -- ESC · 다른 곳 클릭: 입력칸이 꺼지면(숨지 않고 흐려지기만 해도) 목록도 같이 닫기
+        eb:HookScript("OnEscapePressed", function(self) if owner == self then Close(false) end end)
+        eb:HookScript("OnEditFocusLost", function(self)
+            if owner ~= self then return end
+            if pop and pop:IsShown() and pop:IsMouseOver() then return end   -- 목록 줄을 누르는 중이면 그대로
+            Close(false)
+        end)
+    end
+    ns.ChatHistApply = function()
+        for i = 1, (NUM_CHAT_WINDOWS or 10) do
+            local eb = _G["ChatFrame" .. i .. "EditBox"]
+            if eb and eb.SetAltArrowKeyMode then pcall(eb.SetAltArrowKeyMode, eb, not On()) end
+        end
+    end
+    SLASH_LEELCHATHIST1 = "/르엘채팅기록"
+    SlashCmdList.LEELCHATHIST = function()
+        local eb = ChatFrame1EditBox
+        print(("|cfff2b3c2[르엘 채팅]|r 기억한 말 %d개 · 켜짐 %s · 연결 %s · Alt 화살표 %s"):format(#H(), tostring(On()),
+            tostring(eb and eb.leelHist), tostring(eb and eb.GetAltArrowKeyMode and eb:GetAltArrowKeyMode())))
+    end
+    if ChatEdit_AddHistory then
+        hooksecurefunc("ChatEdit_AddHistory", function(eb) if eb and eb.leelHist then Remember(eb, eb:GetText()); eb.leelHistSent = GetTime() end end)
+    end
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function()
+        C_Timer.After(1.5, function()
+            for i = 1, (NUM_CHAT_WINDOWS or 10) do Hook(_G["ChatFrame" .. i .. "EditBox"]) end
+        end)
+    end)
+end
+
+----------------------------------------------------------------------
+-- 파티원 말풍선 직업 색 (G안): 파티 중에 파티원(나 포함)이 말하면 머리 위 말풍선을
+--   어두운 르엘 판 + 얇은 회색 테 + 윗변 굵은 직업 색 띠로. 파티 아닌 사람 말풍선은 그대로.
+--   던전 · 공격대 · 전장 안 말풍선은 게임이 못 바꾸게 막아서 기본 그대로예요.
+--   허브 > 채팅창 > 파티원 말풍선 직업 색
+----------------------------------------------------------------------
+do
+    local recent = {}   -- [말] = { col = {r,g,b}, at = 시간 }
+    local function On() return DB().bubbleCls ~= false end
+    local function Short(n) return type(n) == "string" and (n:gsub("%-.*$", "")) or nil end
+    local function ClassOf(name)
+        if not (IsInGroup and IsInGroup()) then return end
+        local me = Short(UnitName("player"))
+        local units = { "player" }
+        if IsInRaid and IsInRaid() then for i = 1, 40 do units[#units + 1] = "raid" .. i end
+        else for i = 1, 4 do units[#units + 1] = "party" .. i end end
+        for _, u in ipairs(units) do
+            if UnitExists(u) then
+                local nm = Short(UnitName(u))
+                if nm and nm == name then local _, c = UnitClass(u); return c end
+            end
+        end
+        if name == me then local _, c = UnitClass("player"); return c end
+    end
+    local function Skin(child, col)
+        if not child.leelBub then
+            -- 글자 뒤에 깔리게: 말풍선 바깥 틀에 붙이고 한 단 아래로
+            local s = CreateFrame("Frame", nil, child:GetParent() or child)
+            s:SetFrameLevel(math.max(0, child:GetFrameLevel() - 1))
+            s.rim = ns.RoundRect(s, 10, { 0.29, 0.23, 0.22 }, "BACKGROUND", 0, 0)
+            s.bg = ns.RoundRect(s, 10, { 0.118, 0.086, 0.078 }, "BACKGROUND", 1, 1); s.bg:SetColor({ 0.118, 0.086, 0.078 }, 0.92)
+            s.top = s:CreateTexture(nil, "ARTWORK"); s.top:SetTexture(ns.WHITE)
+            s.top:SetHeight(4); s.top:SetPoint("TOPLEFT", 6, 0); s.top:SetPoint("TOPRIGHT", -6, 0)
+            s.topL = s:CreateTexture(nil, "ARTWORK"); s.topL:SetTexture(ns.MEDIA .. "circle"); s.topL:SetSize(8, 8); s.topL:SetPoint("TOPLEFT", 2, 0)
+            s.topR = s:CreateTexture(nil, "ARTWORK"); s.topR:SetTexture(ns.MEDIA .. "circle"); s.topR:SetSize(8, 8); s.topR:SetPoint("TOPRIGHT", -2, 0)
+            child.leelBub = s
+        end
+        local s = child.leelBub
+        local str = child.String or child.Text
+        s:ClearAllPoints()
+        if str then
+            s:SetPoint("TOPLEFT", str, "TOPLEFT", -12, 10); s:SetPoint("BOTTOMRIGHT", str, "BOTTOMRIGHT", 12, -9)
+        else
+            s:SetAllPoints(child)
+        end
+        for _, t in ipairs({ s.top, s.topL, s.topR }) do t:SetVertexColor(col[1], col[2], col[3], 1) end
+        s:Show()
+        -- 기본 말풍선 그림 숨기기 (글자는 그대로)
+        if child.NineSlice then child.NineSlice:SetAlpha(0) end
+        if child.Tail then child.Tail:SetAlpha(0) end
+        for _, r in ipairs({ child:GetRegions() }) do
+            if r:GetObjectType() == "Texture" then r:SetAlpha(0); r.leelBubHid = true end
+        end
+        child.leelBubOn = true
+    end
+    local function Unskin(child)
+        if not child.leelBubOn then return end
+        child.leelBubOn = nil
+        if child.leelBub then child.leelBub:Hide() end
+        if child.NineSlice then child.NineSlice:SetAlpha(1) end
+        if child.Tail then child.Tail:SetAlpha(1) end
+        for _, r in ipairs({ child:GetRegions() }) do if r.leelBubHid then r:SetAlpha(1); r.leelBubHid = nil end end
+    end
+    local function Scan()
+        if not (C_ChatBubbles and C_ChatBubbles.GetAllChatBubbles) then return end
+        local ok, list = pcall(C_ChatBubbles.GetAllChatBubbles, false)   -- false = 던전 안 말풍선은 빼고
+        if not ok or type(list) ~= "table" then return end
+        local now = GetTime()
+        for k, v in pairs(recent) do if now - v.at > 30 then recent[k] = nil end end
+        for _, b in ipairs(list) do
+            local okC, child = pcall(b.GetChildren, b)
+            if okC and child and not (child.IsForbidden and child:IsForbidden()) then
+                local str = child.String or child.Text
+                if not str then
+                    for _, r in ipairs({ child:GetRegions() }) do if r:GetObjectType() == "FontString" then str = r break end end
+                    child.String = child.String or str
+                end
+                local okT, txt = pcall(str and str.GetText or function() end, str)
+                local hit = okT and type(txt) == "string" and not (issecretvalue and issecretvalue(txt)) and recent[txt]
+                if hit and On() then pcall(Skin, child, hit.col) else pcall(Unskin, child) end
+            end
+        end
+    end
+    local function Soon()
+        C_Timer.After(0, Scan); C_Timer.After(0.1, Scan); C_Timer.After(0.4, Scan)
+    end
+    local f = CreateFrame("Frame")
+    for _, e in ipairs({ "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER" }) do pcall(f.RegisterEvent, f, e) end
+    f:SetScript("OnEvent", function(_, _, msg, sender)
+        if not On() or type(msg) ~= "string" or (issecretvalue and (issecretvalue(msg) or issecretvalue(sender))) then return end
+        local cls = ClassOf(Short(sender))
+        if not cls then return end
+        local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls]
+        if not c then return end
+        recent[msg] = { col = { c.r, c.g, c.b }, at = GetTime() }
+        Soon()
+    end)
+    ns.ChatBubbleRefresh = Scan
+end
