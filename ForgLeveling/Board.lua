@@ -855,11 +855,24 @@ local function AutoMode() return not (CDB and (CDB.mode == "manual" or CDB.mode 
 local NEAR = 4      -- 지도 % : 이만큼 가까운 보고는 가는 길에 들러요
 local BuildOrderNN
 -- 정예 · 던전 · 파티 퀘(아직 안 한 것)는 길 맨 뒤로: 혼자 가다 죽지 않게
+-- 파티면 정예 · 파티 퀘도 같이 할 수 있어요 (던전 · 공격대 퀘는 던전 안에 있을 때만)
+--   허브/설정: DB.partyHard == false 면 끔
+local function PartyHardOK(e)
+    if not (e and (e.tag or (e.group and e.group > 1))) then return false end
+    if DB and DB.partyHard == false then return false end
+    if not (IsInGroup and IsInGroup()) then return false end
+    if e.tag == "dungeon" or e.tag == "raid" then
+        local ok, inInst = pcall(IsInInstance)
+        return ok and inInst and true or false
+    end
+    return true
+end
+ns.LQPartyHardOK = PartyHardOK
 local function PartyLast(order)
     local solo, party = {}, {}
     for _, id in ipairs(order) do
         local e = byId[id]
-        if e and not e.done and (e.tag or (e.group and e.group > 1)) then party[#party + 1] = id
+        if e and not e.done and (e.tag or (e.group and e.group > 1)) and not PartyHardOK(e) then party[#party + 1] = id
         else solo[#solo + 1] = id end
     end
     for _, id in ipairs(party) do solo[#solo + 1] = id end
@@ -1380,6 +1393,28 @@ do
     end)
 end
 
+-- 퀘스트 하나 포기 (확인 없이 · 정리하기에서 확인 창을 따로 띄워요)
+ns.LQAbandon = function(q)
+    local ok = false
+    if C_QuestLog and C_QuestLog.SetSelectedQuest and C_QuestLog.SetAbandonQuest and C_QuestLog.AbandonQuest and q.id then
+        ok = pcall(function() C_QuestLog.SetSelectedQuest(q.id); C_QuestLog.SetAbandonQuest(); C_QuestLog.AbandonQuest() end)
+    end
+    if not ok and SelectQuestLogEntry and SetAbandonQuest and _G.AbandonQuest then
+        local idx = q.index
+        if q.id and GetQuestLogIndexByID then
+            local okI, r = pcall(GetQuestLogIndexByID, q.id); if okI and r and r > 0 then idx = r end
+        end
+        if idx then ok = pcall(function() SelectQuestLogEntry(idx); SetAbandonQuest(); _G.AbandonQuest() end) end
+    end
+    if ok and CDB and CDB.sel and q.id then CDB.sel[q.id] = nil end
+    return ok
+end
+-- 버려도 되는 퀘: 내 레벨에 회색인 정예 · 던전 · 파티 퀘 (아직 안 끝낸 것)
+ns.LQJunk = function(e)
+    local _, _, dc = Diff(e)
+    return dc == "grey" and not e.done and not e.failed and (e.tag or (e.group and e.group > 1)) and true or false
+end
+
 -- 퀘스트 포기 (확인 창을 한 번 거쳐요)
 local function LeelAbandon(e)
     if not (e and e.title) then return end
@@ -1460,6 +1495,11 @@ local function Row(i)
     -- 네모를 누르면 길에 넣기 / 빼기
     r.ck:SetScript("OnClick", function()
         local self = r
+        if board.cleanMode then   -- 정리 중: 네모 = 포기할 퀘 고르기
+            local e = self.item and self.item.e
+            if e and e.id then board.cleanSel[e.id] = not board.cleanSel[e.id] or nil; RefreshBoard() end
+            return
+        end
         if self.item and self.item.sec then return end
         local e = self.item and self.item.e
         if not (e and e.id) then return end
@@ -1492,6 +1532,7 @@ local function Row(i)
         local g = guide[e.key]
         if g and g.npc then GameTooltip:AddLine(("준 사람: %s (%s %.0f, %.0f)"):format(g.npc, g.zone or "", g.x or 0, g.y or 0), 0.7, 0.7, 0.7) end
         GameTooltip:AddLine("위치: " .. SRC[e._src or "none"], 0.7, 0.7, 0.7)
+        if e._partyAdd and not e.done then GameTooltip:AddLine("파티 중이라 토끼 자동이 길에 넣었어요", 1, 0.85, 0.35) end
         GameTooltip:AddLine("이름 누르면 자세히 · 네모 누르면 고르기 / 빼기", 0.6, 0.6, 0.6)
         GameTooltip:Show()
     end)
@@ -1615,6 +1656,26 @@ local function PaintRow(r, it, w)
         r.bg:SetColor({ 0.17, 0.10, 0.11 })
     else
         r.title:SetTextColor(P.tx[1], P.tx[2], P.tx[3])
+    end
+    -- 파티라서 길에 넣은 어려운 퀘 (토끼 자동)
+    if not junk and e._partyAdd and not e.done and not e.failed and AutoMode() then
+        r.c2:SetRaw("파티", { 0.30, 0.25, 0.08 }, { 1, 0.85, 0.35 })   -- 짧게 (마우스 = 파티라서 길에 넣었어요)
+        r.c2:ClearAllPoints(); r.c2:SetPoint("RIGHT", r.c1, "LEFT", -4, 0)
+        -- 칩만큼 이름 · 설명 칸을 줄여서 겹치지 않게
+        local tw = r.title:GetWidth() - (r.c2:GetWidth() + 4)
+        if tw > 40 then r.title:SetWidth(tw); r.sub:SetWidth(tw) end
+    end
+    -- 정리 중: 네모가 빨간 휴지통 네모 (고른 것 = 빨갛게)
+    if board.cleanMode then
+        local cs = board.cleanSel and e.id and board.cleanSel[e.id]
+        local RED = { 1, 0.56, 0.62 }
+        r.ckE:SetColor(RED)
+        r.ckF:SetColor(cs and RED or { 0.173, 0.133, 0.125 })
+        r.ckM:SetShown(cs and true or false)
+        for _, t in ipairs(r.sel.tex) do t:Hide() end
+        r.bg:SetColor(cs and { 0.23, 0.10, 0.12 } or CHIP)
+    else
+        r.ckE:SetColor(P.acc)
     end
 end
 
@@ -2516,7 +2577,12 @@ local function PaintSummary(order)
         board.sTime:SetText(parts[1]); board.sTime:SetTextColor(1, 0.56, 0.56)
         local rest = {}
         for i = 2, #parts do rest[#rest + 1] = parts[i] end
-        if party then rest[#rest + 1] = "길 맨 뒤" end
+        if party then
+            -- 파티라서 길에 넣었으면 "파티라 같이", 아니면 "길 맨 뒤"
+            local allIn = true
+            for _, w in ipairs(warn) do if (w.e.tag or (w.e.group and w.e.group > 1)) and not (ns.LQPartyHardOK and ns.LQPartyHardOK(w.e)) then allIn = false end end
+            rest[#rest + 1] = allIn and "파티라 같이 가요" or "길 맨 뒤"
+        end
         board.sWarnSub:SetText(#rest > 0 and table.concat(rest, " · ") or "조심해서 가요")
     end
     board.sXP:SetText(xp > 0 and ("+" .. (BreakUpLargeNumbers and BreakUpLargeNumbers(xp) or xp) .. (unknownXP and "+" or "")) or "-")
@@ -2788,6 +2854,7 @@ RefreshBoard = function()
     PaintList()
     local order = PaintMap()
     PaintSummary(order)
+    if board.PaintClean then board.PaintClean() end
 end
 
 local function Toggle(btn, label, get, set)
@@ -2843,7 +2910,10 @@ local function FillGuide(quiet)
                 if e.done then dones[#dones + 1] = it
                 else
                     local _, k = Diff(e)
-                    if k ~= "hard" then                         -- 어려움(+3 이상) · 파티는 빼요
+                    e._partyAdd = nil
+                    local partyOK = k == "hard" and PartyHardOK(e)
+                    if k ~= "hard" or partyOK then              -- 어려움(+3 이상) · 파티는 빼요 (파티면 정예 · 파티 퀘는 넣어요)
+                        if partyOK then e._partyAdd = true end
                         if (e.level or 0) <= grey then greys[#greys + 1] = it else pool[#pool + 1] = it end
                     end
                 end
@@ -3038,7 +3108,7 @@ local function MakeBoard()
             for _, w in ipairs(list) do
                 GameTooltip:AddDoubleLine(w.e.title, "|cffff8f8f" .. w.why .. "|r  Lv " .. (w.e.level or "?"), 1, 1, 1, 1, 1, 1)
             end
-            if board.warnParty then GameTooltip:AddLine("정예 · 던전 퀘는 길 맨 뒤로 보냈어요. 파티를 구해서 가요.", 0.8, 0.8, 0.8, true)
+            if board.warnParty then GameTooltip:AddLine((IsInGroup and IsInGroup()) and "파티 중이라 정예 · 파티 퀘도 길에 넣었어요 (던전 퀘는 던전 안에서만)." or "정예 · 던전 퀘는 길 맨 뒤로 보냈어요. 파티를 구해서 가요.", 0.8, 0.8, 0.8, true)
             else GameTooltip:AddLine("혼자 하면 위험할 수 있어요. 레벨을 조금 올리고 가요.", 0.8, 0.8, 0.8, true) end
         end
         GameTooltip:Show()
@@ -3197,7 +3267,7 @@ local function MakeBoard()
         ------------------------------------------------------------------
         local sb = CreateFrame("EditBox", nil, board)
         board.sb = sb
-        sb:SetSize(248, 30); sb:SetPoint("TOPLEFT", board, "TOPLEFT", 232, -54)
+        sb:SetSize(212, 30); sb:SetPoint("TOPLEFT", board, "TOPLEFT", 232, -54)
         -- 정렬 메뉴 (검색 칸 오른쪽): 누르면 고르기 목록 · 고른 정렬은 기억
         do
             sortBy = DB.listSort or "near"
@@ -3253,6 +3323,95 @@ local function MakeBoard()
             end)
             sbn:SetScript("OnLeave", function() GameTooltip:Hide() end)
             board:HookScript("OnHide", function() menu:Hide() end)
+        end
+        -- 정리 단추 (정렬 메뉴 오른쪽): 누르면 네모가 휴지통 네모 · 여러 개 골라서 한 번에 포기
+        do
+            local cb = CreateFrame("Button", nil, board)
+            cb:SetSize(30, 30); cb:SetPoint("TOPLEFT", sb, "TOPLEFT", 212 + 6 + 118 + 6, 0)
+            local _, cEdge = Plate(cb, 15, { 0.098, 0.075, 0.078, 1 }, { 0.29, 0.204, 0.22, 1 })
+            local fill = RR(cb, 14, { 1, 0.56, 0.62 }, "BACKGROUND", 1, 1)
+            local ic = cb:CreateTexture(nil, "ARTWORK"); ic:SetTexture(MEDIA .. "ic_trash"); ic:SetSize(14, 14); ic:SetPoint("CENTER")
+            local bar = CreateFrame("Frame", nil, board)
+            bar:SetFrameLevel(board:GetFrameLevel() + 20)
+            bar:SetHeight(38); bar:SetPoint("BOTTOMLEFT", board.list, "BOTTOMLEFT", 0, -8); bar:SetPoint("BOTTOMRIGHT", board.list, "BOTTOMRIGHT", 0, -8)
+            Plate(bar, 12, { 0.23, 0.10, 0.12, 0.97 }, { 1, 0.56, 0.62, 1 })
+            local bi = bar:CreateTexture(nil, "ARTWORK"); bi:SetTexture(MEDIA .. "ic_trash"); bi:SetSize(14, 14); bi:SetPoint("LEFT", 12, 0)
+            bi:SetVertexColor(1, 0.7, 0.75, 1)
+            bar.fs = Font(bar, 12.5, P.tx); bar.fs:SetPoint("LEFT", bi, "RIGHT", 7, 0)
+            local function SBtn(label, red)
+                local b = CreateFrame("Button", nil, bar); b:SetHeight(24)
+                b.bg = RR(b, 10, red and { 1, 0.56, 0.62 } or CHIP, "BACKGROUND", 0, 0)
+                b.fs = Font(b, 12, red and { 0.1, 0.04, 0.05 } or P.tx); b.fs:SetPoint("CENTER")
+                if red then b.fs:SetShadowColor(0, 0, 0, 0) end
+                function b:Set(t) self.fs:SetText(t); self:SetWidth(self.fs:GetStringWidth() + 22) end
+                b:Set(label)
+                return b
+            end
+            bar.go = SBtn("포기", true); bar.go:SetPoint("RIGHT", -8, 0)
+            bar.clear = SBtn("모두 풀기", false); bar.clear:SetPoint("RIGHT", bar.go, "LEFT", -6, 0)
+            bar:Hide()
+            local function Count() local n = 0; for _ in pairs(board.cleanSel or {}) do n = n + 1 end return n end
+            board.PaintClean = function()
+                local on = board.cleanMode and true or false
+                for _, t in ipairs(fill.tex) do t:SetShown(on) end
+                ic:SetVertexColor(on and 0.1 or P.tx2[1], on and 0.04 or P.tx2[2], on and 0.05 or P.tx2[3], 1)
+                if cEdge and cEdge.SetColor then cEdge:SetColor(on and { 1, 0.56, 0.62, 1 } or { 0.29, 0.204, 0.22, 1 }) end
+                bar:SetShown(on)
+                if board.more then board.more:SetShown(not on) end
+                if on then
+                    local n = Count()
+                    bar.fs:SetText(n > 0 and ("|cffffd6e0" .. n .. "개|r 골랐어요") or "포기할 퀘를 네모로 골라요")
+                    bar.go:Set(n > 0 and (n .. "개 포기") or "포기"); bar.go:SetAlpha(n > 0 and 1 or 0.45)
+                end
+            end
+            cb:SetScript("OnClick", function()
+                board.cleanMode = not board.cleanMode
+                board.cleanSel = {}
+                if board.cleanMode then   -- 버려도 되는 퀘는 미리 골라 둬요
+                    for _, e in ipairs(log) do if e.id and ns.LQJunk(e) then board.cleanSel[e.id] = true end end
+                end
+                RefreshBoard()
+            end)
+            cb:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                GameTooltip:SetText(board.cleanMode and "정리 끝내기" or "퀘 정리하기", 1, 0.84, 0.88)
+                GameTooltip:AddLine("여러 퀘를 골라서 한 번에 포기해요", 0.8, 0.8, 0.8)
+                GameTooltip:AddLine("\"버려도 돼요\" 퀘는 미리 골라 둬요", 0.8, 0.8, 0.8)
+                GameTooltip:Show()
+            end)
+            cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            bar.clear:SetScript("OnClick", function() board.cleanSel = {}; RefreshBoard() end)
+            bar.go:SetScript("OnClick", function()
+                local list = {}
+                for _, e in ipairs(log) do if e.id and board.cleanSel[e.id] then list[#list + 1] = { id = e.id, title = e.title, index = e.index } end end
+                if #list == 0 then return end
+                local names = {}
+                for i, q in ipairs(list) do if i <= 6 then names[#names + 1] = "· " .. q.title end end
+                if #list > 6 then names[#names + 1] = ("· 외 %d개"):format(#list - 6) end
+                StaticPopupDialogs["LEELQ_ABANDON_MANY"] = {
+                    text = "|cfff2b3c2%d개|r 퀘스트를 포기할까요?\n\n%s\n\n진행한 목표와 받은 퀘스트 아이템이 사라져요.",
+                    button1 = "포기", button2 = "취소",
+                    OnAccept = function(_, data)
+                        local okN, i = 0, 0
+                        local function Next()
+                            i = i + 1
+                            local q = data[i]
+                            if not q then
+                                Print(("퀘스트 %d개를 포기했어요."):format(okN))
+                                board.cleanMode = false; board.cleanSel = {}
+                                C_Timer.After(0.5, function() ReadLog(); RefreshBoard(); RefreshTracker() end)
+                                return
+                            end
+                            if ns.LQAbandon(q) then okN = okN + 1 else Print(q.title .. " 퀘스트는 포기하지 못했어요.") end
+                            C_Timer.After(0.25, Next)   -- 하나씩 천천히 (게임이 한 번에 하나만 받아요)
+                        end
+                        Next()
+                    end,
+                    timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true,
+                }
+                StaticPopup_Show("LEELQ_ABANDON_MANY", #list, table.concat(names, "\n"), list)
+            end)
+            board:HookScript("OnHide", function() board.cleanMode = false; board.cleanSel = {} end)
         end
         sb:SetAutoFocus(false); sb:SetMaxLetters(40)
         local ff = board.title:GetFont()

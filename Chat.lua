@@ -1265,14 +1265,15 @@ end
 
 ----------------------------------------------------------------------
 -- 파티원 말풍선 직업 색 (G안): 파티 중에 파티원(나 포함)이 말하면 머리 위 말풍선을
---   어두운 르엘 판 + 얇은 회색 테 + 윗변 굵은 직업 색 띠로. 파티 아닌 사람 말풍선은 그대로.
+--   어두운 르엘 판 + 얇은 회색 테 + 왼쪽 세로 직업 색 띠로 (I안). 파티 아닌 사람 말풍선은 그대로.
 --   던전 · 공격대 · 전장 안 말풍선은 게임이 못 바꾸게 막아서 기본 그대로예요.
 --   허브 > 채팅창 > 파티원 말풍선 직업 색
 ----------------------------------------------------------------------
 do
     local recent = {}   -- [말] = { col = {r,g,b}, at = 시간 }
     local function On() return DB().bubbleCls ~= false end
-    local function Short(n) return type(n) == "string" and (n:gsub("%-.*$", "")) or nil end
+    -- "이름-서버" · 와우 포에버 채팅의 "이름 길드" 꼴도 앞 이름만 (와우 이름엔 띄어쓰기가 없어요)
+    local function Short(n) return type(n) == "string" and (n:gsub("%-.*$", ""):gsub("%s.*$", "")) or nil end
     local function ClassOf(name)
         if not (IsInGroup and IsInGroup()) then return end
         local me = Short(UnitName("player"))
@@ -1291,24 +1292,26 @@ do
         if not child.leelBub then
             -- 글자 뒤에 깔리게: 말풍선 바깥 틀에 붙이고 한 단 아래로
             local s = CreateFrame("Frame", nil, child:GetParent() or child)
-            s:SetFrameLevel(math.max(0, child:GetFrameLevel() - 1))
-            s.rim = ns.RoundRect(s, 10, { 0.29, 0.23, 0.22 }, "BACKGROUND", 0, 0)
-            s.bg = ns.RoundRect(s, 10, { 0.118, 0.086, 0.078 }, "BACKGROUND", 1, 1); s.bg:SetColor({ 0.118, 0.086, 0.078 }, 0.92)
-            s.top = s:CreateTexture(nil, "ARTWORK"); s.top:SetTexture(ns.WHITE)
-            s.top:SetHeight(4); s.top:SetPoint("TOPLEFT", 6, 0); s.top:SetPoint("TOPRIGHT", -6, 0)
-            s.topL = s:CreateTexture(nil, "ARTWORK"); s.topL:SetTexture(ns.MEDIA .. "circle"); s.topL:SetSize(8, 8); s.topL:SetPoint("TOPLEFT", 2, 0)
-            s.topR = s:CreateTexture(nil, "ARTWORK"); s.topR:SetTexture(ns.MEDIA .. "circle"); s.topR:SetSize(8, 8); s.topR:SetPoint("TOPRIGHT", -2, 0)
+            s:SetFrameLevel(math.max(0, child:GetFrameLevel() - 2))
+            -- I안 (시안 그대로): 직업 색 판을 깔고, 그 위에 어두운 판을 왼쪽으로 3px 비켜 얹어요
+            --   → 왼쪽 테가 직업 색으로 두꺼워지고, 둥근 모서리를 따라 위아래로 살짝 감겨요
+            s.cls = ns.RoundRect(s, 10, { 1, 1, 1 }, "BACKGROUND", 0, 0)
+            s.body = CreateFrame("Frame", nil, s)
+            s.body:SetPoint("TOPLEFT", 3, 0); s.body:SetPoint("BOTTOMRIGHT", 0, 0)
+            s.body:SetFrameLevel(math.max(0, child:GetFrameLevel() - 1))   -- 글자보다는 아래
+            s.body.rim = ns.RoundRect(s.body, 10, { 0.29, 0.23, 0.22 }, "BACKGROUND", 0, 0); s.body.rim:SetColor({ 0.29, 0.23, 0.22 }, 1)
+            s.body.bg = ns.RoundRect(s.body, 10, { 0.118, 0.086, 0.078 }, "BACKGROUND", 1, 1); s.body.bg:SetColor({ 0.118, 0.086, 0.078 }, 0.95)
             child.leelBub = s
         end
         local s = child.leelBub
         local str = child.String or child.Text
         s:ClearAllPoints()
         if str then
-            s:SetPoint("TOPLEFT", str, "TOPLEFT", -12, 10); s:SetPoint("BOTTOMRIGHT", str, "BOTTOMRIGHT", 12, -9)
+            s:SetPoint("TOPLEFT", str, "TOPLEFT", -15, 8); s:SetPoint("BOTTOMRIGHT", str, "BOTTOMRIGHT", 12, -8)
         else
             s:SetAllPoints(child)
         end
-        for _, t in ipairs({ s.top, s.topL, s.topR }) do t:SetVertexColor(col[1], col[2], col[3], 1) end
+        s.cls:SetColor(col, 1)
         s:Show()
         -- 기본 말풍선 그림 숨기기 (글자는 그대로)
         if child.NineSlice then child.NineSlice:SetAlpha(0) end
@@ -1347,7 +1350,27 @@ do
         end
     end
     local function Soon()
-        C_Timer.After(0, Scan); C_Timer.After(0.1, Scan); C_Timer.After(0.4, Scan)
+        C_Timer.After(0, Scan); C_Timer.After(0.1, Scan); C_Timer.After(0.4, Scan); C_Timer.After(1, Scan)
+    end
+    -- /르엘말풍선 : 말풍선이 안 바뀔 때 확인 (말풍선이 떠 있을 때 입력)
+    SLASH_LEELBUBBLE1 = "/르엘말풍선"
+    SlashCmdList.LEELBUBBLE = function()
+        local P = function(t) print("|cfff2b3c2[르엘 말풍선]|r " .. t) end
+        local n = 0; for _ in pairs(recent) do n = n + 1 end
+        P(("켜짐 %s · 파티 %s · 기억한 말 %d · 파티 말풍선 설정 %s · 일반 말풍선 설정 %s"):format(tostring(On()),
+            tostring(IsInGroup and IsInGroup()), n, tostring(GetCVar and GetCVar("chatBubblesParty")), tostring(GetCVar and GetCVar("chatBubbles"))))
+        if not (C_ChatBubbles and C_ChatBubbles.GetAllChatBubbles) then P("C_ChatBubbles 없음") return end
+        local ok, list = pcall(C_ChatBubbles.GetAllChatBubbles, true)
+        if not ok or type(list) ~= "table" then P("말풍선 목록 못 읽음") return end
+        P("지금 말풍선 " .. #list .. "개")
+        for i, b in ipairs(list) do
+            local forb = b.IsForbidden and b:IsForbidden()
+            local kids = forb and 0 or select("#", b:GetChildren())
+            local child = (not forb) and b:GetChildren() or nil
+            local str = child and (child.String or child.Text)
+            local txt = str and str:GetText()
+            P(("%d: 막힘 %s · 자식 %d · 글 %s · 맞음 %s"):format(i, tostring(forb), kids, tostring(txt), tostring(txt and recent[txt] ~= nil)))
+        end
     end
     local f = CreateFrame("Frame")
     for _, e in ipairs({ "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER" }) do pcall(f.RegisterEvent, f, e) end

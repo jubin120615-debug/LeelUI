@@ -230,3 +230,120 @@ do
         end)
     end)
 end
+
+----------------------------------------------------------------------
+-- 게임 메뉴(ESC)에 "르엘 UI" 단추 (D안): 게임 단추 모양 그대로 · "블리자드 샵" 아래
+--   마우스를 올리면 분홍빛으로 물들어요 · 안 본 새 소식이 있으면 토끼가 편지를 들고 깡총
+--   누르면 메뉴가 닫히고 르엘 허브가 열려요
+----------------------------------------------------------------------
+do
+    local LABEL = "|T" .. ns.MEDIA .. "bunny:14:14:0:0|t  르엘 UI"
+    local function Open()
+        if GameMenuFrame and GameMenuFrame:IsShown() then HideUIPanel(GameMenuFrame) end
+        local hasNew = ns.HubNewsCount and ns.HubNewsCount() > 0
+        C_Timer.After(0, function() if ns.ToggleHub then if hasNew then ns:ToggleHub("_news") else ns:ToggleHub() end end end)
+    end
+    -- 꾸미기: 분홍 물들기 + 편지 든 토끼
+    local function Deco(b)
+        if not b or b.leelDeco then return end
+        b.leelDeco = true
+        local t = b:CreateTexture(nil, "OVERLAY")
+        t:SetTexture(ns.WHITE); t:SetBlendMode("ADD")
+        t:SetPoint("TOPLEFT", 4, -4); t:SetPoint("BOTTOMRIGHT", -4, 4)
+        t:SetVertexColor(0.95, 0.45, 0.62, 0.32); t:Hide()
+        b.leelTint = t
+        b:HookScript("OnEnter", function(self) if self.leelMine then self.leelTint:Show() end end)
+        b:HookScript("OnLeave", function(self) self.leelTint:Hide() end)
+        -- NEW: 토끼가 편지를 들고 깡총 (글 속 토끼는 숨기고 그 자리에 움직이는 토끼)
+        local hop = CreateFrame("Frame", nil, b)
+        hop:SetSize(14, 14); hop:SetFrameLevel(b:GetFrameLevel() + 5)
+        hop.bun = hop:CreateTexture(nil, "ARTWORK"); hop.bun:SetTexture(ns.MEDIA .. "bunny"); hop.bun:SetAllPoints()
+        hop.env = hop:CreateTexture(nil, "OVERLAY"); hop.env:SetTexture(ns.MEDIA .. "mmi_mail")
+        hop.env:SetSize(14, 14); hop.env:SetPoint("CENTER", hop, "TOPLEFT", -2, 1)
+        hop.dot = hop:CreateTexture(nil, "OVERLAY", nil, 2); hop.dot:SetTexture(ns.MEDIA .. "circle")
+        hop.dot:SetSize(5, 5); hop.dot:SetPoint("CENTER", hop.env, "TOPRIGHT", -1, -2); hop.dot:SetVertexColor(1, 0.3, 0.48)
+        hop.glow = hop:CreateTexture(nil, "BACKGROUND"); hop.glow:SetTexture(ns.MEDIA .. "soft_glow"); hop.glow:SetBlendMode("ADD")
+        hop.glow:SetSize(34, 34); hop.glow:SetPoint("CENTER", hop.env, "CENTER"); hop.glow:SetVertexColor(1, 0.8, 0.4, 0.45)
+        -- 깡총: 위로 3 · 아래로 3 · 쉬기
+        local ag = hop:CreateAnimationGroup(); ag:SetLooping("REPEAT")
+        local up = ag:CreateAnimation("Translation"); up:SetOffset(0, 3); up:SetDuration(0.18); up:SetOrder(1); up:SetSmoothing("OUT")
+        local dn = ag:CreateAnimation("Translation"); dn:SetOffset(0, -3); dn:SetDuration(0.18); dn:SetOrder(2); dn:SetSmoothing("IN")
+        local rest = ag:CreateAnimation("Alpha"); rest:SetFromAlpha(1); rest:SetToAlpha(1); rest:SetDuration(0.85); rest:SetOrder(3)
+        hop.ag = ag
+        -- 편지 살랑
+        local eg = hop.env:CreateAnimationGroup(); eg:SetLooping("BOUNCE")
+        local ro = eg:CreateAnimation("Rotation"); ro:SetDegrees(-22); ro:SetDuration(0.6); ro:SetSmoothing("IN_OUT")
+        hop.env:SetRotation(math.rad(11))
+        hop.eg = eg
+        hop:Hide()
+        b.leelNew = hop
+        b:HookScript("OnShow", function(self) if ns.GMLeelPaint then ns.GMLeelPaint(self) end end)
+    end
+    local LABEL_NEW = "|T" .. ns.MEDIA .. "bunny:14:14:0:0:64:64:0:1:0:1|t  르엘 UI"   -- 같은 자리, 투명한 1픽셀
+    local function Paint(b)
+        if not (b and b.leelNew) then return end
+        local hop = b.leelNew
+        if b.leelTint then b.leelTint:Hide() end
+        if not b.leelMine then hop:Hide(); hop.ag:Stop(); hop.eg:Stop(); return end
+        local n = ns.HubNewsCount and ns.HubNewsCount() or 0
+        if n > 0 then
+            b:SetText(LABEL_NEW)
+            local fs = b:GetFontString()
+            hop:ClearAllPoints()
+            if fs then hop:SetPoint("LEFT", fs, "LEFT", 0, 0) else hop:SetPoint("LEFT", b, "CENTER", -34, 0) end
+            hop:Show(); hop.ag:Play(); hop.eg:Play()
+        else
+            b:SetText(LABEL)
+            hop:Hide(); hop.ag:Stop(); hop.eg:Stop()
+        end
+    end
+    ns.GMLeelPaint = Paint
+
+    local GM = _G.GameMenuFrame
+    if GM and GM.InitButtons and GM.AddButton then
+        -- 새 게임 메뉴 (단추를 그때그때 만드는 방식)
+        hooksecurefunc(GM, "InitButtons", function(self)
+            -- 단추 통은 다시 쓰여서, 예전에 꾸민 단추가 다른 단추가 됐을 수 있어요 → 꾸밈 끄기
+            if self.buttonPool then
+                for other in self.buttonPool:EnumerateActive() do
+                    if other.leelDeco then other.leelMine = nil; Paint(other) end
+                end
+            end
+            local ok, b = pcall(self.AddButton, self, LABEL, Open)
+            if not ok or not b then return end
+            b.leelMine = true
+            -- "블리자드 샵" 바로 아래로 (없으면 맨 위 묶음 끝)
+            local after
+            if self.buttonPool then
+                for other in self.buttonPool:EnumerateActive() do
+                    local tx = other.GetText and other:GetText()
+                    if other ~= b and (tx == (BLIZZARD_STORE or "") or (tx and tx:find("샵"))) then after = other end
+                end
+            end
+            if after and after.layoutIndex then b.layoutIndex = after.layoutIndex + 0.5; if self.MarkDirty then self:MarkDirty() end end
+            Deco(b); Paint(b)
+        end)
+    elseif GM then
+        -- 옛 게임 메뉴 (단추가 정해져 있는 방식): 애드온 단추 위에 끼워 넣기
+        local b = CreateFrame("Button", "GameMenuButtonLeelUI", GM, "GameMenuButtonTemplate")
+        b:SetText(LABEL)
+        b.leelMine = true
+        b:SetScript("OnClick", function() PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION or 852); Open() end)
+        local function Place()
+            local addons = _G.GameMenuButtonAddons or _G.GameMenuButtonUIOptions
+            if not addons then return end
+            if InCombatLockdown() then return end
+            local p1, rel, p2, x, y = addons:GetPoint(1)
+            if rel ~= b then
+                b:ClearAllPoints(); b:SetPoint(p1 or "TOP", rel, p2 or "BOTTOM", x or 0, y or -1)
+                addons:ClearAllPoints(); addons:SetPoint("TOP", b, "BOTTOM", 0, -1)
+            end
+            if not b.leelGrown then GM:SetHeight(GM:GetHeight() + b:GetHeight() + 2); b.leelGrown = true end
+        end
+        if GameMenuFrame_UpdateVisibleButtons then
+            hooksecurefunc("GameMenuFrame_UpdateVisibleButtons", function() b.leelGrown = nil; Place() end)
+        end
+        GM:HookScript("OnShow", function() Place(); Paint(b) end)
+        Deco(b)
+    end
+end

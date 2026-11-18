@@ -1525,7 +1525,8 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
-    { "1.3.37", "채팅: 보낸 말 다시 쓰기 · 파티원 말풍선 직업 색", "입력칸에서 ↑ · 최근 5개 · 말풍선 윗변 직업 색 띠" },
+    { "1.3.38", "Leel Quest 퀘 정리 · 파티 땐 어려운 퀘도 길에 · ESC 메뉴 르엘 UI", "골라서 한 번에 포기 · 파티 정예 · 던전 퀘 자동 · 편지 든 토끼 · 말풍선 왼쪽 직업 색 테" },
+    { "1.3.37", "채팅: 보낸 말 다시 쓰기 · 파티원 말풍선 직업 색", "입력칸에서 ↑ · 최근 5개 · 말풍선 왼쪽 직업 색 테" },
     { "1.3.36", "블랙리스트 굴림 알림 · 파티와 같은 퀘", "화난 토끼 · 르엘 경고음 · 토끼 표정 · 회색 정예 · 퀘스티 추천 설정" },
     { "1.3.35", "적 이름표 내 대상 표시 · 이동 모드 크기 줄", "조준 · 화살표 · 디버프 고침 · 지도 퀘 경험치 · 채팅창 크기" },
     { "1.3.34", "따라가기 아이콘 고침", "따라갈 때 아이콘이 위로 날아가던 것" },
@@ -1748,6 +1749,7 @@ local function BuildTalk(f)
         note:SetText("새 버전 소식은 채채TV 방송 공지에서 먼저 알려요.")
     end
 
+    t.ShowTab = Show
     t:SetScript("OnShow", function() Show(1) end)
     t:Hide()
     return t
@@ -1911,6 +1913,16 @@ end
 ----------------------------------------------------------------------
 function ns:ToggleHub(key)
     ns.db.hub = ns.db.hub or {}
+    -- ESC 메뉴 단추: 새 소식이 있으면 소통방 '새 소식' 탭으로 바로
+    if key == "_news" then
+        if NEWS[1] then ns.db.hub.seenNews = NEWS[1][1] end
+        if not (hub and hub:IsShown()) then ns:ToggleHub() end
+        if hub then
+            talk = talk or BuildTalk(hub)
+            talk:Show(); if talk.ShowTab then talk.ShowTab(3) end
+        end
+        return
+    end
     hub = hub or Build()
     if key then
         for i, m in ipairs(MODULES) do if m.key == key then sel = i; if m.cat ~= "none" then curCat = m.cat end end end
@@ -1921,6 +1933,11 @@ function ns:ToggleHub(key)
 end
 
 function ns:RefreshHub() Refresh() end
+-- 아직 안 본 새 소식이 있나 (ESC 메뉴 단추의 편지 든 토끼)
+function ns.HubNewsCount()
+    local seen = ns.db and ns.db.hub and ns.db.hub.seenNews
+    return (NEWS[1] and seen ~= NEWS[1][1]) and 1 or 0
+end
 
 -- 미니맵 아이콘 정리: 길잡이 버튼 숨김 (토끼 하나만)
 function ns:ApplyHubTidy()
