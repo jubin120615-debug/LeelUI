@@ -501,14 +501,14 @@ local function BuildLauncher()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("르엘 메뉴", C.acc[1], C.acc[2], C.acc[3])
         GameTooltip:AddLine("누르면 메뉴가 펼쳐져요", 1, 1, 1)
-        GameTooltip:AddLine("Shift + 끌기로 옮기기", 0.85, 0.78, 0.76)
+        GameTooltip:AddLine("자리 · 크기는 이동 모드에서", 0.85, 0.78, 0.76)
         GameTooltip:Show()
     end)
     launcher:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    -- Shift 누른 채 끌면 토끼 메뉴 옮기기 (전투 밖에서만)
+    -- 옮기기는 이동 모드에서만 (평소엔 고정)
     launcher:RegisterForDrag("LeftButton")
     launcher:SetScript("OnDragStart", function()
-        if IsShiftKeyDown() and not InCombatLockdown() then
+        if ns.moving and not InCombatLockdown() then
             GameTooltip:Hide()
             launchHolder:StartMoving()
             launchHolder.leelDragging = true
@@ -643,6 +643,7 @@ local function Mover(frame, label, key, after)
     local lab = ns.Font(m, 12, C.accHi)
     lab:SetPoint("BOTTOM", m, "TOP", 0, 4); lab:SetText(label)
     if ns.MoveSizeHook then ns.MoveSizeHook(m, label .. " 크기", label) end
+    ns.ABarMovers = ns.ABarMovers or {}; ns.ABarMovers[label] = m
     m:SetScript("OnDragStart", function() if not InCombatLockdown() then frame:StartMoving() end end)
     m:SetScript("OnDragStop", function()
         frame:StopMovingOrSizing()

@@ -390,6 +390,7 @@ end
 local function BadgeShouldShow()
     local d = DB()
     if not d.on then return false end
+    if ns.moving then return true end   -- 이동 모드: 옮기고 크기 바꾸게 보여요
     if unlock or talking or #active > 0 or d.badgeAlways then return true end
     if logWin and logWin:IsShown() then return true end
     return (IsInGroup and IsInGroup()) and true or false
@@ -417,11 +418,19 @@ local function PaintBadge()
 end
 ns.RollPaintBadge = PaintBadge
 
+-- 토끼 단추 옮기기 = 이동 모드로 (옮기기 · 크기는 이동 모드에서만)
 function ns.RollUnlock(on)
-    Anchor()
-    unlock = on and true or false
-    PaintBadge()
-    if on then P("토끼 단추를 끌어서 옮겨요 (놓으면 끝). 휠 = 크기. 평소엔 파티 · 공격대에서만 보여요.") end
+    unlock = false
+    if not on then PaintBadge() return end
+    if InCombatLockdown() then P("전투가 끝나면 옮길 수 있어요.") return end
+    local hub = _G.LeelUI_Hub
+    if hub and hub:IsShown() then hub:Hide() end
+    if ns.SetMoveMode and not ns.moving then ns:SetMoveMode(true) end
+    C_Timer.After(0.15, function()
+        if badge and badge.mover and badge.mover:IsShown() and ns.MoveSelect then
+            ns.MoveSelect(badge.mover, "주사위 창 · 토끼 단추 크기", "주사위 토끼")
+        end
+    end)
 end
 
 function ns.RollBadgePop()
@@ -545,12 +554,9 @@ local function MakeBadge()
         s2.icon:SetSize(s2.size, s2.size)
     end)
     iag:Play()
-    b:SetScript("OnDragStart", function(s) s:StartMoving() end)
-    b:SetScript("OnDragStop", function(s) s:StopMovingOrSizing(); ns.RollSavePos(); if unlock then ns.RollUnlock(false) end end)
-    b:EnableMouseWheel(true)
-    b:SetScript("OnMouseWheel", function(_, d)
-        if unlock or IsShiftKeyDown() then ns.RollSetScale((DB().scale or 100) + d * 5) end
-    end)
+    -- 옮기기 · 크기는 이동 모드에서만 (위에 덮이는 분홍 테두리로)
+    b:SetScript("OnDragStart", nil)
+    b:SetScript("OnDragStop", nil)
     b:SetScript("OnClick", function(_, btn)
         if ns.RollGreetHide then ns.RollGreetHide() end
         if btn == "RightButton" then
@@ -576,7 +582,34 @@ local function MakeBadge()
     b:SetScript("OnMouseUp", function(s) s.target = s:IsMouseOver() and 56 or 50 end)
     badge = b
     ns.RollPlace()
+    -- 이동 모드 테두리: 끌기 = 옮기기 · 누르면 크기 줄 · 휠 = 크기
+    local m = CreateFrame("Frame", nil, b)
+    m:SetPoint("TOPLEFT", -8, 8); m:SetPoint("BOTTOMRIGHT", 8, -8)
+    m:SetFrameStrata("DIALOG")
+    m:EnableMouse(true); m:RegisterForDrag("LeftButton")
+    local tint = m:CreateTexture(nil, "BACKGROUND"); tint:SetAllPoints(); tint:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.12)
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local e = m:CreateTexture(nil, "BORDER")
+        e:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 1)
+        if side == "TOP" or side == "BOTTOM" then e:SetPoint(side .. "LEFT"); e:SetPoint(side .. "RIGHT"); e:SetHeight(2)
+        else e:SetPoint("TOP" .. side); e:SetPoint("BOTTOM" .. side); e:SetWidth(2) end
+    end
+    local lab = ns.Font(m, 12, C.accHi); lab:SetPoint("BOTTOM", m, "TOP", 0, 4); lab:SetText("주사위 토끼")
+    m:SetScript("OnDragStart", function() if not InCombatLockdown() then b:StartMoving() end end)
+    m:SetScript("OnDragStop", function() b:StopMovingOrSizing(); ns.RollSavePos() end)
+    if ns.MoveSizeHook then ns.MoveSizeHook(m, "주사위 창 · 토끼 단추 크기", "주사위 토끼") end
+    m:Hide()
+    b.mover = m; ns.RollMover = m
     return b
+end
+-- 이동 모드가 켜지고 꺼질 때: 토끼 단추 보이기 + 테두리
+if ns.SetMoveMode then
+    hooksecurefunc(ns, "SetMoveMode", function()
+        if ns.moving and DB().on and not badge then MakeBadge() end
+        if not badge then return end
+        PaintBadge()
+        badge.mover:SetShown(ns.moving and badge:IsShown() and not InCombatLockdown() and true or false)
+    end)
 end
 
 Anchor = function()
@@ -783,10 +816,7 @@ local function MakeCard(i)
     -- 단추 막대 테두리
     f.segbox = CreateFrame("Frame", nil, f); f.segbox:SetHeight(26)
     f.segrim = ns.RoundRect(f.segbox, 7, TK_RIM, "BACKGROUND", 0, 0)
-    -- Shift + 끌기 = 위치 옮기기
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function() if IsShiftKeyDown() and badge then badge:StartMoving() end end)
-    f:SetScript("OnDragStop", function() if badge then badge:StopMovingOrSizing(); ns.RollSavePos() end end)
+    -- 옮기기는 이동 모드에서만 (주사위 토끼 테두리를 끌어요)
     -- 아이콘 (둘레 = 등급 색)
     local ic = CreateFrame("Button", nil, f)
     ic:SetSize(28, 28); ic:SetPoint("TOPLEFT", PADX, -6)

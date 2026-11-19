@@ -192,7 +192,7 @@ local function UpdateTargetPower(f)
     -- 자원이 없거나(0) 분노가 0인 몹은 숨김
     -- 숨겨진 값(전투 중 일부 대상)이라 비교가 안 되면 일단 보여줌 (줄과 숫자는 그대로 그려짐)
     local okc, res = pcall(function() return max > 0 and (pType == MANA or cur > 0) end)
-    local show = ok and ((not okc) or res) and true or false
+    local show = ok and ((not okc) or res) and not (ns.db and ns.db.tPowerOff) and true or false
     f.tpower:SetShown(show); f.tpowerText:SetShown(show); f.tpowerLabel:SetShown(show)
     if not show then return end
     ns.SetBar(f.tpower, cur, max)
@@ -327,68 +327,158 @@ end
 
 -- 체력 숫자: 직업 캡이 있으면 캡에 안 가리게 안쪽으로
 -- 체력 숫자 · % 글씨 크기 (허브 > 위쪽 HUD > 체력 글씨 크기: +0 ~ +8)
+-- 글씨 · 바를 조각마다 하나씩 (허브 > Leel HUD > 내 창 · 대상 창)
+--   name 이름 · lv 레벨 · hp 체력 숫자 · pct % · bar 체력 바 두께 · sub 자원 글씨 (+더할 크기)
+--   아직 안 만진 칸은 예전 '글씨 강조' 값에서 시작해요
+function ns.HudTextAdd(unit, k)
+    local db = ns.db or {}
+    local side = (unit == "target") and "target" or "player"
+    local t = db.hudText and db.hudText[side]
+    if t and tonumber(t[k]) then return tonumber(t[k]) end
+    local own = (side == "target") and db.hpTextAddT or db.hpTextAddP
+    local add = tonumber(own) or tonumber(db.hpTextAdd) or 0
+    if k == "pct" or k == "sub" then return math.floor(add * 0.75 + 0.5) end
+    return add
+end
+-- 체력 숫자 · % 보이기 (예전 '숫자 / % / 둘 다' 값에서 시작)
+function ns.HudTextShow(unit, k)
+    local db = ns.db or {}
+    local side = (unit == "target") and "target" or "player"
+    local t = db.hudText and db.hudText[side]
+    if t and t[k] ~= nil then return t[k] and true or false end
+    local mode = ((side == "target") and db.hpShowT or db.hpShowP) or "both"
+    if k == "showHp" then return mode ~= "pct" end
+    if k == "showPct" then return mode ~= "num" end
+    return true
+end
+-- 마나 · 기력 바 (허브 > Leel HUD > 내 창 · 대상 창)
+--   powH 두께 · powW 길이(%) · showPow 바 보이기 · showPowTx 숫자 보이기 · powTicks 눈금
+function ns.HudPow(unit, k)
+    local side = (unit == "target") and "target" or "player"
+    local t = ns.db and ns.db.hudText and ns.db.hudText[side]
+    local v = t and t[k]
+    if k == "powH" then return tonumber(v) or (side == "target" and 4 or 6) end
+    if k == "powW" then return tonumber(v) or 100 end
+    return v ~= false
+end
+function ns.SetHudText(side, k, v)
+    ns.db.hudText = ns.db.hudText or {}
+    ns.db.hudText[side] = ns.db.hudText[side] or {}
+    ns.db.hudText[side][k] = v
+    local fr = ns.hudFrames
+    if fr and fr[side] then
+        ns.ApplyHpTextSize(fr[side])
+        if k == "porArt" and ns.HudRefreshInfo then pcall(ns.HudRefreshInfo, fr[side]) end
+    end
+end
+
 function ns.ApplyHpTextSize(f)
     if not (f and f.hpValue and f.hpBase) then return end
-    local add = tonumber(ns.db and ns.db.hpTextAdd) or 0
+    local u = f.unit
+    local A = function(k) return ns.HudTextAdd(u, k) end
+    local aName, aLv, aHp, aPct, aBar, aSub = A("name"), A("lv"), A("hp"), A("pct"), A("bar"), A("sub")
+    f.hpValue:SetAlpha(ns.HudTextShow(u, "showHp") and 1 or 0)
+    if f.hpPct then f.hpPct:SetAlpha(ns.HudTextShow(u, "showPct") and 1 or 0) end
     local file = ns.NUM
-    -- 글씨 강조만큼 체력바도 두껍게 (위아래로 반씩 늘려서 이름 · 아래 줄과 안 겹치게)
+    -- 체력 바 두께 (위아래로 반씩 늘려서 이름 · 아래 줄과 안 겹치게)
     if f.hp and f.nameA then
-        f.hp:SetHeight(BAR_H + add)
+        f.hp:SetHeight(math.max(6, BAR_H + aBar))
         f.hp:ClearAllPoints()
-        f.hp:SetPoint(f.nameA, f, f.nameA, BAR_X * (f.nameSx or 1), -34 + math.floor(add / 2 + 0.5))
-        if f.hp.heal then f.hp.heal:SetHeight(BAR_H - 4 + add) end
+        f.hp:SetPoint(f.nameA, f, f.nameA, BAR_X * (f.nameSx or 1), -34 + math.floor(aBar / 2 + 0.5))
+        if f.hp.heal then f.hp.heal:SetHeight(math.max(4, BAR_H - 4 + aBar)) end
     end
-    if not f.hpValue:SetFont(file, f.hpBase[1] + add, "") then f.hpValue:SetFont(ns.FONT, f.hpBase[1] + add, "") end
-    -- %는 숫자보다 덜 커지게 (바 안에 들어가도록)
-    local pa = math.floor(add * 0.75 + 0.5)
-    if not f.hpPct:SetFont(file, f.hpBase[2] + pa, "") then f.hpPct:SetFont(ns.FONT, f.hpBase[2] + pa, "") end
-    -- 이름 · 레벨도 같이 (이름은 글꼴을 바꿔도 이 크기를 지키게 TrackText에 새 크기로 다시 알려요)
+    local function Sz(base, add) return math.max(6, base + add) end
+    if not f.hpValue:SetFont(file, Sz(f.hpBase[1], aHp), "") then f.hpValue:SetFont(ns.FONT, Sz(f.hpBase[1], aHp), "") end
+    if not f.hpPct:SetFont(file, Sz(f.hpBase[2], aPct), "") then f.hpPct:SetFont(ns.FONT, Sz(f.hpBase[2], aPct), "") end
+    -- 이름 (글꼴을 바꿔도 이 크기를 지키게 TrackText에 새 크기로 다시 알려요)
     if f.name and f.nameBase then
-        local ns_ = f.nameBase + add
+        local ns_ = Sz(f.nameBase, aName)
         f.name:SetFont(ns.FONT, ns_, "")
-        -- 커진 만큼 이름 줄을 위로 올려서 체력바와 안 겹치게
+        -- 커진 만큼 이름 줄을 위로 (체력 바 두께도 같이 봐요)
         if f.nameA then
+            local up = math.max(aName * 0.8, aBar / 2)
             f.name:ClearAllPoints()
-            f.name:SetPoint(f.nameA, f, f.nameA, (POR_W + 6) * (f.nameSx or 1), -6 + math.floor(add * 0.8 + 0.5))
+            f.name:SetPoint(f.nameA, f, f.nameA, (POR_W + 6) * (f.nameSx or 1), -6 + math.floor(up + 0.5))
         end
         if ns.TrackText then ns.TrackText(f.name, ns_, "") end
     end
     if f.lv and f.lvBase then
         local lvFile = ns.NUM_B or ns.NUM
-        if not f.lv:SetFont(lvFile, f.lvBase + add, "") then f.lv:SetFont(ns.FONT, f.lvBase + add, "") end
+        if not f.lv:SetFont(lvFile, Sz(f.lvBase, aLv), "") then f.lv:SetFont(ns.FONT, Sz(f.lvBase, aLv), "") end
     end
     if f.lvLabel and f.lvLabelBase then
-        local la = f.lvLabelBase + pa
+        local la = Sz(f.lvLabelBase, math.floor(aLv * 0.75 + 0.5))
         f.lvLabel:SetFont(ns.FONT, la, "")
         if ns.TrackText then ns.TrackText(f.lvLabel, la, "") end
     end
-    -- 아래 줄 (자원 숫자 · 마나/기력/분노 글씨)도 같이
-    local half = math.floor(add / 2 + 0.5)
+    -- 아래 줄 (자원 숫자 · 마나/기력/분노 글씨)
+    local half = math.floor(aBar / 2 + 0.5)
     if f.power then
         f.power:ClearAllPoints()
         f.power:SetPoint("TOPLEFT", f, "TOPLEFT", BAR_X + 14, -73 - half)
     end
     if f.manaLine then
         f.manaLine:ClearAllPoints()
-        f.manaLine:SetPoint("TOPLEFT", f, "TOPLEFT", BAR_X + 12, -90 - half - pa)
+        f.manaLine:SetPoint("TOPLEFT", f, "TOPLEFT", BAR_X + 12, -90 - half - math.max(0, aSub))
+    end
+    -- 초상화: 보이기 · 크기 · 테두리 색
+    if f.portrait then
+        local T = (ns.db and ns.db.hudText and ns.db.hudText[(u == "target") and "target" or "player"]) or {}
+        f.portrait:SetAlpha(T.porOff and 0 or 1)
+        f.portrait:SetScale(math.max(0.4, (tonumber(T.porScale) or 100) / 100))
+        local edge = T.porEdge or "pink"
+        if edge == "off" then
+            f.portrait.cut:SetAlpha(0)
+        else
+            f.portrait.cut:SetAlpha(1)
+            local col = C.acc
+            if edge == "class" and ns.HudClassColorOf then col = ns.HudClassColorOf(u == "target" and "target" or "player") or C.acc end
+            f.portrait.cut:SetVertexColor(col[1], col[2], col[3], 1)
+        end
+    end
+    -- 마나 · 기력 바: 두께 · 길이 · 눈금 · 보이기
+    do
+        local pH, pW = ns.HudPow(u, "powH"), ns.HudPow(u, "powW")
+        local showBar, showTx = ns.HudPow(u, "showPow"), ns.HudPow(u, "showPowTx")
+        if f.power then
+            local w = math.floor(220 * pW / 100 + 0.5)
+            f.power:SetSize(w, pH)
+            local tk = f.power.ticks
+            if tk then
+                local on = ns.HudPow(u, "powTicks")
+                for i, t in ipairs(tk) do
+                    t:SetSize(1, pH); t:ClearAllPoints(); t:SetPoint("LEFT", w * i / (#tk + 1), 0); t:SetShown(on)
+                end
+            end
+            f.power:SetAlpha(showBar and 1 or 0)
+            if f.powerText then f.powerText:SetAlpha(showTx and 1 or 0) end
+        end
+        if f.tpower then
+            f.tpower:SetSize(math.floor(200 * pW / 100 + 0.5), pH)
+            f.tpower:SetAlpha(showBar and 1 or 0)
+            if f.tpowerText then f.tpowerText:SetAlpha(showTx and 1 or 0) end
+            if f.tpowerLabel then f.tpowerLabel:SetAlpha(showTx and 1 or 0) end
+        end
     end
     for _, k in ipairs({ "powerText", "manaText", "tpowerText", "manaLabel", "tpowerLabel" }) do
         local fs = f[k]
         if fs then
             f.subBase = f.subBase or {}
             if not f.subBase[k] then
-                local file, size = fs:GetFont()
-                f.subBase[k] = { file = file, size = size or 12 }
+                local file2, size = fs:GetFont()
+                f.subBase[k] = { file = file2, size = size or 12 }
             end
             local b = f.subBase[k]
-            local sz = b.size + pa
+            local sz = Sz(b.size, aSub)
             if not (b.file and fs:SetFont(b.file, sz, "")) then fs:SetFont(ns.FONT, sz, "") end
             if (k == "manaLabel" or k == "tpowerLabel") and ns.TrackText then ns.TrackText(fs, sz, "") end
         end
     end
 end
-function ns.SetHpTextAdd(v)
-    ns.db.hpTextAdd = v
+function ns.SetHpTextAdd(v, which)
+    if which == "player" then ns.db.hpTextAddP = v
+    elseif which == "target" then ns.db.hpTextAddT = v
+    else ns.db.hpTextAdd = v end
     local fr = ns.hudFrames
     if fr then
         for _, k in ipairs({ "player", "target" }) do if fr[k] then ns.ApplyHpTextSize(fr[k]) end end
@@ -414,6 +504,7 @@ local function ClassColor(file)
         or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[file])
     if c then return { c.r, c.g, c.b } end
 end
+ns.HudClassColorOf = function(u) local f = ClassOf(u); return f and ClassColor(f) end
 
 local function SetClassIcon(tex, file)
     local atlas = "classicon-" .. file:lower()
@@ -470,6 +561,8 @@ local function UpdateInfo(f)
     end
     f.lv:SetTextColor(c[1], c[2], c[3])
 
+    -- 초상화는 늘 얼굴 (직업 아이콘은 체력 바 앞에 따로 있어요)
+    f.portrait.tex:SetTexCoord(0, 1, 0, 1)
     SetPortraitTexture(f.portrait.tex, u)
 end
 ns.HudRefreshInfo = UpdateInfo
@@ -525,25 +618,219 @@ function ns.BuildHudPreview(parent)
     e2:SetPoint("BOTTOMLEFT", mid, "TOP", 2, -64)
     local dist = ns.Num(mid, 40, { 1, 1, 1 }); dist:SetPoint("TOP", mid, "TOP", 0, -64)
     local sub = ns.Font(mid, 12, C.tx2); sub:SetPoint("TOP", dist, "BOTTOM", 0, -2)
-    hud.p, hud.t = p, t
+    -- 비전투 모습: 짧은 귀 + zzz (진짜 가운데와 같은 그림)
+    local il = mid:CreateTexture(nil, "ARTWORK"); il:SetTexture(ns.MEDIA .. "ear_short_l"); il:SetSize(42, 42); il:SetPoint("BOTTOM", mid, "TOP", 0, -66)
+    local ir = mid:CreateTexture(nil, "ARTWORK"); ir:SetTexture(ns.MEDIA .. "ear_short_r"); ir:SetSize(42, 42); ir:SetPoint("BOTTOM", mid, "TOP", 0, -66)
+    local zzz = {}
+    for i = 1, 3 do
+        local z = ns.Font(mid, 10 + i, { 0.8, 0.73, 0.71 }); z:SetText("z")
+        z:SetPoint("BOTTOMLEFT", mid, "TOP", 10 + i * 7, -40 + i * 9)
+        local ag = z:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+        local a = ag:CreateAnimation("Alpha"); a:SetFromAlpha(0.15); a:SetToAlpha(0.85); a:SetDuration(0.9 + i * 0.25); a:SetSmoothing("IN_OUT")
+        z.ag = ag; zzz[i] = z
+    end
+    -- 전투 모습(각성): 금빛 귀 뒤 빛 + 노란 번개
+    local glow = mid:CreateTexture(nil, "BACKGROUND"); glow:SetTexture(ns.MEDIA .. "soft_glow"); glow:SetBlendMode("ADD")
+    glow:SetSize(150, 150); glow:SetPoint("CENTER", mid, "TOP", 0, -40); glow:SetVertexColor(1, 0.85, 0.45, 0.55)
+    local bolts = {}
+    for i, b in ipairs({ { -34, -18, "bolt1", -20 }, { 36, -14, "bolt2", 25 }, { -46, -52, "bolt2", -10 }, { 46, -50, "bolt1", 15 } }) do
+        local tx = mid:CreateTexture(nil, "OVERLAY"); tx:SetTexture(ns.MEDIA .. b[3]); tx:SetBlendMode("ADD"); tx:SetSize(14, 28)
+        tx:SetPoint("CENTER", mid, "TOP", b[1], b[2]); tx:SetRotation(math.rad(b[4])); tx.home = { b[1], b[2] }
+        local ag = tx:CreateAnimationGroup(); ag:SetLooping("REPEAT")
+        local a1 = ag:CreateAnimation("Alpha"); a1:SetFromAlpha(0); a1:SetToAlpha(1); a1:SetDuration(0.05); a1:SetStartDelay(i * 0.35); a1:SetOrder(1)
+        local a2 = ag:CreateAnimation("Alpha"); a2:SetFromAlpha(1); a2:SetToAlpha(0); a2:SetDuration(0.25); a2:SetOrder(2)
+        local a3 = ag:CreateAnimation("Alpha"); a3:SetFromAlpha(0); a3:SetToAlpha(0); a3:SetDuration(1.2); a3:SetOrder(3)
+        tx:SetAlpha(0); tx.ag = ag; bolts[i] = tx
+    end
+    hud.p, hud.t, hud.mid = p, t, mid
+    hud.midNum, hud.midSub, hud.midEarIdle, hud.midEarGold, hud.midGlow = dist, sub, il, e1, glow
+    -- 양쪽 귀를 한 번에 감싸는 틀 (허브 강조용 · 그림 없음)
+    local earBox = CreateFrame("Frame", nil, mid)
+    hud.midEarBox = earBox
+    -- 실제 가운데와 같은 모양: 작은 m · 분홍 줄 · 거리 점 4개 · 빛줄기 · 안내 글씨
+    local unitm = ns.Num(mid, 18, { 1, 1, 1 }); unitm:SetPoint("BOTTOMLEFT", dist, "BOTTOMRIGHT", 1, 4)
+    local rule = mid:CreateTexture(nil, "ARTWORK"); rule:SetTexture(ns.MEDIA .. "pill32"); rule:SetSize(46, 3)
+    rule:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1); rule:SetPoint("TOP", dist, "BOTTOM", 0, -6)
+    local pdots = {}
+    for i = 1, 4 do
+        local d = mid:CreateTexture(nil, "ARTWORK", nil, 1); d:SetTexture(ns.MEDIA .. "circle"); d:SetSize(8, 8)
+        d:SetPoint("CENTER", rule, "CENTER", (i - 2.5) * 12, 0); pdots[i] = d
+    end
+    sub:ClearAllPoints(); sub:SetPoint("TOP", rule, "BOTTOM", 0, -9)
+    local streaks = {}
+    for i, x in ipairs({ -30, -14, 0, 15, 31 }) do
+        local t2 = mid:CreateTexture(nil, "BACKGROUND", nil, 1); t2:SetTexture(ns.MEDIA .. "streak"); t2:SetBlendMode("ADD")
+        t2:SetSize(3, 30 + (i * 11) % 20); t2:SetVertexColor(1, 0.843, 0.353); t2:SetPoint("BOTTOM", mid, "TOP", x, -118)
+        local ag = t2:CreateAnimationGroup(); ag:SetLooping("REPEAT")
+        local d = 1.1 + (i % 3) * 0.3
+        local mv = ag:CreateAnimation("Translation"); mv:SetOffset(0, 40); mv:SetDuration(d); mv:SetOrder(1)
+        local fi = ag:CreateAnimation("Alpha"); fi:SetFromAlpha(0); fi:SetToAlpha(0.7); fi:SetDuration(d * 0.35); fi:SetOrder(1)
+        local fo = ag:CreateAnimation("Alpha"); fo:SetFromAlpha(0.7); fo:SetToAlpha(0); fo:SetStartDelay(d * 0.55); fo:SetDuration(d * 0.45); fo:SetOrder(1)
+        t2.ag = ag; streaks[i] = t2
+    end
+    local note = ns.Font(mid, 12, { 0.48, 0.4, 0.38 }); note:SetPoint("TOP", mid, "TOP", 0, -80); note:SetJustifyH("CENTER")
+    local dbox = CreateFrame("Frame", nil, mid); dbox:SetPoint("TOPLEFT", pdots[1], "TOPLEFT"); dbox:SetPoint("BOTTOMRIGHT", pdots[4], "BOTTOMRIGHT")
+    hud.midDots = dbox
+    -- 펫 창 (진짜와 같은 모양) · 내 창 아래
+    local pet = ns.HudPetPreview and ns.HudPetPreview(hud)
+    if pet then
+        pet.portrait.tex:SetTexture("Interface\\Icons\\Ability_Hunter_Pet_Cat")
+        pet.name:SetText("펫 예시"); pet.lv:SetText("25"); pet.chip:Hide()
+        pet.hp.bar:SetMinMaxValues(0, 1000); pet.hp.bar:SetValue(860)
+        pet.hpValue:SetText("860"); pet.hpPct:SetText("86%")
+        pet.focus:SetMinMaxValues(0, 100); pet.focus:SetValue(70)
+        pet:EnableMouse(false)
+    end
+    -- 대상의 대상 (진짜와 같은 모양의 어두운 알약) · 대상 초상화 밑
+    local tt = CreateFrame("Frame", nil, t)
+    do
+        local W_, H_ = POR_W + 40, 32
+        tt:SetSize(W_, H_)
+        ns.RoundRect(tt, 10, { 0.29, 0.204, 0.22 }, "BACKGROUND", 0, -2)
+        local bg = ns.RoundRect(tt, 9, { 0.078, 0.047, 0.055 }, "BACKGROUND", 1, 0); bg:SetColor({ 0.078, 0.047, 0.055 }, 0.92)
+        local sfr = CreateFrame("Frame", nil, tt); sfr:SetPoint("TOPLEFT", 4, -4); sfr:SetPoint("BOTTOMLEFT", 4, 4); sfr:SetWidth(6)
+        ns.RoundRect(sfr, 3, C.acc, "ARTWORK", 0, 0)
+        local hp = CreateFrame("StatusBar", nil, tt)
+        hp:SetPoint("BOTTOMLEFT", 14, 3); hp:SetPoint("BOTTOMRIGHT", -8, 3); hp:SetHeight(3)
+        hp:SetStatusBarTexture(ns.WHITE); hp:SetStatusBarColor(0.937, 0.416, 0.486, 1); hp:SetMinMaxValues(0, 1); hp:SetValue(0.8)
+        local nm = ns.Font(tt, 17, { 1, 0.97, 0.96 }); nm:SetPoint("LEFT", tt, "LEFT", 16, 2); nm:SetText("슈엘")
+        local pc = tt:CreateFontString(nil, "OVERLAY"); pc:SetFont(ns.NUM, 14, ""); pc:SetTextColor(0.85, 0.78, 0.76)
+        pc:SetPoint("RIGHT", tt, "RIGHT", -10, 2); pc:SetText("80%")
+    end
+    hud.pet, hud.tot = pet, tt
+    local function PlaceExtras()
+        -- 조각마다 크기 (진짜 HUD와 같게)
+        local PS = ns.HudPartScale or function() return 1 end
+        p:SetScale(PS("player")); t:SetScale(PS("target"))
+        local ms = PS("center"); mid:SetScale(ms); mid:ClearAllPoints(); mid:SetPoint("TOP", hud, "TOP", 0, -6 / ms)
+        if pet then
+            local sc = (tonumber(ns.db and ns.db.petScale) or 130) / 100
+            local ps = p:GetScale()
+            pet:SetScale(sc); pet:ClearAllPoints()
+            pet:SetPoint("TOPLEFT", p, "TOPLEFT", 14 * ps / sc, -(POR_H + 14) * ps / sc)
+        end
+        local sc2 = (tonumber(ns.db and ns.db.totScale) or 100) / 100
+        tt:SetScale(sc2); tt:ClearAllPoints()
+        tt:SetPoint("TOPRIGHT", t.portrait, "TOPRIGHT", 0, -(POR_H + 8) / sc2)
+        tt:SetShown(not (ns.db and ns.db.tot == false))
+    end
+    -- 보일 부분 고르기: all · player · center · target · pet
+    function hud:Focus(part)
+        part = part or "all"
+        p:SetShown(part == "all" or part == "player")
+        t:SetShown(part == "all" or part == "target" or part == "tot")
+        mid:SetShown(part == "all" or part == "center")
+        if pet then pet:SetShown(part == "all" or part == "pet") end
+        if part == "pet" then p:Show(); p:SetAlpha(0.18); t:Hide() else p:SetAlpha(1) end
+        self.focus = part
+    end
     function hud:Refresh()
-        pcall(UpdateInfo, p); pcall(UpdateHealth, p); pcall(UpdatePower, p)
+        PlaceExtras()
+        -- 내 캐릭터 대신 늘 같은 모형 '르엘' (누구 화면이든 같고, 전투 중 비밀 값도 안 써요)
+        ns.SetText(p.name, "르엘")
+        p.name:SetTextColor(C.acc[1], C.acc[2], C.acc[3])
+        p.lv:SetText("60"); p.lv:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+        p.portrait.tex:SetTexture(ns.MEDIA .. "pv_leel"); p.portrait.tex:SetTexCoord(0, 1, 0, 1)
+        if p.portrait.tex.SetDesaturated then p.portrait.tex:SetDesaturated(false) end
+        if p.cls then
+            p.cls.icon:SetTexture(ns.MEDIA .. "bunny"); p.cls.icon:SetTexCoord(0, 1, 0, 1)
+            p.cls.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+            p.cls:Show()
+            pcall(PlaceHpValue, p, true)
+        end
+        pcall(ns.SetBar, p.hp.bar, 9999, 9999)
+        p.hpValue:SetText("9999"); p.hpPct:SetText("100%")
+        if p.hp.heal then p.hp.heal:Hide() end
+        if p.power then
+            pcall(ns.SetBar, p.power.bar, 9999, 9999)
+            p.power.fill:SetVertexColor(C.mana[1], C.mana[2], C.mana[3], 1)
+            p.powerText:SetText("9999"); p.powerText:SetTextColor(0.56, 0.69, 1)
+        end
+        if p.manaLine then p.manaLine:Hide(); p.manaLabel:Hide(); p.manaText:Hide() end
+        if p.state then p.state:Hide() end
         ns.SetText(t.name, "붉은갈기 노움"); t.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
         t.lv:SetText("36"); t.lv:SetTextColor(1, 0.82, 0.2)
         t.cls:Hide()
         t.portrait.tex:SetTexture("Interface\\Icons\\Ability_Hunter_Pet_Wolf")
         pcall(ns.SetBar, t.hp.bar, 62, 100)
         t.hpValue:SetText("1184"); t.hpPct:SetText("62%")
-        if t.tpower then
+        if t.tpower and ns.db and ns.db.tPowerOff then
+            t.tpower:Hide(); t.tpowerText:Hide(); t.tpowerLabel:Hide()
+        elseif t.tpower then
             t.tpower:Show(); t.tpowerText:Show(); t.tpowerLabel:Show()
             t.tpower:SetMinMaxValues(0, 1); t.tpower:SetValue(0.7)
             t.tpower:SetStatusBarColor(C.mana[1], C.mana[2], C.mana[3])
             t.tpowerText:SetText("540"); t.tpowerLabel:SetText("마나")
         end
         ns.ApplyHpTextSize(p); ns.ApplyHpTextSize(t)
+        -- 가운데: 허브의 [비전투 | 전투 중]에 맞춰 (ns.hudPvFight) · 세부 설정도 같이
+        local O = (ns.db and ns.db.ctr) or {}
         local useDist = not (ns.db and ns.db.centerTime)
-        e1:SetShown(useDist); e2:SetShown(useDist)
-        dist:SetText(useDist and "5m" or "0:42"); sub:SetText(useDist and "대상과 거리" or "전투 시간")
+        local fight = ns.hudPvFight and true or false
+        local awake = fight and not O.numOff   -- '끔'이면 전투 효과도 없음
+        local es = math.max(0.4, (tonumber(O.earScale) or 100) / 100)
+        e1:SetSize(34 * es, 62 * es); e2:SetSize(34 * es, 62 * es); il:SetSize(42 * es, 42 * es); ir:SetSize(42 * es, 42 * es)
+        local earOn = false   -- 가운데 토끼 귀는 없앴어요
+        e1:SetShown(awake and earOn); e2:SetShown(awake and earOn); glow:SetShown(awake)
+        glow:SetAlpha(O.fx == "soft" and 0.45 or 1)
+        glow:ClearAllPoints(); glow:SetPoint("CENTER", mid, "TOP", 0, -86)
+        local BN = { { -46, -78 }, { 46, -74 }, { -54, -100 }, { 54, -98 } }
+        for i, b in ipairs(bolts) do
+            local bp = BN[i] or b.home
+            if bp then b:ClearAllPoints(); b:SetPoint("CENTER", mid, "TOP", bp[1], bp[2]) end
+        end
+        for _, b in ipairs(bolts) do
+            local on = awake and not O.boltOff
+            b:SetShown(on); if on then b.ag:Play() else b.ag:Stop() end
+            b:SetSize(O.fx == "strong" and 18 or 14, O.fx == "strong" and 36 or 28)
+        end
+        il:SetShown(not awake and earOn); ir:SetShown(not awake and earOn)
+        local eb = hud.midEarBox
+        if eb then
+            eb:ClearAllPoints()
+            if awake then eb:SetPoint("TOPLEFT", e1, "TOPLEFT"); eb:SetPoint("BOTTOMRIGHT", e2, "BOTTOMRIGHT")
+            else eb:SetPoint("TOPLEFT", il, "TOPLEFT"); eb:SetPoint("BOTTOMRIGHT", ir, "BOTTOMRIGHT") end
+            eb:SetShown(earOn)
+        end
+        for _, z in ipairs(zzz) do z:Hide(); z.ag:Stop() end   -- 비전투는 그냥 거리 화면
+        -- 숫자 · m · 줄 · 점 · 아래 글씨 (실제 가운데 코드와 같은 규칙)
+        local nf = dist:GetFont(); if nf then dist:SetFont(nf, math.max(14, 40 + (tonumber(O.numAdd) or 0)), "") end
+        local mf2 = unitm:GetFont(); if mf2 then unitm:SetFont(mf2, math.max(9, 18 + math.floor((tonumber(O.numAdd) or 0) * 0.4 + 0.5)), "") end
+        local NEAR, MID, GOLD = { 0.62, 0.88, 0.66 }, C.acc, { 1, 0.843, 0.353 }
+        local OFFC = { 0.36, 0.27, 0.25 }
+        local hidden = O.numOff or ((not useDist) and not fight)
+        dist:SetShown(not hidden); unitm:SetShown(not hidden and useDist)
+        sub:SetShown(not hidden and not O.subOff)
+        note:SetShown(hidden)
+        if O.numOff then note:SetText("가운데 사용 안 함")
+        elseif hidden then note:SetText("전투 전엔 가운데가 안 보여요\n(전투 시간 모드)") end
+        local showDots = (not hidden) and useDist and not O.dotsOff
+        local showRule = (not hidden) and not useDist
+        rule:SetShown(showRule)
+        local n, col
+        if useDist then
+            if fight then dist:SetText("20"); col = MID; n = 2; sub:SetText("대상과 거리")
+            else dist:SetText("5"); col = NEAR; n = 1; sub:SetText("근접 거리") end
+            unitm:SetText("m")
+            local tc = fight and C.tx or col
+            if O.white then tc = C.tx end
+            dist:SetTextColor(tc[1], tc[2], tc[3]); unitm:SetTextColor(tc[1], tc[2], tc[3])
+            local dc = fight and GOLD or (O.white and C.acc or col)
+            for i, d in ipairs(pdots) do
+                local k = (i <= n) and dc or OFFC
+                d:SetVertexColor(k[1], k[2], k[3], 1); d:SetShown(showDots)
+            end
+            hud.midDots:SetShown(showDots)
+        else
+            dist:SetText("42"); dist:SetTextColor(C.tx[1], C.tx[2], C.tx[3]); sub:SetText("전투 시간")
+            for _, d in ipairs(pdots) do d:Hide() end
+        end
+        -- 전투 중 효과: 빛 · 번개 · 빛줄기 (숫자 둘레)
+        for _, st in ipairs(streaks) do
+            local on = awake and not O.streakOff
+            st:SetShown(on); if on then st.ag:Play() else st.ag:Stop() end
+        end
+        dist:SetAlpha(1); sub:SetAlpha(1)
         self:SetScale(ns.db.scale or 0.7)
     end
     hud:Refresh()
@@ -727,6 +1014,7 @@ local function CreateCenter(hud)
     local function Dots(n, col)
         c.rule:Hide()
         if c.awake and col and col ~= DIST_COL.far then col = GOLD end
+        if ns.db and ns.db.ctr and ns.db.ctr.white and col then col = C.acc end
         for i, d in ipairs(c.dots) do
             local k = (n and i <= n) and col or DOT_OFF
             d:SetVertexColor(k[1], k[2], k[3], 1)
@@ -768,8 +1056,10 @@ local function CreateCenter(hud)
         local gen = self.idleGen
         if on then
             self.ear:SetAlpha(1); self.earR:SetAlpha(1)   -- 까딱은 뺐어요 (가만히)
-            for i, z in ipairs(self.zzz) do
-                C_Timer.After((i - 1) * 1.0, function() if c.idleGen == gen then z.ag:Play() end end)
+            if not (ns.db and ns.db.ctr and ns.db.ctr.zzzOff) then
+                for i, z in ipairs(self.zzz) do
+                    C_Timer.After((i - 1) * 1.0, function() if c.idleGen == gen then z.ag:Play() end end)
+                end
             end
         else
             self.twitchAg:Stop(); self.ear:SetAlpha(0); self.earR:SetAlpha(0)
@@ -804,6 +1094,7 @@ local function CreateCenter(hud)
         local h = 34 + ((i * 37) % 30)
         t:SetSize(3 + (i % 2), h); t:SetVertexColor(GOLD[1], GOLD[2], GOLD[3]); t:SetAlpha(0)
         t:SetPoint("BOTTOM", c, "TOP", x, -62 - (i % 3) * 4)
+        t.leelX, t.leelY = x, -62 - (i % 3) * 4
         local d = 1.1 + ((i * 53) % 9) / 10
         local ag = t:CreateAnimationGroup(); ag:SetLooping("REPEAT")
         local mv = ag:CreateAnimation("Translation"); mv:SetOffset(0, 46); mv:SetDuration(d); mv:SetOrder(1)
@@ -828,15 +1119,18 @@ local function CreateCenter(hud)
     end
     -- 번개 자리: 귀 양옆 · 숫자 양옆 (거리 칸 위쪽 기준)
     local BOLT_AT = { { -30, 6 }, { 30, 8 }, { -48, -26 }, { 48, -24 }, { -40, -50 }, { 42, -48 }, { -16, 18 }, { 16, 20 } }
+    -- 귀를 끄면 번개는 숫자 둘레로 (숫자 가운데 ≈ 위에서 25 아래)
+    local BOLT_NUM = { { -44, -8 }, { 44, -6 }, { -54, -28 }, { 54, -26 }, { -42, -48 }, { 44, -46 }, { -22, 4 }, { 22, 6 } }
     local boltN, boltWait, boltLast = 0, 0, 0
     local function Crackle(n)
         for _ = 1, n do
             boltN = boltN % #c.bolts + 1
             local b = c.bolts[boltN]
             local at
-            repeat at = math.random(#BOLT_AT) until at ~= boltLast
+            local AT = BOLT_NUM   -- 귀는 없앴어요: 번개는 숫자 둘레로
+            repeat at = math.random(#AT) until at ~= boltLast
             boltLast = at
-            local p = BOLT_AT[at]
+            local p = AT[at]
             local big = math.random() < 0.35
             b.t:SetTexture(ns.MEDIA .. (math.random() < 0.5 and "bolt1" or "bolt2"))
             b.t:SetSize(big and 16 or 12, big and 32 or 24)
@@ -852,6 +1146,7 @@ local function CreateCenter(hud)
         if boltWait > 0 then return end
         Crackle(math.random() < 0.3 and 2 or 1)
         boltWait = 0.35 + math.random() * 0.9
+        if ns.db and ns.db.ctr and ns.db.ctr.fx == "strong" then boltWait = boltWait * 0.5 end
     end)
 
     function c:Awaken(on)
@@ -861,10 +1156,14 @@ local function CreateCenter(hud)
         if on then
             self.fightStart = GetTime()
             self.earOut:Stop(); self:IdleFx(false); self.earG:SetAlpha(1)
-            self.earPop:Play(); self.flashAg:Stop(); self.flashAg:Play()
-            Crackle(3); boltWait = 0.5; self.boltTick:Show()   -- 변신 순간 번개 세 갈래
-            for _, st in ipairs(self.streaks) do
-                C_Timer.After(0.15 + math.random() * st.d, function() if c.awake then st.ag:Play() end end)
+            local O = (ns.db and ns.db.ctr) or {}
+            self.earPop:Play()
+            if not O.flashOff then self.flashAg:Stop(); self.flashAg:Play() end
+            if not O.boltOff and not O.numOff then Crackle(3); boltWait = 0.5; self.boltTick:Show() end   -- 변신 순간 번개 세 갈래
+            if not O.streakOff then
+                for _, st in ipairs(self.streaks) do
+                    C_Timer.After(0.15 + math.random() * st.d, function() if c.awake then st.ag:Play() end end)
+                end
             end
         else
             for _, st in ipairs(self.streaks) do st.ag:Stop(); st.t:SetAlpha(0) end
@@ -876,6 +1175,7 @@ local function CreateCenter(hud)
 
     local function Color(col)
         if c.awake and col ~= DIST_COL.far then col = C.tx end
+        if ns.db and ns.db.ctr and ns.db.ctr.white then col = C.tx end   -- 허브: 거리 색 = 흰색
         c.text:SetTextColor(col[1], col[2], col[3])
         c.unitm:SetTextColor(col[1], col[2], col[3])
     end
@@ -986,6 +1286,75 @@ local function CreateCenter(hud)
     SLASH_LEELAWAKE1 = "/르엘각성"
     SlashCmdList.LEELAWAKE = function() c:Awaken(not c.awake); if c.awake and not c:IsShown() then c:ShowDist() end end
     ns.hudCenter = c   -- 르엘 허브: 위쪽 HUD를 고르면 각성 모습 미리 보기
+
+    -- 허브 > Leel HUD > 가운데 세부 설정 (ns.db.ctr)
+    --   귀 · 숫자 · 아래 글씨 · 졸음 z · 각성 효과를 틀 하나씩에 담아 켜고 끄기 · 크기
+    do
+        local function L(f, lv) f:SetAllPoints(c); f:SetFrameLevel(c:GetFrameLevel() + lv); return f end
+        local fxF = L(CreateFrame("Frame", nil, c), 1)
+        local earF = L(CreateFrame("Frame", nil, c), 2)
+        local numF = L(CreateFrame("Frame", nil, c), 3)
+        local subF = L(CreateFrame("Frame", nil, numF), 1)
+        local zF = L(CreateFrame("Frame", nil, c), 3)
+        c.flash:SetParent(fxF)
+        for _, st in ipairs(c.streaks) do st.t:SetParent(fxF) end
+        for _, b in ipairs(c.bolts) do b.t:SetParent(fxF) end
+        for _, t in ipairs({ c.ear, c.earR, c.earG }) do t:SetParent(earF) end
+        for _, t in ipairs({ c.text, c.unitm, c.rule }) do t:SetParent(numF) end
+        for _, d in ipairs(c.dots) do d:SetParent(numF) end
+        c.sub:SetParent(subF)
+        for _, z in ipairs(c.zzz) do z.fs:SetParent(zF) end
+        local f1 = c.text:GetFont()
+        local f2 = c.unitm:GetFont()
+        function c:ApplyOpts()
+            local O = (ns.db and ns.db.ctr) or {}
+            earF:SetAlpha(0)   -- 가운데 토끼 귀는 없앴어요 (숫자 + 효과만)
+            earF:SetScale(math.max(0.4, (tonumber(O.earScale) or 100) / 100))
+            zF:SetAlpha(0)   -- 비전투는 그냥 거리 화면 (zzz 없음)
+            numF:SetAlpha(O.numOff and 0 or 1)
+            subF:SetAlpha(O.subOff and 0 or 1)
+            for _, d in ipairs(c.dots) do d:SetAlpha(O.dotsOff and 0 or 1) end
+            local add = tonumber(O.numAdd) or 0
+            if f1 then c.text:SetFont(f1, math.max(16, 50 + add), "") end
+            if f2 then c.unitm:SetFont(f2, math.max(10, 22 + math.floor(add * 0.4 + 0.5)), "") end
+            -- 가운데 '끔' = 숫자도 전투 효과도 안 보여요
+            fxF:SetAlpha(O.numOff and 0 or (O.fx == "soft" and 0.45 or 1))
+            if O.numOff then c.boltTick:Hide() end
+            -- 귀를 끄면 빛 · 빛줄기도 숫자 쪽으로 내려와요
+            local dy = -14   -- 귀가 없으니 빛 · 빛줄기도 숫자 쪽으로
+            c.flash:ClearAllPoints(); c.flash:SetPoint("CENTER", c, "TOP", 0, -22 + dy)
+            for _, st in ipairs(c.streaks) do
+                if st.t.leelX then st.t:ClearAllPoints(); st.t:SetPoint("BOTTOM", c, "TOP", st.t.leelX, st.t.leelY + dy * 2) end
+            end
+            if O.boltOff then c.boltTick:Hide(); for _, b in ipairs(c.bolts) do b.ag:Stop(); b.t:SetAlpha(0) end end
+            if O.streakOff then for _, st in ipairs(c.streaks) do st.ag:Stop(); st.t:SetAlpha(0) end end
+        end
+        -- 언제 보일지: 늘 · 대상 있을 때(처음) · 전투 중만
+        local function Vis()
+            if ns.moving then return end
+            local v = ns.db and ns.db.ctr and ns.db.ctr.vis or "target"
+            local fight = UnitAffectingCombat("player")
+            if v == "combat" and not fight then
+                c:Hide()
+            elseif v == "always" and not c:IsShown() then
+                if not UnitExists("target") and not fight then
+                    c.text:SetText(""); c.unitm:SetText(""); c.sub:SetText("")
+                    c.rule:Hide(); for _, d in ipairs(c.dots) do d:Hide() end
+                end
+                c:Show()
+            end
+        end
+        hooksecurefunc(c, "ShowDist", Vis)
+        hooksecurefunc(c, "Idle", Vis)
+        hooksecurefunc(c, "Fight", Vis)
+        c:ApplyOpts()
+    end
+    function ns.SetCtr(k, v)
+        ns.db.ctr = ns.db.ctr or {}
+        ns.db.ctr[k] = v
+        if c.ApplyOpts then c:ApplyOpts() end
+        if c.Apply then c:Apply() end
+    end
     SLASH_LEELTOTEM1 = "/르엘토템"; SLASH_LEELTOTEM2 = "/leeltotem"
     SlashCmdList.LEELTOTEM = function(msg)
         msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -1035,8 +1404,8 @@ local function Chip(parent)
     return c
 end
 
-local function CreatePet(hud)
-    local f = CreateFrame("Button", "LeelUI_pet", hud, "SecureUnitButtonTemplate")
+local function CreatePet(hud, preview)
+    local f = preview and CreateFrame("Button", nil, hud) or CreateFrame("Button", "LeelUI_pet", hud, "SecureUnitButtonTemplate")
     f:SetSize(PET_POR + PET_BAR, PET_POR + 4)
     f:SetPoint("TOPLEFT", hud, "TOPLEFT", 14, -(POR_H + 14))
     f:SetAttribute("unit", "pet")
@@ -1105,6 +1474,8 @@ local function CreatePet(hud)
     end)
     return f
 end
+-- 허브 미리 보기용 펫 창 (진짜 펫 창과 같은 모양 · 클릭 없음)
+ns.HudPetPreview = function(h) return CreatePet(h, true) end
 
 ----------------------------------------------------------------------
 -- 따라가는 중 표시: 대상 초상화 분홍 빛 맥박 + 두 사람 배지 + 아래 알약
@@ -1253,7 +1624,7 @@ local function UpdatePet(f)
     end
     -- 만족도 (사냥꾼 펫만 값이 있어요)
     local ok, h = pcall(GetPetHappiness)
-    if ok and h and not (issecretvalue and issecretvalue(h)) and not dead then
+    if ok and h and not (issecretvalue and issecretvalue(h)) and not dead and not (ns.db and ns.db.petMoodOff) then
         local CC = { { 1, 0.42, 0.42 }, { 1, 0.83, 0.42 }, { 0.5, 0.84, 0.48 } }
         local FACE = { "pet_sad", "pet_ok", "pet_happy" }
         local c = CC[h]
@@ -1327,7 +1698,25 @@ end
 ----------------------------------------------------------------------
 -- 만들기 + 이벤트
 ----------------------------------------------------------------------
+-- Leel HUD 안 씀 (허브 > Leel HUD 쓰기 끔): 게임 기본 플레이어 · 대상 창은 숨기지 않아요
+do
+    local orig = ns.HideBlizzard
+    if orig then
+        ns.HideBlizzard = function(self, ...)
+            if ns.db and ns.db.hudOff then return end
+            return orig(self, ...)
+        end
+    end
+end
+
 function ns:CreateHUD()
+    -- 잠깐 있던 '초상화 그림' 설정 지우기
+    for _, sd in ipairs({ "player", "target" }) do
+        local T = ns.db and ns.db.hudText and ns.db.hudText[sd]
+        if T then T.porArt = nil end
+    end
+    -- 안 쓸 때도 만들어 두고(이동 모드 · 허브가 찾아요) 숨겨요
+    if ns.db and ns.db.hudOff then C_Timer.After(0, function() if ns.hud then ns.hud:Hide() end end) end
     local hud = CreateFrame("Frame", "LeelUI_HUD", UIParent)
     hud:SetSize(SIDE_W * 2 + GAP, POR_H + 14 + 64)
     hud:SetMovable(true)
@@ -1354,12 +1743,17 @@ function ns:CreateHUD()
     -- 펫 창은 내 창을 따라다님 (조각 이동 때 같이)
     -- 펫 창 크기 (허브 > 위쪽 HUD · 80~160%, 처음 130%) · 자리는 크기와 상관없이 내 창 아래 그대로
     local function PlacePet()
+        if InCombatLockdown() then return end
         local sc = (tonumber(ns.db and ns.db.petScale) or 130) / 100
+        local ps = player:GetScale()   -- 내 창 크기만큼 아래로
         pet:SetScale(sc)
         pet:ClearAllPoints()
-        pet:SetPoint("TOPLEFT", player, "TOPLEFT", 14 / sc, -(POR_H + 14) / sc)
+        pet:SetPoint("TOPLEFT", player, "TOPLEFT", 14 * ps / sc, -(POR_H + 14) * ps / sc)
     end
     PlacePet()
+    ns.HudPlacePet = PlacePet
+    -- 이동 모드: 펫 창 테두리 (크기만)
+    C_Timer.After(0, function() if ns.MoveSizeOnly then ns.MoveSizeOnly(pet, "펫 창 크기 (사냥꾼 · 흑마법사)", "펫 창") end end)
     function ns.SetPetScale(v)
         if ns.db then ns.db.petScale = v end
         if InCombatLockdown() then
@@ -1448,6 +1842,20 @@ function ns:CreateHUD()
             if on then RegisterUnitWatch(tt) else UnregisterUnitWatch(tt); tt:Hide() end
         end
         target.tot = tt
+        -- 이동 모드: 대상의 대상 테두리 (크기만) · 켜 두었으면 예시로 보이게
+        C_Timer.After(0, function()
+            if not ns.MoveSizeOnly then return end
+            ns.MoveSizeOnly(tt, "대상의 대상 크기", "대상의 대상", function(on)
+                if InCombatLockdown() or (ns.db and ns.db.tot == false) then return end
+                if on then
+                    UnregisterUnitWatch(tt); tt:Show()
+                    tt.name:SetText("대상의 대상"); tt.pct:SetText("100%"); tt.stripe:SetColor(C.acc, 1)
+                    tt.hp:SetMinMaxValues(0, 1); tt.hp:SetValue(1)
+                else
+                    RegisterUnitWatch(tt)
+                end
+            end)
+        end)
         ns.hudToT = tt
     end
 

@@ -236,7 +236,7 @@ function ns:CreateMover(hud)
 
     m:Hide(); bar:Hide()
     ns.mover, ns.moverBar = m, bar
-    C_Timer.After(0, function() if ns.MoveSizeHook then ns.MoveSizeHook(m, "위쪽 HUD 크기", "위쪽 HUD") end end)
+    C_Timer.After(0, function() if ns.MoveSizeHook then ns.MoveSizeHook(m, "Leel HUD 크기", "Leel HUD") end end)
 end
 
 ----------------------------------------------------------------------
@@ -255,6 +255,19 @@ local function PartOff(key)
     ns.db.hudParts = ns.db.hudParts or {}
     return ns.db.hudParts[key]
 end
+-- 조각마다 크기 (HUD 전체 크기에 곱해요 · 100 = 그대로)
+local PART_SIZE = { player = "내 창 크기", center = "가운데 크기", target = "대상 창 크기" }
+local PART_TITLE = { player = "내 창", center = "가운데", target = "대상 창" }
+function ns.HudPartScale(key)
+    local t = ns.db and ns.db.partScale
+    local v = t and tonumber(t[key]) or 100
+    return math.max(0.4, math.min(2, v / 100))
+end
+function ns.SetHudPartScale(key, v)
+    ns.db.partScale = ns.db.partScale or {}
+    ns.db.partScale[key] = math.floor(tonumber(v) or 100)
+    ns:ApplyHudParts()
+end
 
 function ns:ApplyHudParts()
     local fr, hud = ns.hudFrames, ns.hud
@@ -264,10 +277,13 @@ function ns:ApplyHudParts()
             local f = fr[p.key]
             if f then
                 local o = PartOff(p.key) or { p.dx, p.dy }
+                local sc = ns.HudPartScale(p.key)
+                f:SetScale(sc)
                 f:ClearAllPoints()
-                f:SetPoint(p.point, hud, p.point, o[1], o[2])
+                f:SetPoint(p.point, hud, p.point, o[1] / sc, o[2] / sc)   -- 자리는 HUD 기준 그대로
             end
         end
+        if ns.HudPlacePet then ns.HudPlacePet() end
         if ns.RefreshHudHub then ns.RefreshHudHub() end
     end)
 end
@@ -281,13 +297,14 @@ end
 local function SavePart(p, f)
     local hud = ns.hud
     local x, y
+    local k = f:GetScale()   -- 조각 크기만큼 HUD 단위로 바꿔서
     if p.point == "TOPLEFT" then
-        x, y = f:GetLeft() - hud:GetLeft(), f:GetTop() - hud:GetTop()
+        x, y = f:GetLeft() * k - hud:GetLeft(), f:GetTop() * k - hud:GetTop()
     elseif p.point == "TOPRIGHT" then
-        x, y = f:GetRight() - hud:GetRight(), f:GetTop() - hud:GetTop()
+        x, y = f:GetRight() * k - hud:GetRight(), f:GetTop() * k - hud:GetTop()
     else
-        x = (f:GetLeft() + f:GetRight()) / 2 - (hud:GetLeft() + hud:GetRight()) / 2
-        y = f:GetTop() - hud:GetTop()
+        x = (f:GetLeft() + f:GetRight()) / 2 * k - (hud:GetLeft() + hud:GetRight()) / 2
+        y = f:GetTop() * k - hud:GetTop()
     end
     if ns.db.grid then
         x = math.floor(x / SNAP + 0.5) * SNAP
@@ -299,6 +316,7 @@ local function SavePart(p, f)
 end
 
 local partMovers
+function ns.HudPartMover(key) return partMovers and partMovers[key] end
 local function BuildPartMovers()
     if partMovers or not ns.hudFrames then return end
     partMovers = {}
@@ -325,12 +343,13 @@ local function BuildPartMovers()
             local lb = ns.Font(m, 12, C.accHi)
             lb:SetText(p.label)
             lb:SetPoint("BOTTOM", m, "TOP", 0, 2)
-            ns.MoveSizeHook(m, "위쪽 HUD 크기", "위쪽 HUD")
+            ns.MoveSizeHook(m, PART_SIZE[p.key], PART_TITLE[p.key])
+            partMovers[p.key] = m
             m:SetScript("OnEnter", function()
                 tint:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.16)
                 GameTooltip:SetOwner(m, "ANCHOR_TOP")
                 GameTooltip:SetText(p.label .. " 옮기기")
-                GameTooltip:AddLine("끌기: 이것만 옮기기", 1, 1, 1)
+                GameTooltip:AddLine("끌기: 이것만 옮기기 · 누르면 크기 줄 · 휠 = 크기", 1, 1, 1)
                 GameTooltip:AddLine("셋 다 같이는 토끼 손잡이를 끌어요", 0.8, 0.8, 0.8)
                 GameTooltip:Show()
             end)
@@ -555,15 +574,27 @@ end)
 -- 이동 모드에서 고른 것 바로 위에 크기 조절 줄: − 82% + · 처음 크기
 -- (고르기 = 테두리를 누르기 · 끌기, 고른 테두리 위에서 휠 = 크기)
 ----------------------------------------------------------------------
-local SIZE_DEFAULT = { ["위쪽 HUD 크기"] = function() return math.floor((ns.defaults.scale or 0.61) * 100 + 0.5) end,
+local SIZE_DEFAULT = { ["Leel HUD 크기"] = function() return math.floor((ns.defaults.scale or 0.61) * 100 + 0.5) end,
                        ["파티 프레임 크기"] = function() return math.floor((ns.defaults.partyScale or 0.75) * 100 + 0.5) end,
-                       ["액션바 크기"] = function() return 80 end, ["토끼 메뉴 크기"] = function() return 80 end }
+                       ["액션바 크기"] = function() return 80 end, ["토끼 메뉴 크기"] = function() return 80 end,
+                       ["내 창 크기"] = function() return 100 end, ["가운데 크기"] = function() return 100 end,
+                       ["대상 창 크기"] = function() return 100 end, ["대상의 대상 크기"] = function() return 100 end,
+                       ["펫 창 크기 (사냥꾼 · 흑마법사)"] = function() return 130 end }
+-- 허브에 줄이 없을 때도 쓰는 조각 크기 (내 창 · 가운데 · 대상 창)
+local function PartSize(key, label)
+    return { t = "slider", label = label, min = 50, max = 160,
+        get = function() return ns.db.partScale and ns.db.partScale[key] or 100 end,
+        set = function(v) if ns.SetHudPartScale then ns.SetHudPartScale(key, v) end end }
+end
+local SIZE_FALLBACK = { ["내 창 크기"] = PartSize("player", "내 창 크기"), ["가운데 크기"] = PartSize("center", "가운데 크기"),
+                        ["대상 창 크기"] = PartSize("target", "대상 창 크기") }
 local function SizeItem(label)
     for _, m in ipairs(ns.HUB_MODULES or {}) do
         for _, it in ipairs(m.items or {}) do
             if it.t == "slider" and it.label == label then return it end
         end
     end
+    return SIZE_FALLBACK[label]
 end
 local sizeBar, sizeSel
 local function SizePaint()
@@ -643,3 +674,40 @@ end
 hooksecurefunc(ns, "SetMoveMode", function()
     if not ns.moving then ns.MoveSelect(nil) end
 end)
+
+-- 크기만 바꾸는 테두리 (대상의 대상 · 펫 창처럼 자리가 HUD에 붙어 있는 것)
+--   이동 모드에서만 보여요 · 누르면 크기 줄 · 휠 = 크기
+--   onToggle(on): 이동 모드가 켜지고 꺼질 때 (예시로 보이게 하기 등)
+function ns.MoveSizeOnly(frame, label, title, onToggle)
+    if not frame or frame.leelSizeOnly then return end
+    local m = CreateFrame("Frame", nil, frame)
+    m:SetPoint("TOPLEFT", -3, 3); m:SetPoint("BOTTOMRIGHT", 3, -3)
+    m:SetFrameStrata("FULLSCREEN")
+    m:EnableMouse(true)
+    local tint = m:CreateTexture(nil, "BACKGROUND")
+    tint:SetAllPoints(); tint:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.1)
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local e = m:CreateTexture(nil, "BORDER")
+        e:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.9)
+        if side == "TOP" or side == "BOTTOM" then e:SetPoint(side .. "LEFT"); e:SetPoint(side .. "RIGHT"); e:SetHeight(1)
+        else e:SetPoint("TOP" .. side); e:SetPoint("BOTTOM" .. side); e:SetWidth(1) end
+    end
+    m:SetScript("OnEnter", function(self)
+        tint:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.2)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(title .. " 크기", 1, 0.84, 0.88)
+        GameTooltip:AddLine("누르면 위에 크기 줄 · 휠 = 크기", 1, 1, 1)
+        GameTooltip:AddLine("자리는 HUD를 따라가요", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    m:SetScript("OnLeave", function() tint:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.1); GameTooltip:Hide() end)
+    ns.MoveSizeHook(m, label, title)
+    m:Hide()
+    frame.leelSizeOnly = m
+    hooksecurefunc(ns, "SetMoveMode", function()
+        local on = ns.moving and not InCombatLockdown()
+        if onToggle then pcall(onToggle, on and true or false) end
+        m:SetShown(on and frame:IsShown() and true or false)
+    end)
+    return m
+end

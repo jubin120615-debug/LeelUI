@@ -111,11 +111,11 @@ end
 
 local MODULES = {
     {
-        key = "LeelUI", title = "위쪽 HUD", sub = "내 체력 · 대상 창", icon = "hb_ui",
+        key = "LeelUI", title = "Leel HUD", sub = "내 체력 · 대상 창", icon = "hb_ui",
         always = true,
-        desc = "내 체력, 대상 창이 있는 위쪽 HUD. 허브도 여기에 들어 있어요.",
+        desc = "내 체력, 대상 창이 있는 Leel HUD. 허브도 여기에 들어 있어요.\n내 창 · 가운데 · 대상 창 크기는 이동 모드에서 테두리를 누르면 따로 바꿔요.",
         items = {
-            { t = "slider", label = "위쪽 HUD 크기", min = 50, max = 150,
+            { t = "slider", label = "Leel HUD 크기", min = 50, max = 150,
               get = function() return math.floor((ns.db.scale or 0.7) * 100 + 0.5) end,
               set = function(v)
                   ns:SetHudScale(v / 100)
@@ -169,7 +169,7 @@ local MODULES = {
     {
         key = "LeelUI_ABar", builtin = true, cat = "view",
         title = "액션바", sub = "둥둥 바 · 토끼 메뉴", icon = "hb_apps",
-        desc = "판 없는 둥근 액션바 + 토끼 메뉴 (시험 중).\n스위치는 다시 불러오기 후 적용. 토끼는 Shift + 끌기로 옮겨요.",
+        desc = "판 없는 둥근 액션바 + 토끼 메뉴 (시험 중).\n스위치는 다시 불러오기 후 적용. 토끼 메뉴는 이동 모드에서 옮겨요.",
         onoff = { reload = true, get = function() return ns.ABarDB and ns.ABarDB().on end,
                   set = function(v) ns.ABarDB().on = v and true or false end },
         items = {
@@ -201,7 +201,7 @@ local MODULES = {
             { t = "toggle", label = "토끼 발자국", hint = "발자국 6개가 하나씩 찍혀요 (화면 가운데 아래)",
               get = function() return ns.db.castStyle == "paw" end,
               set = function() SetCastStyle("paw") end },
-            { t = "toggle", label = "예전 얇은 바", hint = "위쪽 HUD 아래에 붙은 얇은 바",
+            { t = "toggle", label = "예전 얇은 바", hint = "Leel HUD 아래에 붙은 얇은 바",
               get = function() return ns.db.castStyle == "hud" end,
               set = function() SetCastStyle("hud") end },
             { t = "toggle", label = "내 시전바만 보기", hint = "대상(적)의 시전바는 숨겨요",
@@ -384,7 +384,7 @@ local MODULES = {
         title = "주사위 창", sub = "입찰 · 차비 · 토끼 추천", icon = "hb_gift",
         onoff = { get = function() return ns.RollDB and ns.RollDB().on end,
                   set = function(v) ns.RollDB().on = v and true or false; if ns.RollApply then ns.RollApply() end end },
-        desc = "템이 나오면 토끼 단추에서 경매 카드가 튀어나와요. 토끼가 내 특성 기준으로 추천 단추를 빛내 줘요 (대신 누르지는 않아요).\n토끼 단추: 클릭 = 기록장 · 오른쪽 클릭 = 경매 창 접기 · 끌기 = 옮기기",
+        desc = "템이 나오면 토끼 단추에서 경매 카드가 튀어나와요. 토끼가 내 특성 기준으로 추천 단추를 빛내 줘요 (대신 누르지는 않아요).\n토끼 단추: 클릭 = 기록장 · 오른쪽 클릭 = 경매 창 접기 · 옮기기 · 크기 = 이동 모드",
         items = {
             { t = "toggle", label = "르엘 주사위 창", hint = "끄면 게임 기본 창",
               get = function() return ns.RollDB and ns.RollDB().on end,
@@ -1525,6 +1525,7 @@ end
 local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local NEWS = {
+    { "1.3.39", "이동 모드에서 HUD 조각마다 크기 · 가운데는 숫자와 효과만", "내 창 · 가운데 · 대상 창 따로 크기 · 대상의 대상 · 펫 창 크기 · 주사위 토끼 · 토끼 메뉴는 이동 모드에서 · 설정 나누기 빨라짐" },
     { "1.3.38", "Leel Quest 퀘 정리 · 파티 땐 어려운 퀘도 길에 · ESC 메뉴 르엘 UI", "골라서 한 번에 포기 · 파티 정예 · 던전 퀘 자동 · 편지 든 토끼 · 말풍선 왼쪽 직업 색 테" },
     { "1.3.37", "채팅: 보낸 말 다시 쓰기 · 파티원 말풍선 직업 색", "입력칸에서 ↑ · 최근 5개 · 말풍선 왼쪽 직업 색 테" },
     { "1.3.36", "블랙리스트 굴림 알림 · 파티와 같은 퀘", "화난 토끼 · 르엘 경고음 · 토끼 표정 · 회색 정예 · 퀘스티 추천 설정" },

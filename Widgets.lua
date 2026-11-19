@@ -102,10 +102,12 @@ function ns.CreateSkewBar(parent, w, h, opts)
     over:SetFrameLevel(sb:GetFrameLevel() + 2)
 
     if opts.ticks then
+        holder.ticks = {}
         for i = 1, opts.ticks do
             local t = Tex(over, "ARTWORK", 0, ns.WHITE, C.plate, 0.9)
             t:SetSize(1, h)
             t:SetPoint("LEFT", w * i / (opts.ticks + 1), 0)
+            holder.ticks[i] = t
         end
     end
 
