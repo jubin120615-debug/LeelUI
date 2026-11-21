@@ -129,8 +129,15 @@ local function Title()
     return name or "줍기"
 end
 
+-- 허브 > 줍기 창: 자리 (cursor = 마우스 근처 · center = 화면 가운데 조금 오른쪽) · 크기
 local function PlaceAtCursor()
+    local d = DB()
+    win:SetScale((tonumber(d.scale) or 100) / 100)
     win:ClearAllPoints()
+    if d.pos == "center" then
+        win:SetPoint("LEFT", UIParent, "CENTER", 80, 40)
+        return
+    end
     local x, y = GetCursorPosition()
     local s = win:GetEffectiveScale()
     win:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s - 30, y / s + 20)

@@ -352,6 +352,33 @@ do
     }
     local HOSTILE, NEUTRAL, FRIEND = { 1, 0.54, 0.54 }, { 1, 0.85, 0.42 }, { 0.62, 0.92, 0.66 }
 
+    -- 허브 > 툴팁 세부 설정 (기본값 = 지금 모습)
+    local TIP_DEF = { tot = false, hpBar = "both", guild = true, ilvl = false, scale = 100, rel = "chip",
+                      bunny = true, bgA = 97, quality = false, pos = "br", combat = "show", ids = false, mine = false }
+    local function TO(k)
+        local t = ns.db and ns.db.tipO
+        local v = t and t[k]
+        if v == nil then return TIP_DEF[k] end
+        return v
+    end
+    ns.TipOpt = TO
+    local function Apply()
+        for _, n in ipairs({ "GameTooltip", "ItemRefTooltip", "ShoppingTooltip1", "ShoppingTooltip2", "EmbeddedItemTooltip" }) do
+            local tt = _G[n]
+            if tt and tt.leelSkin then
+                if tt.leelFill then tt.leelFill:SetColor({ 0.114, 0.082, 0.078 }, (tonumber(TO("bgA")) or 97) / 100) end
+                if tt.leelBunny then tt.leelBunny:SetShown(TO("bunny") and true or false) end
+                if tt.leelStripe then tt.leelStripe:SetShown(TO("rel") == "stripe") end
+            end
+        end
+        pcall(GameTooltip.SetScale, GameTooltip, (tonumber(TO("scale")) or 100) / 100)
+    end
+    function ns.SetTipOpt(k, v)
+        ns.db.tipO = ns.db.tipO or {}
+        ns.db.tipO[k] = v
+        Apply()
+    end
+
     local function SetStripe(tt, c)
         if tt.leelStripe then tt.leelStripe:SetVertexColor(c[1], c[2], c[3], 1) end
         local sb = tt == GameTooltip and _G.GameTooltipStatusBar
@@ -366,7 +393,7 @@ do
         local bg = CreateFrame("Frame", nil, tt)
         bg:SetAllPoints()
         bg:SetFrameLevel(math.max(0, tt:GetFrameLevel() - 1))
-        ns.RoundPlate(bg, 14, { 0.114, 0.082, 0.078, 0.97 }, { 0.949, 0.702, 0.761, 0.38 })
+        tt.leelFill, tt.leelEdge = ns.RoundPlate(bg, 14, { 0.114, 0.082, 0.078, 0.97 }, { 0.949, 0.702, 0.761, 0.38 })
         local st = bg:CreateTexture(nil, "BORDER")
         st:SetTexture(ns.WHITE)
         st:SetPoint("TOPLEFT", bg, "TOPLEFT", 1, -10)
@@ -386,9 +413,13 @@ do
             d:SetTexture(ns.MEDIA .. "circle"); d:SetVertexColor(0.17, 0.13, 0.125, 1); d:SetAllPoints()
             local i = b:CreateTexture(nil, "ARTWORK")
             i:SetTexture(ns.MEDIA .. "bunny"); i:SetPoint("CENTER"); i:SetSize(20, 20)
+            tt.leelBunny = b
         end
         SetStripe(tt, C.acc)
-        tt:HookScript("OnHide", function(self) self.leelUnitCol = nil; SetStripe(self, C.acc) end)
+        tt:HookScript("OnHide", function(self)
+            self.leelUnitCol = nil; SetStripe(self, C.acc)
+            if self.leelEdge then self.leelEdge:SetColor({ 0.949, 0.702, 0.761 }, 0.38) end
+        end)
         -- 다른 곳에서 테두리를 다시 그리면 또 숨김
         if tt.NineSlice then
             hooksecurefunc(tt.NineSlice, "Show", function(ns9) ns9:SetAlpha(0) end)
@@ -465,7 +496,9 @@ do
                 if type(u) == "string" and not (issecretvalue and issecretvalue(u)) then unit = u end
             end)
             if not unit and UnitExists("mouseover") then unit = "mouseover" end
-            if not unit then self.leelR:SetText(""); return end
+            local hb = TO("hpBar")
+            self:SetAlpha(hb == "off" and 0 or 1)
+            if not unit or hb ~= "both" then self.leelR:SetText(""); return end
             local h, m
             pcall(function() h = UnitHealth(unit); m = UnitHealthMax(unit) end)
             if not pcall(ns.HealthPercentText, self.leelR, unit, h, m) then
@@ -505,6 +538,14 @@ do
         return col
     end
 
+    -- 커서 기준 자리 (허브: 오른쪽 아래 · 오른쪽 위 · 왼쪽 아래)
+    function ns.TipPlace(tt, x, y)
+        tt:ClearAllPoints()
+        local p = TO("pos")
+        if p == "tr" then tt:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", x + 20, y + 16)
+        elseif p == "bl" then tt:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", x - 18, y - 22)
+        else tt:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x + 20, y - 22) end
+    end
     -- 커서 오른쪽 아래에 붙어서 따라다니기
     local follow = CreateFrame("Frame")
     follow:Hide()
@@ -513,8 +554,7 @@ do
         if not tt:IsShown() or not tt.leelCursor then follow:Hide() return end
         local x, y = GetCursorPosition()
         local s = tt:GetEffectiveScale()
-        tt:ClearAllPoints()
-        tt:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s + 20, y / s - 22)
+        ns.TipPlace(tt, x / s, y / s)
     end)
 
     local ev = CreateFrame("Frame")
@@ -526,6 +566,7 @@ do
         end
         SkinStatusBar()
         GameTooltip:SetClampedToScreen(true)
+        Apply()
 
         hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tt, parent)
             if tt ~= GameTooltip then return end
@@ -535,8 +576,7 @@ do
             follow:Show()
             local x, y = GetCursorPosition()
             local s = tt:GetEffectiveScale()
-            tt:ClearAllPoints()
-            tt:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s + 20, y / s - 22)
+            ns.TipPlace(tt, x / s, y / s)
         end)
         GameTooltip:HookScript("OnHide", function(self) self.leelCursor = nil end)
 
@@ -595,6 +635,35 @@ do
                 local col = UnitColor(unit)
                 if col then tt.leelUnitCol = col; SetStripe(tt, col) end
                 if tt ~= GameTooltip then return end
+                -- 전투 중 (허브: 보이기 · Shift 누를 때만 · 숨기기)
+                local cm = TO("combat")
+                if cm ~= "show" and UnitAffectingCombat("player") and not (cm == "shift" and IsShiftKeyDown()) then
+                    tt:Hide(); return
+                end
+                -- 길드 줄 숨기기
+                if not TO("guild") then
+                    pcall(function()
+                        local g = UnitIsPlayer(unit) and GetGuildInfo(unit)
+                        if type(g) == "string" and g ~= "" then
+                            for i = 2, math.min(4, tt:NumLines()) do
+                                local l = _G["GameTooltipTextLeft" .. i]
+                                local t = l and l:GetText()
+                                if type(t) == "string" and t:find(g, 1, true) then l:SetText(""); break end
+                            end
+                        end
+                    end)
+                end
+                -- 대상의 대상 · 내 대상
+                if TO("tot") then
+                    pcall(function()
+                        if UnitExists(unit .. "target") then
+                            local nm = UnitName(unit .. "target")
+                            if UnitIsUnit(unit .. "target", "player") then tt:AddLine("대상: |cfff2b3c2나|r", 0.85, 0.78, 0.76)
+                            else tt:AddLine("대상: " .. nm, 0.85, 0.78, 0.76) end
+                        end
+                    end)
+                end
+                if TO("mine") and ns.Try(UnitIsUnit, unit, "target") then tt:AddLine("|cfff2b3c2● 내 대상|r") end
                 -- 관계 칩 (플레이어는 직업 색 이름이라 생략)
                 local kind
                 pcall(function()
@@ -622,11 +691,41 @@ do
                         if w == nil or (issecretvalue and issecretvalue(w)) then w = nil end
                         if w then chip:SetPoint("LEFT", line1, "LEFT", w + 6, 0) else chip:SetPoint("LEFT", line1, "RIGHT", -60, 0) end
                     end)
-                    chip:Show()
+                    chip:SetShown(TO("rel") == "chip")
                 else
                     chip:Hide()
                 end
             end)
+            -- 아이템: 품질 테두리 · 아이템 레벨 · 번호
+            if Enum.TooltipDataType.Item then
+                TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tt, data)
+                    if not tt or not tt.leelSkin then return end
+                    pcall(function()
+                        local _, link = tt:GetItem()
+                        if not link then return end
+                        local _, _, q, ilvl = GetItemInfo(link)
+                        if TO("quality") and q and q >= 2 and tt.leelEdge then
+                            local r, g, b = GetItemQualityColor(q)
+                            tt.leelEdge:SetColor({ r, g, b }, 0.95)
+                        end
+                        if TO("ilvl") and ilvl and ilvl > 1 then tt:AddLine("아이템 레벨 " .. ilvl, 1, 0.84, 0.54) end
+                        if TO("ids") then
+                            local id = tonumber(link:match("item:(%d+)"))
+                            if id then tt:AddLine("아이템 번호 " .. id, 0.55, 0.48, 0.47) end
+                        end
+                    end)
+                end)
+            end
+            if Enum.TooltipDataType.Spell then
+                TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, function(tt, data)
+                    if not TO("ids") or not tt or not tt.leelSkin then return end
+                    pcall(function()
+                        local id = data and data.id
+                        if not id and tt.GetSpell then id = select(2, tt:GetSpell()) end
+                        if id then tt:AddLine("주문 번호 " .. id, 0.55, 0.48, 0.47) end
+                    end)
+                end)
+            end
             -- 체력 바 자리: 툴팁 줄이 다 들어간 뒤(Questie 줄 포함) 맨 아래에 높이를 더해요
             hooksecurefunc(GameTooltip, "Show", function(self)
                 local sb = _G.GameTooltipStatusBar

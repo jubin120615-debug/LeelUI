@@ -16,6 +16,7 @@ local function DB()
     if d.rec == nil then d.rec = true end
     if d.board == nil then d.board = "mine" end   -- "off" | "mine" | "all"
     if d.greet == nil then d.greet = "all" end    -- 파티 인사 말풍선: "off" | "short" | "all"
+    if d.hideWon == nil then d.hideWon = true end -- 블리자드 "다음을 획득했습니다" 알림 숨기기 (르엘 획득 알림과 겹쳐서)
     return d
 end
 ns.RollDB = DB
@@ -418,19 +419,12 @@ local function PaintBadge()
 end
 ns.RollPaintBadge = PaintBadge
 
--- 토끼 단추 옮기기 = 이동 모드로 (옮기기 · 크기는 이동 모드에서만)
+-- 토끼 단추 옮기기: 끌어서 자유롭게 · 휠 = 크기 (이동 모드에서도 돼요)
 function ns.RollUnlock(on)
-    unlock = false
-    if not on then PaintBadge() return end
-    if InCombatLockdown() then P("전투가 끝나면 옮길 수 있어요.") return end
-    local hub = _G.LeelUI_Hub
-    if hub and hub:IsShown() then hub:Hide() end
-    if ns.SetMoveMode and not ns.moving then ns:SetMoveMode(true) end
-    C_Timer.After(0.15, function()
-        if badge and badge.mover and badge.mover:IsShown() and ns.MoveSelect then
-            ns.MoveSelect(badge.mover, "주사위 창 · 토끼 단추 크기", "주사위 토끼")
-        end
-    end)
+    Anchor()
+    unlock = on and true or false
+    PaintBadge()
+    if on then P("토끼 단추를 끌어서 옮겨요 (놓으면 끝). 휠 = 크기. 평소엔 파티 · 공격대에서만 보여요.") end
 end
 
 function ns.RollBadgePop()
@@ -554,9 +548,13 @@ local function MakeBadge()
         s2.icon:SetSize(s2.size, s2.size)
     end)
     iag:Play()
-    -- 옮기기 · 크기는 이동 모드에서만 (위에 덮이는 분홍 테두리로)
-    b:SetScript("OnDragStart", nil)
-    b:SetScript("OnDragStop", nil)
+    -- 끌기 = 옮기기 · 휠 = 크기 (예전처럼 자유롭게 · Shift + 휠은 언제나)
+    b:SetScript("OnDragStart", function(s) s:StartMoving() end)
+    b:SetScript("OnDragStop", function(s) s:StopMovingOrSizing(); ns.RollSavePos(); if unlock then ns.RollUnlock(false) end end)
+    b:EnableMouseWheel(true)
+    b:SetScript("OnMouseWheel", function(_, d)
+        if unlock or IsShiftKeyDown() then ns.RollSetScale((DB().scale or 100) + d * 5) end
+    end)
     b:SetScript("OnClick", function(_, btn)
         if ns.RollGreetHide then ns.RollGreetHide() end
         if btn == "RightButton" then
@@ -816,7 +814,10 @@ local function MakeCard(i)
     -- 단추 막대 테두리
     f.segbox = CreateFrame("Frame", nil, f); f.segbox:SetHeight(26)
     f.segrim = ns.RoundRect(f.segbox, 7, TK_RIM, "BACKGROUND", 0, 0)
-    -- 옮기기는 이동 모드에서만 (주사위 토끼 테두리를 끌어요)
+    -- Shift + 끌기 = 위치 옮기기
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function() if IsShiftKeyDown() and badge then badge:StartMoving() end end)
+    f:SetScript("OnDragStop", function() if badge then badge:StopMovingOrSizing(); ns.RollSavePos() end end)
     -- 아이콘 (둘레 = 등급 색)
     local ic = CreateFrame("Button", nil, f)
     ic:SetSize(28, 28); ic:SetPoint("TOPLEFT", PADX, -6)
@@ -1880,9 +1881,42 @@ hideAfter:SetScript("OnEvent", function()
     end)
 end)
 
+-- 블리자드 주사위 획득 알림 ("다음을 획득했습니다 · 주사위 63"): 르엘 "획득!" 알림과 두 번 떠서 숨겨요
+local function WonFrames()
+    local out = {}
+    local sys = _G.LootWonAlertSystem
+    local pool = sys and (sys.alertFramePool or sys.pool)
+    if pool and pool.EnumerateActive then for f in pool:EnumerateActive() do out[#out + 1] = f end end
+    for i = 1, 8 do local f = _G["LootWonAlertFrame" .. i]; if f then out[#out + 1] = f end end
+    return out
+end
+local function HideWonNow()
+    for _, f in ipairs(WonFrames()) do
+        if f:IsShown() and (f.rollType or f.RollTypeIcon or f.RollValue) then
+            pcall(f.SetAlpha, f, 0); pcall(f.Hide, f)
+        end
+    end
+end
+local function BlizzWon(off)
+    local af = _G.AlertFrame
+    if af and af.IsEventRegistered then
+        if off and af:IsEventRegistered("LOOT_ITEM_ROLL_WON") then af:UnregisterEvent("LOOT_ITEM_ROLL_WON"); af.leelWonOff = true
+        elseif not off and af.leelWonOff then af:RegisterEvent("LOOT_ITEM_ROLL_WON"); af.leelWonOff = nil end
+    end
+    local sys = _G.LootWonAlertSystem
+    if sys and not sys.leelHooked and hooksecurefunc and sys.AddAlert then
+        sys.leelHooked = true
+        hooksecurefunc(sys, "AddAlert", function(_, _, _, rollType, roll)
+            if DB().on and DB().hideWon ~= false and (rollType or roll) then C_Timer.After(0, HideWonNow) end
+        end)
+    end
+end
+ns.RollBlizzWon = function() BlizzWon(DB().on and DB().hideWon ~= false) end
+
 function ns.RollApply()
     local on = DB().on
     Blizz(on)
+    BlizzWon(on and DB().hideWon ~= false)
     if not on then
         for _, f in ipairs({ unpack(active) }) do Free(f) end
         wipe(entries)
@@ -1907,6 +1941,8 @@ pcall(ev.RegisterEvent, ev, "CANCEL_ALL_LOOT_ROLLS")
 ev:SetScript("OnEvent", function(_, event, a1, a2)
     if event == "PLAYER_LOGIN" then
         Blizz(DB().on)
+        BlizzWon(DB().on and DB().hideWon ~= false)
+        C_Timer.After(3, function() BlizzWon(DB().on and DB().hideWon ~= false) end)   -- AlertFrame이 늦게 준비되는 판
         pcall(RollDbg, "fmt")
         if DB().on then Anchor(); PaintBadge() end
         return

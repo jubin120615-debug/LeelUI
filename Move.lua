@@ -629,7 +629,9 @@ local function SizeBuild()
         local d = sizeSel and SIZE_DEFAULT[sizeSel.label]
         if d then SizeSet(d()) end
     end)
-    b.close = Btn("✕", function() ns.MoveSelect(nil) end, 30)
+    b.close = Btn("", function() ns.MoveSelect(nil) end, 30)   -- ✕ 글자는 게임 글꼴에 없어서 그림으로
+    local xi = b.close:CreateTexture(nil, "OVERLAY"); xi:SetTexture(ns.MEDIA .. "hb_x"); xi:SetSize(12, 12); xi:SetPoint("CENTER")
+    xi:SetVertexColor(C.tx[1], C.tx[2], C.tx[3])
     b:SetScript("OnUpdate", function(self)
         local w = 14 + self.title:GetStringWidth() + 8 + self.minus:GetWidth() + 6 + 52 + 8 + self.plus:GetWidth()
             + (self.reset:IsShown() and (8 + self.reset:GetWidth()) or 0) + 8 + self.close:GetWidth() + 14

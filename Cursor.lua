@@ -19,6 +19,30 @@ fx:EnableMouse(false)
 
 local function On(k) return not (ns.db and ns.db[k] == false) end
 
+-- 허브 > 마우스 세부 설정 (기본값 = 지금 모습)
+local CFX_DEF = { size = 100, col = "pink", shape = "heart", trail = "mid", combat = "on", find = false }
+local function CO(k)
+    local t = ns.db and ns.db.cfxO
+    local v = t and t[k]
+    if v == nil then return CFX_DEF[k] end
+    return v
+end
+ns.CfxOpt = CO
+function ns.SetCfxOpt(k, v) ns.db.cfxO = ns.db.cfxO or {}; ns.db.cfxO[k] = v end
+-- 색: 분홍(기본 · 오른클릭은 크림) · 직업 색 · 흰색
+local function Col(base)
+    local m = CO("col")
+    if m == "white" then return { 1, 0.98, 0.97 } end
+    if m == "class" then
+        local _, cls = UnitClass("player")
+        local c = cls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls]
+        if c then return { c.r, c.g, c.b } end
+    end
+    return base
+end
+local SHAPE = { heart = "fx_heart", star = "fx_star", dot = "circle" }
+local TRAIL_K = { short = 0.55, mid = 1, long = 1.7 }
+
 -- 커서 위치 (UIParent 좌표)
 local function CursorXY()
     local x, y = GetCursorPosition()
@@ -29,12 +53,17 @@ end
 ----------------------------------------------------------------------
 -- 조각 (그림 하나가 잠깐 살다 사라짐)
 ----------------------------------------------------------------------
+-- 조각 묶음: 화면(UIParent)용 하나 + 허브 미리 보기용 하나 (같은 코드)
+local function Particles(host, anchor)
 local pool, live = {}, {}
 local function Spawn(tex, x, y, o)
     local p = table.remove(pool)
     if not p then
-        p = { t = fx:CreateTexture(nil, "OVERLAY") }
+        p = { t = host:CreateTexture(nil, "OVERLAY") }
     end
+    local k = (tonumber(CO("size")) or 100) / 100
+    if o.s0 then o.s0 = o.s0 * k end
+    if o.s1 then o.s1 = o.s1 * k end
     local t = p.t
     t:SetTexture(M .. tex)
     t:SetBlendMode(o.add and "ADD" or "BLEND")
@@ -68,27 +97,39 @@ local function Step(dt)
             local s = p.s0 + (p.s1 - p.s0) * e
             p.t:SetSize(s, s)
             p.t:ClearAllPoints()
-            p.t:SetPoint("CENTER", UIParent, "BOTTOMLEFT", p.x, p.y)
+            p.t:SetPoint("CENTER", anchor, "BOTTOMLEFT", p.x, p.y)
             p.t:SetAlpha(p.a0 + (p.a1 - p.a0) * k)
             if p.spin then p.t:SetRotation(p.spin * p.age) end
         end
     end
 end
+return Spawn, Step, live
+end
+local Spawn, Step, live = Particles(fx, UIParent)
 
 ----------------------------------------------------------------------
 -- ① 클릭 퐁: 짧게 눌렀다 뗐을 때만 (카메라 돌리기 끌기는 빼요)
 ----------------------------------------------------------------------
-local function Pop(x, y, right)
-    local c = right and CREAM or PINK
-    Spawn("ring", x, y, { c = c, s0 = 6, s1 = 46, a0 = 1, a1 = 0, life = 0.38 })
-    Spawn("circle", x, y, { c = c, s0 = 10, s1 = 2, a0 = 0.8, a1 = 0, life = 0.18, add = true })
+local function Pop(x, y, right, sp)
+    sp = sp or Spawn
+    local c = Col(right and CREAM or PINK)
+    sp("ring", x, y, { c = c, s0 = 6, s1 = 46, a0 = 1, a1 = 0, life = 0.38 })
+    sp("circle", x, y, { c = c, s0 = 10, s1 = 2, a0 = 0.8, a1 = 0, life = 0.18, add = true })
     local n = right and 2 or 3
+    local tex = SHAPE[CO("shape")] or "fx_heart"
     for i = 1, n do
         local ang = math.rad(60 + (i - 1) * (60 / math.max(n - 1, 1)) + math.random(-12, 12))
-        local sp = math.random(70, 110)
-        Spawn("fx_heart", x, y, { c = c, s0 = 9, s1 = 13, a0 = 1, a1 = 0, life = 0.55,
-            vx = math.cos(ang) * sp, vy = math.sin(ang) * sp, g = 160 })
+        local spd = math.random(70, 110)
+        sp(tex, x, y, { c = c, s0 = 9, s1 = 13, a0 = 1, a1 = 0, life = 0.55,
+            vx = math.cos(ang) * spd, vy = math.sin(ang) * spd, g = 160, spin = (tex == "fx_star") and 3 or nil })
     end
+end
+-- 커서 찾기: 커서 둘레로 큰 링이 조여들어요
+local function Find(x, y, sp)
+    sp = sp or Spawn
+    local c = Col(PINK)
+    sp("ring", x, y, { c = c, s0 = 150, s1 = 18, a0 = 0, a1 = 1, life = 0.45 })
+    sp("ring", x, y, { c = c, s0 = 110, s1 = 14, a0 = 0, a1 = 0.9, life = 0.55 })
 end
 
 local press = {}
@@ -110,13 +151,17 @@ end
 ----------------------------------------------------------------------
 -- ② 반짝 꼬리: 움직일 때만
 ----------------------------------------------------------------------
+local function MakeTrail(sp)
 local lastX, lastY, trailAcc, trailN = nil, nil, 0, 0
-local function Trail(x, y, dt)
+return function(x, y, dt)
+    if x == nil then lastX = nil return end
     if not lastX then lastX, lastY = x, y; return end
     local dx, dy = x - lastX, y - lastY
     local dist = math.sqrt(dx * dx + dy * dy)
     lastX, lastY = x, y
     if dt <= 0 or dist / dt < 120 then return end
+    local lk = TRAIL_K[CO("trail")] or 1
+    local dc = Col(DOT)
     trailAcc = trailAcc + dist
     while trailAcc >= 9 do
         trailAcc = trailAcc - 9
@@ -124,13 +169,15 @@ local function Trail(x, y, dt)
         local f = trailAcc / math.max(dist, 1)
         local px, py = x - dx * f, y - dy * f
         if trailN % 7 == 0 then
-            Spawn("fx_star", px + math.random(-6, 6), py + math.random(-6, 6),
-                { c = { 1, 0.95, 0.80 }, s0 = 12, s1 = 4, a0 = 0.95, a1 = 0, life = 0.45, add = true, spin = 3 })
+            sp("fx_star", px + math.random(-6, 6), py + math.random(-6, 6),
+                { c = { 1, 0.95, 0.80 }, s0 = 12, s1 = 4, a0 = 0.95, a1 = 0, life = 0.45 * lk, add = true, spin = 3 })
         else
-            Spawn("circle", px, py, { c = DOT, s0 = 7, s1 = 1.5, a0 = 0.75, a1 = 0, life = 0.35 })
+            sp("circle", px, py, { c = dc, s0 = 7, s1 = 1.5, a0 = 0.75, a1 = 0, life = 0.35 * lk })
         end
     end
 end
+end
+local Trail = MakeTrail(Spawn)
 
 ----------------------------------------------------------------------
 -- ③ 가리키는 것에 따라 반응 (게임 화면 위에서만)
@@ -217,6 +264,7 @@ fx:SetScript("OnUpdate", function(_, dt)
         db.cursorFx = nil
     end
     local click, rea, trail = On("cfxClick"), On("cfxReact"), On("cfxTrail")
+    if CO("combat") == "off" and InCombatLockdown() then click, rea, trail = false, false, false end
     local hidden = IsMouselooking and IsMouselooking()
     local x, y = CursorXY()
     if not hidden then
@@ -227,15 +275,84 @@ fx:SetScript("OnUpdate", function(_, dt)
         else
             press.LeftButton, press.RightButton = nil, nil
         end
-        if trail then Trail(x, y, dt) else lastX = nil end
+        if trail then Trail(x, y, dt) else Trail(nil) end
         if rea then React(x, y, dt) else react:Hide() end
     else
         press.LeftButton, press.RightButton = nil, nil
-        lastX = nil; react:Hide()
+        Trail(nil); react:Hide()
     end
     if #live > 0 then Step(dt) end
 end)
 
 function ns.CursorFxRefresh()
     if not On("cfxReact") then react:Hide() end
+end
+
+----------------------------------------------------------------------
+-- 커서 찾기 (허브): Ctrl 두 번 · 전투 시작할 때 커서 둘레로 링이 조여들어요
+----------------------------------------------------------------------
+do
+    local fe = CreateFrame("Frame")
+    fe:RegisterEvent("MODIFIER_STATE_CHANGED")
+    fe:RegisterEvent("PLAYER_REGEN_DISABLED")
+    local lastCtrl = 0
+    fe:SetScript("OnEvent", function(_, ev, key, down)
+        if not CO("find") then return end
+        if ev == "PLAYER_REGEN_DISABLED" then local x, y = CursorXY(); Find(x, y) return end
+        if (key == "LCTRL" or key == "RCTRL") and down == 1 then
+            local now = GetTime()
+            if now - lastCtrl < 0.4 then local x, y = CursorXY(); Find(x, y); lastCtrl = 0 else lastCtrl = now end
+        end
+    end)
+end
+
+----------------------------------------------------------------------
+-- 허브 미리 보기: 같은 효과 코드로 작은 칸 안에서 커서가 돌아다녀요
+--   (꼬리 → 클릭 퐁 → 적 위에서 빨간 점선 → 커서 찾기 링 · 3.6초마다 한 바퀴)
+----------------------------------------------------------------------
+function ns.CursorDemo(parent)
+    local d = CreateFrame("Frame", nil, parent)
+    d:SetSize(520, 140)
+    d:SetClipsChildren(true)
+    local sp, step = Particles(d, d)
+    local tr = MakeTrail(sp)
+    local mob = d:CreateTexture(nil, "ARTWORK"); mob:SetTexture(M .. "circle"); mob:SetVertexColor(0.16, 0.12, 0.11, 1)
+    mob:SetSize(56, 44); mob:SetPoint("CENTER", d, "BOTTOMLEFT", 420, 62)
+    local mobLab = d:CreateFontString(nil, "OVERLAY"); mobLab:SetFont(ns.FONT or STANDARD_TEXT_FONT, 11, ""); mobLab:SetText("적")
+    mobLab:SetTextColor(1, 0.6, 0.6); mobLab:SetPoint("BOTTOM", mob, "TOP", 0, 4)
+    local cur = d:CreateTexture(nil, "OVERLAY", nil, 7); cur:SetTexture("Interface\\CURSOR\\Point"); cur:SetSize(24, 24)
+    local rs = d:CreateTexture(nil, "OVERLAY"); rs:SetTexture(M .. "fx_dash"); rs:SetSize(40, 40); rs:Hide()
+    d.cur, d.mob, d.react = cur, mob, rs
+    local t, clicked, found = 0, false, false
+    d:SetScript("OnUpdate", function(self, dt)
+        t = (t + dt) % 3.6
+        local x, y
+        if t < 1.6 then
+            local k = t / 1.6
+            x = 40 + 300 * k; y = 70 + 34 * math.sin(k * math.pi * 2)
+        elseif t < 2.6 then
+            local k = (t - 1.6) / 1.0
+            x = 340 + 80 * k; y = 70 - 8 * k
+        else
+            x, y = 420, 62
+        end
+        cur:ClearAllPoints(); cur:SetPoint("TOPLEFT", self, "BOTTOMLEFT", x - 2, y + 2)
+        if On("cfxTrail") then tr(x, y, dt) else tr(nil) end
+        if t > 1.62 and t < 1.7 and not clicked then
+            clicked = true
+            if On("cfxClick") then Pop(x, y, false, sp) end
+        elseif t < 1.6 then clicked = false end
+        local over = t >= 2.6
+        rs:SetShown(over and On("cfxReact"))
+        if over then
+            rs:ClearAllPoints(); rs:SetPoint("CENTER", self, "BOTTOMLEFT", x + 11, y - 12)
+            local c = RED; rs:SetVertexColor(c[1], c[2], c[3], 0.9); rs:SetRotation(-GetTime() * 1.2)
+        end
+        if t > 3.0 and not found then
+            found = true
+            if CO("find") then Find(x, y, sp) end
+        elseif t < 3.0 then found = false end
+        step(dt)
+    end)
+    return d
 end

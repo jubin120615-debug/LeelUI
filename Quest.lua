@@ -9,7 +9,9 @@ local GetItemInfo = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo  -- 새 �
 local function DB()
     ns.db.quest = ns.db.quest or {}
     local d = ns.db.quest
-    local def = { on = true, accept = true, complete = true, gossip = false, best = true, skipTrivial = true }
+    -- toast/toastXp = 받음 · 완료 알림 · pauseKey = 쉬는 키 · shared = 파티원이 나눈 퀘 · skipGroup = 정예 · 파티 퀘는 직접 (기본은 지금 그대로)
+    local def = { on = true, accept = true, complete = true, gossip = false, best = true, skipTrivial = true,
+                  toast = true, toastXp = true, pauseKey = "shift", shared = true, skipGroup = false }
     for k, v in pairs(def) do if d[k] == nil then d[k] = v end end
     return d
 end
@@ -77,7 +79,11 @@ end
 ----------------------------------------------------------------------
 local function Paused()
     local d = DB()
-    return not d.on or IsShiftKeyDown()
+    if not d.on then return true end
+    local k = d.pauseKey or "shift"
+    if k == "ctrl" then return IsControlKeyDown() and true or false end
+    if k == "alt" then return IsAltKeyDown() and true or false end
+    return IsShiftKeyDown() and true or false
 end
 
 local G = C_GossipInfo or {}
@@ -136,6 +142,11 @@ end
 local lastDetail, lastDetailAt = nil, 0
 local function OnDetail()
     if Paused() or not DB().accept then return end
+    local d = DB()
+    -- 파티원이 나눈 퀘 (퀘 준 쪽이 플레이어)
+    if d.shared == false and UnitIsPlayer and UnitExists("questnpc") and UnitIsPlayer("questnpc") then return end
+    -- 정예 · 파티 퀘 (권장 인원 2명 이상)
+    if d.skipGroup and GetSuggestedGroupNum and (GetSuggestedGroupNum() or 0) > 1 then return end
     local title = GetTitleText and GetTitleText()
     -- 같은 퀘 창이 연달아 다시 열리면 (다른 자동 수락 애드온, 대화창 되돌아옴) 한 번만 받기
     if title and title == lastDetail and GetTime() - lastDetailAt < 3 then return end
@@ -157,7 +168,7 @@ local function OnAccepted(a1, a2)
     toasted[qid] = GetTime()
     local title = C_QuestLog and C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(qid)
     if not title or title == "" then title = lastDetail end
-    if title then ns.PillToast("퀘스트 받음  |cff9fe3a8" .. title .. "|r", "hb_quest") end
+    if title and DB().toast ~= false then ns.PillToast("퀘스트 받음  |cff9fe3a8" .. title .. "|r", "hb_quest") end
 end
 
 local function OnProgress()
@@ -250,11 +261,11 @@ local function OnComplete()
 end
 
 local function OnTurnedIn(questID, xp)
-    if not DB().on then return end
+    if not DB().on or DB().toast == false then return end
     local title = (C_QuestLog and C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(questID)) or ""
     local msg = "퀘스트 완료"
     if title ~= "" then msg = msg .. "  " .. title end
-    if xp and xp > 0 then msg = msg .. "  |cff9fe3a8+" .. (BreakUpLargeNumbers and BreakUpLargeNumbers(xp) or xp) .. " 경험치|r" end
+    if xp and xp > 0 and DB().toastXp ~= false then msg = msg .. "  |cff9fe3a8+" .. (BreakUpLargeNumbers and BreakUpLargeNumbers(xp) or xp) .. " 경험치|r" end
     ns.PillToast(msg, "hb_quest")
 end
 

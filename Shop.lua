@@ -15,6 +15,7 @@ local function DB()
     if d.repair == nil then d.repair = true end
     if d.sell == nil then d.sell = true end
     if d.report == nil then d.report = true end
+    if d.pauseKey == nil then d.pauseKey = "shift" end   -- 허브 > 상점 토끼 > 쉬는 키
     d.keep = d.keep or {}
     return d
 end
@@ -244,8 +245,10 @@ end
 local function OnMerchant()
     local d = DB()
     if not d.on or not open then return end
-    if IsShiftKeyDown() then
-        Print("Shift: 이번엔 상점 토끼가 쉬어요.")
+    local pk = d.pauseKey or "shift"
+    local held = (pk == "ctrl" and IsControlKeyDown()) or (pk == "alt" and IsAltKeyDown()) or (pk == "shift" and IsShiftKeyDown())
+    if held then
+        Print(((pk == "ctrl" and "Ctrl") or (pk == "alt" and "Alt") or "Shift") .. ": 이번엔 상점 토끼가 쉬어요.")
         return
     end
     sold, soldN, pass = 0, 0, 0

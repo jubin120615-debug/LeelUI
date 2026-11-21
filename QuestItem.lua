@@ -11,6 +11,9 @@ local function DB()
     ns.db.qitem = ns.db.qitem or {}
     local d = ns.db.qitem
     if d.on == nil then d.on = true end
+    -- 허브 세부 설정 (기본 = 지금 모습)
+    local def = { plate = true, btn = true, side = "right", bsz = 38, psz = 26, glow = true, learn = true, count = true }
+    for k, v in pairs(def) do if d[k] == nil then d[k] = v end end
     d.mobs = d.mobs or {}      -- itemID → { [몹 이름] = true }
     d.no = d.no or {}          -- itemID → { [몹 이름] = true }  (그만 보기)
     return d
@@ -199,6 +202,7 @@ local function Disc(f, layer, sub, size, color, a)
     t:SetVertexColor(color[1], color[2], color[3], a or 1)
     return t
 end
+local glows = {}
 local function RoundIcon(f, size)
     f.glow = Disc(f, "BACKGROUND", -1, size + 14, C.acc, 0.35)
     Disc(f, "BACKGROUND", 0, size + 2, { 0, 0, 0 }, 0.75)
@@ -215,6 +219,7 @@ local function RoundIcon(f, size)
     local an = ag:CreateAnimation("Alpha"); an:SetFromAlpha(0.15); an:SetToAlpha(0.55); an:SetDuration(0.8)
     an:SetTarget(f.glow)
     ag:Play()
+    glows[#glows + 1] = f.glow
 end
 
 local function MakeButton()
@@ -261,16 +266,31 @@ local function MakeButton()
         end
     end)
     -- 적 대상이 있을 때만 (전투 중에도 게임이 알아서 보였다 숨겼다)
-    RegisterStateDriver(btn, "visibility", "[@target,harm,nodead] show; hide")
+    RegisterStateDriver(btn, "visibility", DB().btn ~= false and "[@target,harm,nodead] show; hide" or "hide")
     btn:SetAlpha(0)
 end
 
 local function PlaceButton()
     if InCombatLockdown() then return end
+    local d = DB()
+    btn:SetScale((tonumber(d.bsz) or 38) / 38)
+    if plateIcon then plateIcon:SetScale((tonumber(d.psz) or 26) / 26) end
+    for _, g in ipairs(glows) do g:SetShown(d.glow ~= false) end
+    RegisterStateDriver(btn, "visibility", d.btn ~= false and "[@target,harm,nodead] show; hide" or "hide")
     btn:ClearAllPoints()
     local t = ns.hudFrames and ns.hudFrames.target
-    if t then btn:SetPoint("LEFT", t, "RIGHT", 10, 2)
+    if t then
+        local k = btn:GetScale()
+        if d.side == "left" then btn:SetPoint("RIGHT", t, "LEFT", -10 / k, 2 / k)
+        elseif d.side == "below" then btn:SetPoint("TOP", t, "BOTTOM", 0, -10 / k)
+        else btn:SetPoint("LEFT", t, "RIGHT", 10 / k, 2 / k) end
     else btn:SetPoint("CENTER", UIParent, "CENTER", 220, -160) end
+end
+-- 허브에서 바꿀 때
+function ns.QItemApply()
+    if not btn then return end
+    if InCombatLockdown() then ns.Print("전투가 끝나면 퀘템 단추가 바뀌어요.") end
+    PlaceButton(); ns.QuestItemRefresh()
 end
 
 local function MakePlateIcon()
@@ -298,7 +318,7 @@ function ns.QuestItemRefresh()
     if it then
         btn.icon:SetTexture(it.icon)
         local n = Count(it.id)
-        btn.sayText:SetText(n > 1 and ("쓰기 " .. n) or "쓰기")
+        btn.sayText:SetText((n > 1 and d.count ~= false) and ("쓰기 " .. n) or "쓰기")
         btn.say:SetWidth(btn.sayText:GetStringWidth() + 12)
         btn:SetAlpha(1)
         if not InCombatLockdown() then btn:SetAttribute("item", "item:" .. it.id) end
@@ -309,7 +329,7 @@ function ns.QuestItemRefresh()
         -- 이름표 위
         local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit("target")
         local f = plate and (plate.leel or plate)
-        if f and plate:IsShown() then
+        if f and plate:IsShown() and d.plate ~= false then
             plateIcon.icon:SetTexture(it.icon)
             plateIcon:SetParent(f)
             plateIcon:ClearAllPoints()
@@ -330,6 +350,7 @@ end
 ----------------------------------------------------------------------
 local function LearnUse(spellID)
     if not spellID then return end
+    if DB().learn == false then return end
     local name = UnitExists("target") and UnitCanAttack("player", "target") and UnitName("target")
     if type(name) ~= "string" then return end
     for _, it in ipairs(items) do

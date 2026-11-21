@@ -28,6 +28,7 @@ local function CreateSide(hud, unit, mirrored, preview)
     -- preview = 허브 미리 보기용 모형 (보통 프레임 · 클릭 없음, 생김새는 진짜와 같아요)
     local f = preview and CreateFrame("Frame", nil, hud)
         or CreateFrame("Button", "LeelUI_" .. unit, hud, "SecureUnitButtonTemplate")
+    f.isPv = preview and true or false
     f:SetSize(SIDE_W, 140)
     f:SetPoint(A, hud, A, 0, 0)
     if not preview then
@@ -258,6 +259,10 @@ local function AddTargetExtras(f)
     -- 내 디버프: 블리자드 애드온용 오라 컨테이너(CustomAuraContainer)
     -- 숨겨진 오라도 게임이 직접 채워 줌. 우리는 모양(분홍 진행 링)만 정함
     ns.CreateTargetDebuffs(f)
+    -- 위협 빛 · 디버프 줄 보이기/크기 · 연계 점수 칸 (허브 > 대상 창)
+    if ns.HudTargetExtras then ns.HudTargetExtras(f) end
+    if ns.HudTargetCombo then ns.HudTargetCombo(f) end
+    if ns.HudTargetAuras then ns.HudTargetAuras(f) end
 end
 
 ----------------------------------------------------------------------
@@ -268,8 +273,20 @@ local function SameGUID(a, b)
     return ok and r or false
 end
 
+-- 대상 창 설정 (허브 > Leel HUD > 대상 창): ns.db.tgt
+--   rankOn 등급 테두리 · nameCol "react"|"white" · lvCol "diff"|"white" · threatOn 위협 빛
+--   deadKeep 죽어도 회색 안 함 · debOff · buffOff · debScale · castIntOnly
+local TGT_DEF = { nameCol = "white", lvCol = "diff", debScale = 100 }   -- 처음 값 = 예전 모습 그대로
+function ns.TgtOpt(k)
+    local t = ns.db and ns.db.tgt
+    local v = t and t[k]
+    if v == nil then v = TGT_DEF[k] end
+    return v
+end
+
 local function UpdateDead(f)
     local dead = Try(UnitIsDeadOrGhost, f.unit)
+    if f.unit == "target" and ns.TgtOpt("deadKeep") then dead = false end
     f.hpValue:SetShown(not dead)
     f.hpPct:SetShown(not dead)
     f.hp:SetAlpha(dead and 0.5 or 1)
@@ -426,15 +443,7 @@ function ns.ApplyHpTextSize(f)
         local T = (ns.db and ns.db.hudText and ns.db.hudText[(u == "target") and "target" or "player"]) or {}
         f.portrait:SetAlpha(T.porOff and 0 or 1)
         f.portrait:SetScale(math.max(0.4, (tonumber(T.porScale) or 100) / 100))
-        local edge = T.porEdge or "pink"
-        if edge == "off" then
-            f.portrait.cut:SetAlpha(0)
-        else
-            f.portrait.cut:SetAlpha(1)
-            local col = C.acc
-            if edge == "class" and ns.HudClassColorOf then col = ns.HudClassColorOf(u == "target" and "target" or "player") or C.acc end
-            f.portrait.cut:SetVertexColor(col[1], col[2], col[3], 1)
-        end
+        if ns.HudPorEdge then ns.HudPorEdge(f) end
     end
     -- 마나 · 기력 바: 두께 · 길이 · 눈금 · 보이기
     do
@@ -535,7 +544,15 @@ local function UpdateClass(f)
         f.name:SetTextColor(col[1], col[2], col[3])
     else
         f.cls:Hide()
-        f.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+        local col = C.tx
+        -- 대상 이름 색: 적 빨강 · 중립 노랑 · 아군 초록 (플레이어는 위에서 직업 색)
+        if f.unit == "target" and ns.TgtOpt("nameCol") == "react" then
+            local ok, r = pcall(UnitReaction, "player", "target")
+            if ok and type(r) == "number" and not ns.IsSecret(r) then
+                if r <= 3 then col = { 1, 0.45, 0.45 } elseif r == 4 then col = { 1, 0.86, 0.4 } else col = { 0.55, 0.9, 0.55 } end
+            end
+        end
+        f.name:SetTextColor(col[1], col[2], col[3])
     end
     PlaceHpValue(f, shown)
 end
@@ -555,7 +572,7 @@ local function UpdateInfo(f)
     else
         f.lv:SetText(lvl or "")
         local getColor = GetCreatureDifficultyColor or GetQuestDifficultyColor
-        if u ~= "player" and getColor and lvl then
+        if u ~= "player" and getColor and lvl and not (u == "target" and ns.TgtOpt("lvCol") == "white") then
             local d = getColor(lvl); c = { d.r, d.g, d.b }
         end
     end
@@ -564,8 +581,193 @@ local function UpdateInfo(f)
     -- 초상화는 늘 얼굴 (직업 아이콘은 체력 바 앞에 따로 있어요)
     f.portrait.tex:SetTexCoord(0, 1, 0, 1)
     SetPortraitTexture(f.portrait.tex, u)
+    if ns.HudPorEdge then ns.HudPorEdge(f) end
 end
 ns.HudRefreshInfo = UpdateInfo
+
+-- 초상화 테 색: 분홍 · 직업 색 · 끔 (+ 대상 등급 테두리: 정예 · 보스 = 금테 · 희귀 = 은테)
+--   대상이 바뀔 때마다 다시 칠해요 (직업 색 · 등급이 대상마다 달라서)
+function ns.HudPorEdge(f)
+    if not (f and f.portrait and f.portrait.cut) then return end
+    local side = (f.unit == "target") and "target" or "player"
+    local T = (ns.db and ns.db.hudText and ns.db.hudText[side]) or {}
+    local edge = T.porEdge or "pink"
+    local col = C.acc
+    if edge == "class" and ns.HudClassColorOf then
+        -- 미리 보기 모형(르엘)은 내 직업 색으로
+        col = ns.HudClassColorOf((f.isPv and "player") or side) or C.acc
+    end
+    if side == "target" and not f.isPv and ns.TgtOpt("rankOn") and UnitExists("target") then
+        local ok, c = pcall(UnitClassification, "target")
+        if ok and type(c) == "string" and not ns.IsSecret(c) then
+            if c == "elite" or c == "worldboss" or c == "rareelite" then col, edge = { 1, 0.83, 0.42 }, "rank"
+            elseif c == "rare" then col, edge = { 0.82, 0.86, 0.92 }, "rank" end
+        end
+    end
+    if edge == "off" then f.portrait.cut:SetAlpha(0) return end
+    f.portrait.cut:SetAlpha(1)
+    f.portrait.cut:SetVertexColor(col[1], col[2], col[3], 1)
+end
+ns.HudRankEdge = ns.HudPorEdge
+
+-- 대상 창 위협 빛 (켰을 때만)
+function ns.HudTargetExtras(f)
+    if not f or f.thrGlow then return end
+    local g = f:CreateTexture(nil, "BACKGROUND", nil, -2)
+    g:SetTexture(ns.MEDIA .. "soft_glow"); g:SetBlendMode("ADD")
+    g:SetPoint("TOPLEFT", f.portrait, "TOPLEFT", -22, 22); g:SetPoint("BOTTOMRIGHT", f.portrait, "BOTTOMRIGHT", 22, -22)
+    g:SetVertexColor(1, 0.23, 0.29, 0.9); g:Hide()
+    f.thrGlow = g
+    local function Threat()
+        local on = false
+        if ns.TgtOpt("threatOn") and UnitExists("target") then
+            local ok, st = pcall(UnitThreatSituation, "player", "target")
+            if ok and type(st) == "number" and not ns.IsSecret(st) then on = st >= 2 end
+        end
+        g:SetShown(on)
+    end
+    f.tgtExtras = function() Threat() end
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_TARGET_CHANGED"); ev:RegisterEvent("UNIT_THREAT_SITUATION_UPDATE")
+    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ev:SetScript("OnEvent", function() Threat() end)
+end
+
+-- 연계 점수 칸 (도적 · 표범 드루): 체력 바 바로 밑 기울어진 칸 5개 · 대상 쪽부터 차요
+--   comboOff 끔 · comboH 두께 · comboNum 숫자 · comboRedOff 다 차도 분홍 · comboShow0 0점이어도 보이기
+function ns.MakeComboBar(f)
+    local h = math.max(4, math.min(14, tonumber(ns.TgtOpt("comboH")) or 7))
+    local cb = ns.CreateSkewBar(f, 200, h, { mirrored = true, ticks = 4, inset = 1, noShadow = true })
+    cb:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -16, -6)
+    for _, t in ipairs(cb.ticks or {}) do t:SetWidth(3); t:SetColorTexture(0.05, 0.03, 0.03, 1) end
+    -- 빈 칸도 또렷하게: 옅은 분홍 테
+    if cb.border then cb.border:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.55) end
+    cb.bar:SetMinMaxValues(0, 5); cb.bar:SetValue(0)
+    cb.num = ns.Num(cb.over, 13, C.accHi, false); cb.num:SetPoint("RIGHT", cb, "LEFT", -6, 0)
+    local glow = cb:CreateTexture(nil, "BACKGROUND", nil, -3)
+    glow:SetTexture(ns.MEDIA .. "soft_glow"); glow:SetBlendMode("ADD")
+    glow:SetPoint("TOPLEFT", -14, 10); glow:SetPoint("BOTTOMRIGHT", 14, -10)
+    glow:SetVertexColor(1, 0.3, 0.25, 1); glow:Hide()
+    local ag = glow:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+    local al = ag:CreateAnimation("Alpha"); al:SetFromAlpha(1); al:SetToAlpha(0.25); al:SetDuration(0.6); al:SetSmoothing("IN_OUT")
+    -- 칸 자체도 숨쉬어요 (밝은 바닥 위에서는 둘레 빛이 잘 안 보여서)
+    local ag2 = cb.bar:CreateAnimationGroup(); ag2:SetLooping("BOUNCE")
+    local a2 = ag2:CreateAnimation("Alpha"); a2:SetFromAlpha(1); a2:SetToAlpha(0.35); a2:SetDuration(0.6); a2:SetSmoothing("IN_OUT")
+    function cb:SetCount(n)
+        local hh = math.max(4, math.min(14, tonumber(ns.TgtOpt("comboH")) or 7))
+        self:SetHeight(hh); for _, t in ipairs(self.ticks or {}) do t:SetHeight(hh) end
+        ns.SetBar(self.bar, n, 5)
+        local full = not ns.TgtOpt("comboRedOff") and ns.Try(function() return n >= 5 end)
+        local c = full and { 1, 0.35, 0.29 } or C.acc
+        self.bar:SetStatusBarColor(c[1], c[2], c[3], 1)
+        -- 기력이 바뀔 때마다 불려서, 이미 숨쉬는 중이면 다시 시작하지 않아요 (계속 처음으로 돌아가 멈춘 것처럼 보였어요)
+        if full then
+            glow:Show()
+            if not ag:IsPlaying() then ag:Play() end
+            if not ag2:IsPlaying() then ag2:Play() end
+        else
+            ag:Stop(); ag2:Stop(); glow:Hide()
+        end
+        self.num:SetShown(ns.TgtOpt("comboNum") and true or false)
+        ns.SetText(self.num, n)
+    end
+    return cb
+end
+function ns.HudTargetCombo(f)
+    if not f or f.combo then return end
+    local cb = ns.MakeComboBar(f)
+    cb:Hide()
+    f.combo = cb
+    local function Shift(D)
+        if (ns.ComboShift or 0) == D then return end
+        ns.ComboShift = D
+        if f.tpower then f.tpower:ClearAllPoints(); f.tpower:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -16, -8 - D) end
+        local tc = ns.casts and ns.casts.target
+        if tc and tc.OnLayout then tc:OnLayout()
+        else
+            if f.debuffs then pcall(function() f.debuffs:ClearAllPoints(); f.debuffs:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -76, -17 - D) end) end
+            if f.buffs then pcall(function() f.buffs:ClearAllPoints(); f.buffs:SetPoint("TOPRIGHT", f.hp, "BOTTOMRIGHT", -76, -17 - 36 - 6 - D) end) end
+        end
+    end
+    local function Update()
+        local on = not ns.TgtOpt("comboOff") and UnitExists("target") and ns.UsesCombo and ns.UsesCombo()
+        if on then
+            local n = ns.ComboOn and ns.ComboOn("target")
+            if n == nil then on = false
+            elseif not ns.TgtOpt("comboShow0") and ns.Try(function() return n <= 0 end) then on = false   -- 0점이면 숨겨요
+            else cb:SetCount(n) end
+        end
+        cb:SetShown(on and true or false)
+        Shift(on and (cb:GetHeight() + 6) or 0)
+    end
+    f.comboUpdate = Update
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_TARGET_CHANGED"); ev:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+    ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player"); ev:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
+    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev:SetScript("OnEvent", Update)
+end
+
+-- 대상의 대상 알약 꾸미기 (허브 > 대상의 대상): 진짜 알약 · 미리 보기 알약 둘 다
+--   totPctOff % 끔 · totHpOff 체력 줄 끔 · totMeOn 나를 노리면 강조 · totName 이름 글씨 · totW 길이(%)
+--   totStripe "class"|"pink" · totVis "all"|"combat" · totHideMe 나일 땐 숨기기
+function ns.StyleToT(tt, me, col, isPv)
+    if not (tt and tt.name) then return end
+    local O = ns.TgtOpt
+    tt.pct:SetShown(not O("totPctOff"))
+    tt.hp:SetShown(not O("totHpOff"))
+    local f, _, fl = tt.name:GetFont()
+    if f then tt.name:SetFont(f, math.max(9, 17 + (tonumber(O("totName")) or 0)), fl or "") end
+    -- 배경: 어둡게(처음) · 분홍 · 직업 색(옅게) · 반투명
+    if tt.bg then
+        local b = O("totBg") or "dark"
+        if b == "pink" then tt.bg:SetColor({ 0.36, 0.16, 0.22 }, 0.94)
+        elseif b == "class" then
+            local cc = col or C.acc
+            tt.bg:SetColor({ cc[1] * 0.38, cc[2] * 0.38, cc[3] * 0.38 }, 0.94)
+        elseif b == "clear" then tt.bg:SetColor({ 0.078, 0.047, 0.055 }, 0.35)
+        else tt.bg:SetColor({ 0.078, 0.047, 0.055 }, 0.92) end
+    end
+    if O("totStripe") == "pink" then col = nil end
+    if tt.stripe then tt.stripe:SetColor(col or C.acc, 1) end
+    local hi = me and O("totMeOn") and true or false
+    if tt.rim then tt.rim:SetColor(hi and { 1, 0.42, 0.48 } or { 0.29, 0.204, 0.22 }, 1) end
+    if not tt.meTag then
+        tt.meTag = ns.Font(tt, 12, { 1, 0.42, 0.48 }, "OVERLAY"); tt.meTag:SetText("나")
+    end
+    tt.meTag:ClearAllPoints()
+    if tt.pct:IsShown() then tt.meTag:SetPoint("RIGHT", tt.pct, "LEFT", -6, 0) else tt.meTag:SetPoint("RIGHT", tt, "RIGHT", -10, 2) end
+    tt.meTag:SetShown(hi)
+    local w = math.floor((tt.baseW or 120) * math.max(60, math.min(200, tonumber(O("totW")) or 100)) / 100 + 0.5)
+    if isPv or not InCombatLockdown() then tt:SetWidth(w); tt.name:SetWidth(math.max(30, w - 64)) end
+    if not isPv then
+        local a = 1
+        if O("totVis") == "combat" and not UnitAffectingCombat("player") then a = 0 end
+        if me and O("totHideMe") and not O("totMeOn") then a = 0 end
+        tt:SetAlpha(a)
+    end
+end
+
+-- 대상 창 디버프 · 버프 줄 보이기 · 크기
+function ns.HudTargetAuras(f)
+    if not f then return end
+    local sc = math.max(0.5, math.min(1.6, (tonumber(ns.TgtOpt("debScale")) or 100) / 100))
+    if f.debuffs then pcall(function() f.debuffs:SetShown(not ns.TgtOpt("debOff")); f.debuffs:SetScale(sc) end) end
+    if f.buffs then pcall(function() f.buffs:SetShown(not ns.TgtOpt("buffOff")); f.buffs:SetScale(sc) end) end
+end
+
+-- 허브에서 대상 창 설정을 바꿀 때
+function ns.SetTgtOpt(k, v)
+    ns.db.tgt = ns.db.tgt or {}
+    ns.db.tgt[k] = v
+    local f = ns.hudFrames and ns.hudFrames.target
+    if not f then return end
+    if UnitExists("target") then pcall(UpdateInfo, f); pcall(UpdateDead, f) end
+    if ns.ApplyHpTextSize then pcall(ns.ApplyHpTextSize, f) end
+    if f.tgtExtras then f.tgtExtras() end
+    if f.comboUpdate then f.comboUpdate() end
+    ns.HudTargetAuras(f)
+end
 
 local function UpdatePower(f)
     local pType = UnitPowerType("player")
@@ -609,6 +811,41 @@ function ns.BuildHudPreview(parent)
     AddPlayerExtras(p)
     local t = CreateSide(hud, "target", true, true)
     AddTargetPower(t)
+    -- 대상 창 미리 보기 덤: 내 디버프 · 버프 줄 · 시전바 · 위협 빛 · 퀘스트 표시 (허브 > 대상 창 설정대로)
+    do
+        local function Ring(parent, sz, ring, num)
+            local b = CreateFrame("Frame", nil, parent); b:SetSize(sz, sz)
+            local ic = b:CreateTexture(nil, "ARTWORK"); ic:SetPoint("TOPLEFT", 3, -3); ic:SetPoint("BOTTOMRIGHT", -3, 3)
+            ic:SetTexture(ns.MEDIA .. "circle"); ic:SetVertexColor(0.27, 0.2, 0.3)
+            local rg = b:CreateTexture(nil, "OVERLAY"); rg:SetTexture(ns.MEDIA .. "ring"); rg:SetAllPoints(); rg:SetVertexColor(ring[1], ring[2], ring[3], 1)
+            local n = ns.Num(b, sz * 0.42, { 1, 1, 1 }); n:SetPoint("CENTER", 0, 0); n:SetText(num)
+            return b
+        end
+        local deb = CreateFrame("Frame", nil, t); deb:SetSize(3 * 42, 36)
+        deb:SetPoint("TOPRIGHT", t.hp, "BOTTOMRIGHT", -76, -17)
+        for i, n in ipairs({ "12", "8", "3" }) do
+            local b = Ring(deb, 36, C.acc, n); b:SetPoint("TOPRIGHT", -(i - 1) * 42, 0)
+        end
+        local buf = CreateFrame("Frame", nil, t); buf:SetSize(2 * 33, 28)
+        buf:SetPoint("TOPRIGHT", deb, "BOTTOMRIGHT", 0, -6)
+        for i, n in ipairs({ "30", "" }) do
+            local b = Ring(buf, 28, { 0.62, 0.90, 0.76 }, n); b:SetPoint("TOPRIGHT", -(i - 1) * 33, 0)
+        end
+        -- 대상 시전바: '예전 얇은 바' 모양일 때만 대상 창 체력 바 바로 아래 (토끼 · 발자국은 화면 아래 내 시전바 위)
+        local cast = CreateFrame("Frame", nil, t); cast:SetSize(230, 18)
+        cast:SetPoint("TOPRIGHT", t.hp, "BOTTOMRIGHT", -14, -7)
+        local cbg = ns.RoundRect(cast, 9, { 0.13, 0.1, 0.095 }, "BACKGROUND", 0, 0)
+        local cf = CreateFrame("Frame", nil, cast); cf:SetPoint("TOPLEFT"); cf:SetPoint("BOTTOMLEFT"); cf:SetWidth(140)
+        ns.RoundRect(cf, 9, C.acc, "ARTWORK", 0, 0)
+        local ct = ns.Font(cast, 11, C.ink, "OVERLAY"); ct:SetPoint("LEFT", 10, 0); ct:SetText("화염구"); ct:SetShadowColor(0, 0, 0, 0)
+        local cn = ns.Num(cast, 11, C.tx); cn:SetPoint("RIGHT", -8, 0); cn:SetText("1.2")
+        local thr = t:CreateTexture(nil, "BACKGROUND", nil, -2)
+        thr:SetTexture(ns.MEDIA .. "soft_glow"); thr:SetBlendMode("ADD")
+        thr:SetPoint("TOPLEFT", t.portrait, "TOPLEFT", -22, 22); thr:SetPoint("BOTTOMRIGHT", t.portrait, "BOTTOMRIGHT", 22, -22)
+        thr:SetVertexColor(1, 0.23, 0.29, 0.9)
+        t.pvDeb, t.pvBuf, t.pvCast, t.pvThr = deb, buf, cast, thr
+        t.pvCombo = ns.MakeComboBar(t)
+    end
     -- 가운데 금빛 귀 + 거리
     local mid = CreateFrame("Frame", nil, hud)
     mid:SetSize(GAP, 120); mid:SetPoint("TOP", hud, "TOP", 0, -6)
@@ -680,22 +917,42 @@ function ns.BuildHudPreview(parent)
         pet.hpValue:SetText("860"); pet.hpPct:SetText("86%")
         pet.focus:SetMinMaxValues(0, 100); pet.focus:SetValue(70)
         pet:EnableMouse(false)
+        -- 만족도 얼굴 (설정대로) · 켜 둔 채 그 줄에 마우스를 올리면 불만 얼굴 + 빨간 빛 (끄면 마우스를 올려도 없음)
+        function pet:PvMood()
+            local off = ns.db and ns.db.petMoodOff
+            local sad = ns.hudPvPeek == "mood"
+            if off then self.moodFrame:Hide(); self.moodAg:Stop(); self.moodGlow:Hide(); self.portrait.cut:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) return end
+            local c = sad and { 1, 0.42, 0.42 } or { 0.5, 0.84, 0.48 }
+            self.portrait.cut:SetVertexColor(c[1], c[2], c[3], 1)
+            self.mood:SetTexture(ns.MEDIA .. (sad and "pet_sad" or "pet_happy")); self.moodFrame:Show()
+            if sad then self.moodGlow:Show(); if not self.moodAg:IsPlaying() then self.moodAg:Play() end
+            else self.moodAg:Stop(); self.moodGlow:Hide() end
+        end
+        local oldMood = pet.PvMood
+        function pet:PvMood()
+            oldMood(self)
+            if not ns.PetOpt("chipOff") then self.chip:Set("공격 중", C.acc, C.ink) end
+            ns.StylePet(self, true)
+        end
     end
     -- 대상의 대상 (진짜와 같은 모양의 어두운 알약) · 대상 초상화 밑
     local tt = CreateFrame("Frame", nil, t)
     do
         local W_, H_ = POR_W + 40, 32
         tt:SetSize(W_, H_)
-        ns.RoundRect(tt, 10, { 0.29, 0.204, 0.22 }, "BACKGROUND", 0, -2)
+        tt.rim = ns.RoundRect(tt, 10, { 0.29, 0.204, 0.22 }, "BACKGROUND", 0, -2)
         local bg = ns.RoundRect(tt, 9, { 0.078, 0.047, 0.055 }, "BACKGROUND", 1, 0); bg:SetColor({ 0.078, 0.047, 0.055 }, 0.92)
+        tt.bg = bg
         local sfr = CreateFrame("Frame", nil, tt); sfr:SetPoint("TOPLEFT", 4, -4); sfr:SetPoint("BOTTOMLEFT", 4, 4); sfr:SetWidth(6)
-        ns.RoundRect(sfr, 3, C.acc, "ARTWORK", 0, 0)
+        tt.stripe = ns.RoundRect(sfr, 3, C.acc, "ARTWORK", 0, 0)
+        tt.baseW = W_
         local hp = CreateFrame("StatusBar", nil, tt)
         hp:SetPoint("BOTTOMLEFT", 14, 3); hp:SetPoint("BOTTOMRIGHT", -8, 3); hp:SetHeight(3)
-        hp:SetStatusBarTexture(ns.WHITE); hp:SetStatusBarColor(0.937, 0.416, 0.486, 1); hp:SetMinMaxValues(0, 1); hp:SetValue(0.8)
-        local nm = ns.Font(tt, 17, { 1, 0.97, 0.96 }); nm:SetPoint("LEFT", tt, "LEFT", 16, 2); nm:SetText("슈엘")
+        hp:SetStatusBarTexture(ns.WHITE); hp:SetStatusBarColor(0.937, 0.416, 0.486, 1); hp:SetMinMaxValues(0, 1); hp:SetValue(1)
+        local nm = ns.Font(tt, 17, { 1, 0.97, 0.96 }); nm:SetPoint("LEFT", tt, "LEFT", 16, 2); nm:SetText("르엘")
         local pc = tt:CreateFontString(nil, "OVERLAY"); pc:SetFont(ns.NUM, 14, ""); pc:SetTextColor(0.85, 0.78, 0.76)
-        pc:SetPoint("RIGHT", tt, "RIGHT", -10, 2); pc:SetText("80%")
+        pc:SetPoint("RIGHT", tt, "RIGHT", -10, 2); pc:SetText("100%")
+        tt.name, tt.pct, tt.hp = nm, pc, hp
     end
     hud.pet, hud.tot = pet, tt
     local function PlaceExtras()
@@ -748,21 +1005,62 @@ function ns.BuildHudPreview(parent)
         end
         if p.manaLine then p.manaLine:Hide(); p.manaLabel:Hide(); p.manaText:Hide() end
         if p.state then p.state:Hide() end
-        ns.SetText(t.name, "붉은갈기 노움"); t.name:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
-        t.lv:SetText("36"); t.lv:SetTextColor(1, 0.82, 0.2)
-        t.cls:Hide()
-        t.portrait.tex:SetTexture("Interface\\Icons\\Ability_Hunter_Pet_Wolf")
-        pcall(ns.SetBar, t.hp.bar, 62, 100)
-        t.hpValue:SetText("1184"); t.hpPct:SetText("62%")
+        -- 대상도 내 창과 같은 모형 '르엘' (LV 60 · 9999 · 토끼 초상화)
+        ns.SetText(t.name, "르엘"); t.name:SetTextColor(C.acc[1], C.acc[2], C.acc[3])
+        t.lv:SetText("60"); t.lv:SetTextColor(C.tx[1], C.tx[2], C.tx[3])
+        t.portrait.tex:SetTexture(ns.MEDIA .. "pv_leel"); t.portrait.tex:SetTexCoord(0, 1, 0, 1)
+        if t.portrait.tex.SetDesaturated then t.portrait.tex:SetDesaturated(false) end
+        if t.cls then
+            t.cls.icon:SetTexture(ns.MEDIA .. "bunny"); t.cls.icon:SetTexCoord(0, 1, 0, 1)
+            t.cls.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+            t.cls:Show()
+            pcall(PlaceHpValue, t, true)
+        end
+        pcall(ns.SetBar, t.hp.bar, 9999, 9999)
+        t.hpValue:SetText("9999"); t.hpPct:SetText("100%")
+        if t.hp.heal then t.hp.heal:Hide() end
         if t.tpower and ns.db and ns.db.tPowerOff then
             t.tpower:Hide(); t.tpowerText:Hide(); t.tpowerLabel:Hide()
         elseif t.tpower then
             t.tpower:Show(); t.tpowerText:Show(); t.tpowerLabel:Show()
-            t.tpower:SetMinMaxValues(0, 1); t.tpower:SetValue(0.7)
+            t.tpower:SetMinMaxValues(0, 1); t.tpower:SetValue(1)
             t.tpower:SetStatusBarColor(C.mana[1], C.mana[2], C.mana[3])
-            t.tpowerText:SetText("540"); t.tpowerLabel:SetText("마나")
+            t.tpowerText:SetText("9999"); t.tpowerLabel:SetText("마나")
+        end
+        -- 대상 창 덤 (설정대로 · 죽은 대상은 그 줄에 마우스를 올렸을 때만)
+        local TO = ns.TgtOpt or function() end
+        local sc = math.max(0.5, math.min(1.6, (tonumber(TO("debScale")) or 100) / 100))
+        t.pvDeb:SetShown(not TO("debOff")); t.pvDeb:SetScale(sc)
+        t.pvBuf:SetShown(not TO("buffOff")); t.pvBuf:SetScale(sc)
+        -- 대상의 대상 알약: 설정대로 (나를 노리면 강조 줄에 마우스 = 강조된 모습)
+        ns.StyleToT(tt, ns.hudPvPeek == "totme", ns.HudClassColorOf and ns.HudClassColorOf("player"), true)
+        if pet and pet.PvMood then pet:PvMood() end
+        -- 연계 점수 칸: 미리 보기는 3점 (그 줄에 마우스를 올리면 5점 꽉 찬 모습)
+        local cOn = not TO("comboOff")
+        t.pvCombo:SetShown(cOn and true or false)
+        if cOn then t.pvCombo:SetCount(ns.hudPvPeek == "combo" and 5 or 3) end
+        local D = cOn and (t.pvCombo:GetHeight() + 6) or 0
+        if t.tpower then t.tpower:ClearAllPoints(); t.tpower:SetPoint("TOPRIGHT", t.hp, "BOTTOMRIGHT", -16, -8 - D) end
+        local hudCast = ns.db and ns.db.castStyle == "hud" and not ns.db.castMineOnly
+        t.pvCast:SetShown(hudCast and true or false)
+        t.pvCast:ClearAllPoints(); t.pvCast:SetPoint("TOPRIGHT", t.hp, "BOTTOMRIGHT", -14, -7 - D)
+        t.pvDeb:ClearAllPoints(); t.pvDeb:SetPoint("TOPRIGHT", t.hp, "BOTTOMRIGHT", -76, (hudCast and -51 or -17) - D)
+        -- 마우스를 올린 줄(ns.hudPvPeek)은 꺼져 있어도 어떤 모습인지 잠깐 보여줘요
+        local peek = ns.hudPvPeek
+        t.pvThr:SetShown((TO("threatOn") or peek == "thr") and true or false)
+        local dead = ns.hudPvDead and not TO("deadKeep")
+        t.portrait.tex:SetDesaturated(dead and true or false)
+        t.hp:SetAlpha(dead and 0.5 or 1); t.name:SetAlpha(dead and 0.5 or 1)
+        t.hpValue:SetShown(not dead); t.hpPct:SetShown(not dead)
+        if t.state then
+            if dead then t.state:SetText("쓰러짐"); t.state:Show() else t.state:Hide() end
         end
         ns.ApplyHpTextSize(p); ns.ApplyHpTextSize(t)
+        -- 등급 테두리: 미리 보기는 정예(금테)로 보여줘요
+        if (TO("rankOn") or peek == "rank") and t.portrait.cut then t.portrait.cut:SetAlpha(1); t.portrait.cut:SetVertexColor(1, 0.83, 0.42, 1) end
+        -- 이름 · 레벨 색: 미리 보기 대상은 '적'처럼
+        if TO("nameCol") == "react" then t.name:SetTextColor(1, 0.45, 0.45) end
+        if TO("lvCol") == "white" then t.lv:SetTextColor(C.tx[1], C.tx[2], C.tx[3]) else t.lv:SetTextColor(1, 0.5, 0.25) end
         -- 가운데: 허브의 [비전투 | 전투 중]에 맞춰 (ns.hudPvFight) · 세부 설정도 같이
         local O = (ns.db and ns.db.ctr) or {}
         local useDist = not (ns.db and ns.db.centerTime)
@@ -1444,6 +1742,8 @@ local function CreatePet(hud, preview)
     f.focus:SetStatusBarColor(FOCUS[1], FOCUS[2], FOCUS[3])
     local fbg = ns.Tex(f.focus, "BACKGROUND", 0, ns.MEDIA .. "pill32", { 1, 1, 1 }, 0.12)
     fbg:SetAllPoints()
+    -- 펫의 대상 (허브 > 펫 · 켰을 때만): 집중 바 아래 작은 글씨
+    f.ptg = ns.Font(f, 11, C.tx2); f.ptg:SetPoint("TOPLEFT", f.focus, "BOTTOMLEFT", 0, -4); f.ptg:Hide()
 
     -- 펫 만족도 (사냥꾼): 초상화 테두리 색 + 오른쪽 아래 얼굴 · 불만이면 빨간 빛이 숨쉬듯
     f.moodGlow = f.portrait:CreateTexture(nil, "BACKGROUND", nil, -1)
@@ -1476,6 +1776,62 @@ local function CreatePet(hud, preview)
 end
 -- 허브 미리 보기용 펫 창 (진짜 펫 창과 같은 모양 · 클릭 없음)
 ns.HudPetPreview = function(h) return CreatePet(h, true) end
+
+-- 펫 창 세부 (허브 > 펫): ns.db.petO
+--   chipOff 상태 칩 · focusOff 집중 바 · tgtOn 펫의 대상 · porOff 초상화 · porEdge "state"|"pink"|"off"
+--   nameAdd · lvAdd 글씨 · barW 체력 바 길이(%) · hpOff · pctOff · vis "all"|"combat" · alert "off"|"chat"|"sound"
+local PET_DEF = { porEdge = "state", barW = 100, vis = "all", alert = "off" }
+function ns.PetOpt(k)
+    local t = ns.db and ns.db.petO
+    local v = t and t[k]
+    if v == nil then v = PET_DEF[k] end
+    return v
+end
+function ns.SetPetOpt(k, v)
+    ns.db.petO = ns.db.petO or {}
+    ns.db.petO[k] = v
+    if ns.HudPetRefresh then ns.HudPetRefresh() end
+end
+function ns.StylePet(f, isPv)
+    if not f then return end
+    local O = ns.PetOpt
+    if O("chipOff") then f.chip:Hide() end
+    f.focus:SetShown(not O("focusOff"))
+    -- 펫의 대상
+    if O("tgtOn") then
+        if isPv then f.ptg:SetText("▸ 붉은갈기 노움"); f.ptg:Show()
+        elseif UnitExists("pettarget") then f.ptg:SetFormattedText("▸ %s", UnitName("pettarget") or ""); f.ptg:Show()
+        else f.ptg:Hide() end
+        f.ptg:ClearAllPoints()
+        if f.focus:IsShown() then f.ptg:SetPoint("TOPLEFT", f.focus, "BOTTOMLEFT", 0, -4) else f.ptg:SetPoint("TOPLEFT", f.hp, "BOTTOMLEFT", 12, -4) end
+    else
+        f.ptg:Hide()
+    end
+    f.portrait:SetAlpha(O("porOff") and 0 or 1)
+    local e = O("porEdge")
+    if e == "off" then f.portrait.cut:SetAlpha(0)
+    else
+        f.portrait.cut:SetAlpha(1)
+        if e == "pink" then f.portrait.cut:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) end
+    end
+    local nf, _, nfl = f.name:GetFont(); if nf then f.name:SetFont(nf, math.max(9, 15 + (tonumber(O("nameAdd")) or 0)), nfl or "") end
+    local lf, _, lfl = f.lv:GetFont(); if lf then f.lv:SetFont(lf, math.max(9, 15 + (tonumber(O("lvAdd")) or 0)), lfl or "") end
+    f.hp:SetWidth(math.floor(PET_BAR * math.max(50, math.min(160, tonumber(O("barW")) or 100)) / 100 + 0.5))
+    f.hpValue:SetAlpha(O("hpOff") and 0 or 1)
+    f.hpPct:SetAlpha(O("pctOff") and 0 or 1)
+    if isPv then return end
+    f:SetAlpha((O("vis") == "combat" and not UnitAffectingCombat("player")) and 0 or 1)
+    -- 불만으로 바뀌는 순간 한 번 알림
+    local ok, h = pcall(GetPetHappiness)
+    if ok and type(h) == "number" and not ns.IsSecret(h) then
+        if h == 1 and (f.lastHappy or 0) > 1 then
+            local a = O("alert")
+            if a == "chat" then print("|cfff2b3c2[르엘 펫]|r 펫이 배고파요. 먹이를 주세요!")
+            elseif a == "sound" then pcall(PlaySoundFile, ns.MEDIA .. "leel_black_warn.ogg", "Master") end
+        end
+        f.lastHappy = h
+    end
+end
 
 ----------------------------------------------------------------------
 -- 따라가는 중 표시: 대상 초상화 분홍 빛 맥박 + 두 사람 배지 + 아래 알약
@@ -1586,7 +1942,7 @@ local function SetupFollow(f)
     end
 end
 
-local function UpdatePet(f)
+local function UpdatePetCore(f)
     if not UnitExists("pet") then return end
     ns.SetText(f.name, UnitName("pet"))
     ns.SetText(f.lv, UnitLevel("pet"))
@@ -1637,6 +1993,10 @@ local function UpdatePet(f)
         end
     end
     f.moodFrame:Hide(); f.moodAg:Stop(); f.moodGlow:Hide()
+end
+local function UpdatePet(f)
+    UpdatePetCore(f)
+    if ns.StylePet then pcall(ns.StylePet, f, false) end
 end
 
 ----------------------------------------------------------------------
@@ -1717,6 +2077,10 @@ function ns:CreateHUD()
     end
     -- 안 쓸 때도 만들어 두고(이동 모드 · 허브가 찾아요) 숨겨요
     if ns.db and ns.db.hudOff then C_Timer.After(0, function() if ns.hud then ns.hud:Hide() end end) end
+    -- 게임 기본 플레이어 · 대상 창: Leel HUD를 쓰면 숨기고, 안 쓰면 보여요 (따로 고르는 스위치 없음)
+    if ns.db then ns.db.hideBlizzard = not ns.db.hudOff end
+    -- 가운데는 늘 대상과 거리 (전투 시간 보기는 없앴어요 · 전투 중은 효과로)
+    if ns.db then ns.db.centerTime = nil end
     local hud = CreateFrame("Frame", "LeelUI_HUD", UIParent)
     hud:SetSize(SIDE_W * 2 + GAP, POR_H + 14 + 64)
     hud:SetMovable(true)
@@ -1777,6 +2141,7 @@ function ns:CreateHUD()
         local rim = ns.RoundRect(tt, 10, { 0.29, 0.204, 0.22 }, "BACKGROUND", 0, -2)
         local bg = ns.RoundRect(tt, 9, { 0.078, 0.047, 0.055 }, "BACKGROUND", 1, 0)
         bg:SetColor({ 0.078, 0.047, 0.055 }, 0.92)
+        tt.rim, tt.bg, tt.baseW = rim, bg, W_
         tt.sfr = CreateFrame("Frame", nil, tt)
         tt.sfr:SetPoint("TOPLEFT", 4, -4); tt.sfr:SetPoint("BOTTOMLEFT", 4, 4); tt.sfr:SetWidth(6)
         tt.stripe = ns.RoundRect(tt.sfr, 3, C.acc, "ARTWORK", 0, 0)
@@ -1805,7 +2170,9 @@ function ns:CreateHUD()
                     if cc then col = { cc.r, cc.g, cc.b } end
                 end
             end
-            tt.stripe:SetColor(col or C.acc, 1)
+            local okm, me = pcall(UnitIsUnit, "targettarget", "player")
+            me = okm and not ns.IsSecret(me) and me and true or false
+            ns.StyleToT(tt, me, col, false)
             local cur, max = UnitHealth("targettarget"), UnitHealthMax("targettarget")
             tt.hp:SetMinMaxValues(0, max or 1)
             tt.hp:SetValue(cur or 0)
@@ -1917,11 +2284,12 @@ function ns:CreateHUD()
     petEv:RegisterUnitEvent("UNIT_PET", "player")
     for _, e in ipairs({ "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER",
                          "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_PORTRAIT_UPDATE", "UNIT_FLAGS",
-                         "UNIT_THREAT_SITUATION_UPDATE", "UNIT_HAPPINESS" }) do
+                         "UNIT_THREAT_SITUATION_UPDATE", "UNIT_HAPPINESS", "UNIT_TARGET" }) do
         pcall(petEv.RegisterUnitEvent, petEv, e, "pet")
     end
     pcall(petEv.RegisterEvent, petEv, "PET_UI_UPDATE")
     pcall(petEv.RegisterEvent, petEv, "UNIT_HAPPINESS")
+    pcall(petEv.RegisterEvent, petEv, "PLAYER_REGEN_ENABLED"); pcall(petEv.RegisterEvent, petEv, "PLAYER_REGEN_DISABLED")
     -- 점검: /르엘펫검사 (만족도가 안 보일 때)
     SLASH_LEELPETCHK1 = "/르엘펫검사"
     SlashCmdList.LEELPETCHK = function()
@@ -1934,6 +2302,7 @@ function ns:CreateHUD()
         if C_PetInfo then P("C_PetInfo 있음") end
         if PetFrameHappiness then P("블리자드 펫 만족도 그림: " .. tostring(PetFrameHappiness:IsShown())) end
     end
+    ns.HudPetRefresh = function() if pet and not ns.moving then pcall(UpdatePet, pet) end end
     petEv:SetScript("OnEvent", function()
         if not ns.moving then UpdatePet(pet) end
     end)

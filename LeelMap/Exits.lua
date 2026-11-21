@@ -359,4 +359,11 @@ _G.LeelMapExits = {
     end,
     Refresh = function() Paint() end,
     Forget = function() if LeelMapDB then LeelMapDB.exitSeen = {} end; Paint() end,
+    -- 르엘 허브 미리 보기: 이 지역 출구 { to = 지도 번호, x, y (0~1), name }
+    List = function(z)
+        local out = {}
+        local ok, list = pcall(Exits, z)
+        for _, e in ipairs(ok and list or {}) do out[#out + 1] = { to = e.to, x = e.x, y = e.y, name = (Info(e.to) or {}).name } end
+        return out
+    end,
 }

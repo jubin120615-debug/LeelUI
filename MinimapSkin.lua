@@ -204,9 +204,11 @@ local function Coords()
     return "-"
 end
 
+-- 허브 > 미니맵 > 시계: nil = 게임 설정대로 · "local" = 내 컴퓨터 시간 · "server" = 서버 시간
 local function Clock()
     local h, m = GetGameTime()
-    if GetCVarBool and GetCVarBool("timeMgrUseLocalTime") then
+    local mode = ns.db and ns.db.mmClock
+    if mode == "local" or (mode == nil and GetCVarBool and GetCVarBool("timeMgrUseLocalTime")) then
         return date("%H:%M")
     end
     return string.format("%d:%02d", h, m)
@@ -283,8 +285,15 @@ local function Common(mask)
     -- 휠로 확대/축소
     Minimap:EnableMouseWheel(true)
     Minimap:SetScript("OnMouseWheel", function(self, d)
+        if ns.db and ns.db.mmWheel == false then return end   -- 허브 > 미니맵 > 휠로 확대 · 축소
         local z = self:GetZoom() + (d > 0 and 1 or -1)
         if z >= 0 and z <= (self:GetZoomLevels() - 1) then self:SetZoom(z) end
+        -- 허브 > 미니맵 > 저절로 다시 축소: 10초 뒤 가장 멀리
+        if ns.db and ns.db.mmAutoZoom then
+            self.leelZoomAt = GetTime()
+            local at = self.leelZoomAt
+            C_Timer.After(10, function() if self.leelZoomAt == at and self:GetZoom() > 0 then self:SetZoom(0) end end)
+        end
     end)
     skin = CreateFrame("Frame", "LeelUI_MinimapSkin", Minimap)
     skin:SetAllPoints(Minimap)
@@ -460,9 +469,11 @@ local function Update()
     local z = ZoneText()
     if zonePill then
         if styles.barFrame then
-            -- D: 지역 이름 + 좌표 한 알약
-            zonePill.fs:SetText(z .. "   |cffd6a09c" .. Coords() .. "|r")
+            -- D: 지역 이름 + 좌표 한 알약 (허브: 지역 알약 · 좌표 끄기)
+            local showC = not (ns.db and ns.db.mmCoords == false)
+            zonePill.fs:SetText(showC and (z .. "   |cffd6a09c" .. Coords() .. "|r") or z)
             zonePill:SetWidth(math.max(60, zonePill.fs:GetStringWidth() + 24))
+            zonePill:SetShown(not (ns.db and ns.db.mmZone == false))
         else
             zonePill:Set(z)
         end

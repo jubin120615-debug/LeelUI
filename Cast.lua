@@ -17,6 +17,35 @@ local COL = {
     done = { 1.00, 0.97, 0.98 },
     fail = { 0.85, 0.26, 0.18 },
 }
+-- 허브 > 시전바 세부 설정 (기본값 = 지금 모습)
+local CAST_DEF = { len = 100, thick = 100, icon = "left", text = "both", tfmt = "left", col = "pink", fsz = 0,
+                   who = "target", ooc = true, lag = false, ticks = false, flash = true, kick = "off", gotKick = false }
+function ns.CastOpt(k)
+    local t = ns.db and ns.db.castO
+    local v = t and t[k]
+    if v == nil then return CAST_DEF[k] end
+    return v
+end
+function ns.SetCastOpt(k, v)
+    ns.db.castO = ns.db.castO or {}
+    ns.db.castO[k] = v
+    if k == "kick" and ns.CastKickWatch then ns.CastKickWatch() end
+    if (k == "len" or k == "thick") and ns.CastApplySize then ns.CastApplySize() end
+    if ns.castPv and ns.SetCastPreview and not InCombatLockdown() then ns:SetCastPreview(true) end
+end
+local O = ns.CastOpt
+
+local function MeColor()
+    local m = O("col")
+    if m == "white" then return { 1, 0.97, 0.98 } end
+    if m == "class" then
+        local _, cls = UnitClass("player")
+        local cc = cls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls]
+        if cc then return { cc.r, cc.g, cc.b } end
+    end
+    return nil
+end
+
 local NAMECOL = {
     me = C.tx, ch = { 0.81, 0.86, 1 }, int = { 1, 0.70, 0.65 },
     lock = { 0.79, 0.76, 0.76 }, done = { 1, 1, 1 }, fail = { 1, 0.56, 0.50 },
@@ -124,8 +153,23 @@ end
 ----------------------------------------------------------------------
 -- 우리 시전바
 ----------------------------------------------------------------------
+local function Decor(b)
+    local tx = O("text")
+    b.name:SetAlpha((tx == "both" or tx == "name") and 1 or 0)
+    b.time:SetAlpha((tx == "both" or tx == "time") and 1 or 0)
+    local add = tonumber(O("fsz")) or 0
+    for _, pair in ipairs({ { b.name, b.nameSz }, { b.time, b.timeSz } }) do
+        local fs, base = pair[1], pair[2]
+        if fs and base then
+            local f, _, fl = fs:GetFont()
+            if f then pcall(fs.SetFont, fs, f, math.max(7, base + add), fl) end
+        end
+    end
+    if b.PlaceIcon then b:PlaceIcon(O("icon")) end
+end
+
 local function Paint(b, kind)
-    ns.PaintFlat(b, COL[kind])
+    ns.PaintFlat(b, (kind == "me" and MeColor()) or COL[kind])
     local c = NAMECOL[kind]
     b.name:SetTextColor(c[1], c[2], c[3])
     if kind == "done" then
@@ -134,10 +178,30 @@ local function Paint(b, kind)
         b.border:SetVertexColor(C.edge[1], C.edge[2], C.edge[3], C.edge[4])
     end
     if b.OnPaint then b:OnPaint(kind) end
+    Decor(b)
+end
+
+local function Extras(b, lagW, ticks)
+    if b.lagTex then
+        if lagW and lagW >= 1 then b.lagTex:SetWidth(lagW); b.lagTex:Show() else b.lagTex:Hide() end
+    end
+    if b.ticks then
+        local w = b.bar:GetWidth()
+        for i, t in ipairs(b.ticks) do
+            if ticks and i < ticks and w > 0 then
+                t:ClearAllPoints(); t:SetPoint("TOP", b.bar, "TOPLEFT", w * i / ticks, 1)
+                t:SetPoint("BOTTOM", b.bar, "BOTTOMLEFT", w * i / ticks, -1)
+                t:Show()
+            else
+                t:Hide()
+            end
+        end
+    end
 end
 
 local function Hide(b)
     b.casting, b.finishing, b.mirroring = false, false, false
+    Extras(b)
     b:SetScript("OnUpdate", nil)
     if not b.borrowing then b:Hide() end
     if b.OnLayout then b:OnLayout() end
@@ -167,7 +231,10 @@ local function OnTick(b)
     end
     local v = now - b.startT
     b.bar:SetValue(b.channel and (b.dur - v) or v)
-    b.time:SetFormattedText("%.1f", b.endT - now)
+    local f = O("tfmt")
+    if f == "of" then b.time:SetFormattedText("%.1f / %.1f", v, b.dur)
+    elseif f == "leftof" then b.time:SetFormattedText("%.1f / %.1f", b.endT - now, b.dur)
+    else b.time:SetFormattedText("%.1f", b.endT - now) end
 end
 
 -- 귀여운 시전바: 숨겨진 값이면 블리자드 시전바의 값을 그대로 옮겨 받아 우리 모양으로 그림
@@ -219,10 +286,36 @@ local function StartMirror(b, raw)
     return true
 end
 
+-- 적 시전바: 대상이 시전 중이 아니면 주시 대상 · 마우스 올린 적 (허브 > 적 시전바 대상)
+local function Casting(u)
+    if not UnitExists(u) then return false end
+    local ok, r = pcall(function() return (UnitCastingInfo(u) or UnitChannelInfo(u)) and true or false end)
+    return (not ok) or r
+end
+local function PickUnit(b)
+    if b.baseUnit ~= "target" then return b.baseUnit end
+    if Casting("target") then return "target" end
+    local who = O("who")
+    local alt = (who == "focus" and "focus") or (who == "mouse" and "mouseover") or nil
+    if alt and Casting(alt) and ns.Try(UnitCanAttack, "player", alt) and not ns.Try(UnitIsUnit, alt, "target") then return alt end
+    return "target"
+end
+
 local function Start(b)
+    b.unit = PickUnit(b)
     local u = b.unit
+    -- 허브 '전투 밖에서도' 끔: 내 시전바는 전투 중에만
+    if u == "player" and not O("ooc") and not UnitAffectingCombat("player") then
+        if b:IsShown() then Hide(b) end
+        return
+    end
     -- 허브 '내 시전바만': 대상 시전바는 안 띄움
     if u ~= "player" and ns.db.castMineOnly then
+        if b:IsShown() then Hide(b) end
+        return
+    end
+    -- 허브 '내 시전바' 끔
+    if u == "player" and ns.db.castMineOff then
         if b:IsShown() then Hide(b) end
         return
     end
@@ -248,6 +341,7 @@ local function Start(b)
     end)
     if not ok then
         -- 숨겨진 값: 귀여운 시전바는 값만 옮겨 받고, 예전 바는 블리자드 시전바를 빌려 씀
+        if u ~= "player" and u ~= "target" then Hide(b) return end   -- 주시 · 마우스 대상은 빌릴 바가 없음
         if b.cute then
             if not StartMirror(b, raw) then Hide(b) end
         elseif not StartBorrow(b) then
@@ -261,6 +355,8 @@ local function Start(b)
         b.blizz.leelForce = 0; b.blizz:SetAlpha(0)
     end
     if not info then Hide(b) return end
+    -- 허브 > 대상 창 '시전바 보일 때: 끊을 수 있을 때만'
+    if u ~= "player" and info.notInt and ns.TgtOpt and ns.TgtOpt("castIntOnly") then Hide(b) return end
 
     b.casting, b.finishing, b.channel = true, false, info.channel
     b.castID = info.castID
@@ -282,6 +378,19 @@ local function Start(b)
     OnTick(b)
     b:SetScript("OnUpdate", OnTick)
     b:Show()
+    -- 지연 꼬리 · 정신 집중 눈금
+    local lagW, ticks
+    if u == "player" and not info.channel and O("lag") and GetNetStats then
+        local _, _, home, world = GetNetStats()
+        local lat = math.max(home or 0, world or 0) / 1000
+        local w = b.bar:GetWidth()
+        if w > 0 and info.dur > 0 then lagW = math.min(w * 0.5, w * lat / info.dur) end
+    end
+    if info.channel and O("ticks") then
+        local n = math.floor(info.dur + 0.5)
+        if n >= 2 and n <= 12 then ticks = n end
+    end
+    Extras(b, lagW, ticks)
     if b.OnLayout then b:OnLayout() end
 end
 
@@ -289,6 +398,8 @@ local function Finish(b, kind, label)
     if not b.casting or b.finishing then return end
     b.finishing = true
     b:SetScript("OnUpdate", nil)
+    Extras(b)
+    if not O("flash") then Hide(b) return end
     if b.mirroring then
         -- 값을 모르니 완료면 끝까지 채우기만
         if kind == "done" then pcall(function() local _, hi = b.bar:GetMinMaxValues(); b.bar:SetValue(hi) end) end
@@ -314,8 +425,8 @@ local function SameCast(b, guid)
     return not ok or same
 end
 
-local function BuildHud(f, unit, mirrored, w)
-    local b = ns.CreateSkewBar(f, w, H, { mirrored = mirrored, inset = 2, noShadow = true, shape = "pill32" })
+local function BuildHud(f, unit, mirrored, w, h)
+    local b = ns.CreateSkewBar(f, w, h or H, { mirrored = mirrored, inset = 2, noShadow = true, shape = "pill32" })
     b.unit, b.mirrored = unit, mirrored
     b:SetFrameLevel(f.hp:GetFrameLevel() + 2)
 
@@ -329,6 +440,7 @@ local function BuildHud(f, unit, mirrored, w)
     local iconEdge = b:CreateTexture(nil, "BORDER")
     iconEdge:SetTexture(ns.MEDIA .. "circle"); iconEdge:SetVertexColor(0.07, 0.05, 0.04, 1)
     iconEdge:SetPoint("TOPLEFT", b.icon, -1.5, 1.5); iconEdge:SetPoint("BOTTOMRIGHT", b.icon, 1.5, -1.5)
+    b.iconEdge = iconEdge
 
     b.name = ns.Font(b, 12)
     b.name:SetWordWrap(false)
@@ -352,29 +464,106 @@ local function BuildHud(f, unit, mirrored, w)
     end
     b.name:SetWidth(w - 60)
     b.name:SetJustifyH(mirrored and "RIGHT" or "LEFT")
+    function b:PlaceIcon(mode)
+        local a = mode == "off" and 0 or 1
+        self.icon:SetAlpha(a); self.iconEdge:SetAlpha(a)
+        self.icon:ClearAllPoints(); self.name:ClearAllPoints()
+        if mode == "left" then
+            if mirrored then
+                self.icon:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", -2, -3)
+                self.name:SetPoint("RIGHT", self.icon, "LEFT", -5, 0)
+            else
+                self.icon:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 2, -3)
+                self.name:SetPoint("LEFT", self.icon, "RIGHT", 5, 0)
+            end
+        else
+            if mirrored then
+                self.name:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", -2, -3)
+                self.icon:SetPoint("RIGHT", self, "LEFT", -6, 0)
+            else
+                self.name:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 2, -3)
+                self.icon:SetPoint("LEFT", self, "RIGHT", 6, 0)
+            end
+        end
+    end
     return b
 end
 
 local BuildBunny, BuildPaw  -- 아래 "귀여운 시전바"
 
 local function CreateCast(f, unit, mirrored, w, style)
+    local lenK = (tonumber(O("len")) or 100) / 100
+    local thK = (tonumber(O("thick")) or 100) / 100
+    w = math.floor(w * lenK + 0.5)
     local b
-    if style == "bunny" then b = BuildBunny(f, unit, w); b.cute = true
-    elseif style == "paw" then b = BuildPaw(f, unit); b.cute = true
-    else b = BuildHud(f, unit, mirrored, w) end
-    b.unit = unit
+    if style == "bunny" then b = BuildBunny(f, unit, w, math.max(6, math.floor(16 * thK + 0.5))); b.cute = true
+    elseif style == "paw" then b = BuildPaw(f, unit, lenK, thK); b.cute = true
+    else b = BuildHud(f, unit, mirrored, w, math.max(4, math.floor(H * thK + 0.5))) end
+    b.unit, b.baseUnit = unit, unit
+    b.baseW, b.style = math.floor(w / lenK + 0.5), style   -- 처음 길이 (허브 '바 길이'로 바로 바꿀 때 기준)
     b:Hide()
+    -- 글씨 기본 크기 (허브 '글씨 크기'는 여기에 더하기)
+    pcall(function() local _, sz = b.name:GetFont(); b.nameSz = math.floor(sz + 0.5) end)
+    pcall(function() local _, sz = b.time:GetFont(); b.timeSz = math.floor(sz + 0.5) end)
+    -- 지연 꼬리 (내 시전바 끝 빨간 부분) · 정신 집중 눈금
+    local holderT = CreateFrame("Frame", nil, b.bar)
+    holderT:SetAllPoints(b.bar); holderT:SetFrameLevel(b.bar:GetFrameLevel() + 2)
+    local lag = holderT:CreateTexture(nil, "OVERLAY")
+    lag:SetColorTexture(0.85, 0.26, 0.18, 0.6)
+    lag:SetPoint("TOPRIGHT", b.bar, "TOPRIGHT", 0, 0); lag:SetPoint("BOTTOMRIGHT", b.bar, "BOTTOMRIGHT", 0, 0)
+    local lm = holderT:CreateMaskTexture()
+    lm:SetTexture(ns.MEDIA .. (style == "paw" and "cb_paws" or "pill32"), "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    lm:SetAllPoints(b.bar)
+    lag:AddMaskTexture(lm)
+    lag:Hide()
+    b.lagTex = lag
+    b.ticks = {}
+    for i = 1, 11 do
+        local t = holderT:CreateTexture(nil, "OVERLAY", nil, 1)
+        t:SetColorTexture(1, 1, 1, 0.65); t:SetWidth(1.5); t:Hide()
+        b.ticks[i] = t
+    end
+    -- 내가 끊겼을 때 흔들기
+    local ag = b:CreateAnimationGroup()
+    for i, dx in ipairs({ -6, 12, -10, 7, -3 }) do
+        local a = ag:CreateAnimation("Translation"); a:SetOffset(dx, 0); a:SetDuration(0.045); a:SetOrder(i)
+    end
+    b.shake = ag
 
     local ev = CreateFrame("Frame")
     for _, e in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_DELAYED",
                          "UNIT_SPELLCAST_CHANNEL_UPDATE", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_CHANNEL_STOP",
                          "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_FAILED",
                          "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE" }) do
-        pcall(ev.RegisterUnitEvent, ev, e, unit)
+        if unit == "target" then
+            if not pcall(ev.RegisterUnitEvent, ev, e, "target", "focus") then pcall(ev.RegisterUnitEvent, ev, e, "target") end
+            ev:RegisterEvent(e)   -- 마우스 올린 적은 이름이 자주 바뀌어서 전부 받고 아래에서 걸러요
+        else
+            pcall(ev.RegisterUnitEvent, ev, e, unit)
+        end
     end
-    if unit == "target" then ev:RegisterEvent("PLAYER_TARGET_CHANGED") end
-    ev:SetScript("OnEvent", function(_, event, _, guid)
-        if ns.moving then return end
+    if unit == "target" then
+        ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+        pcall(ev.RegisterEvent, ev, "UPDATE_MOUSEOVER_UNIT")
+        pcall(ev.RegisterEvent, ev, "PLAYER_FOCUS_CHANGED")
+    end
+    ev:SetScript("OnEvent", function(_, event, eu, guid)
+        if ns.moving or ns.castPv then return end
+        if unit == "target" and type(eu) == "string" and event:find("^UNIT_SPELLCAST") then
+            -- 대상 · (허브에서 고른) 주시 대상 · 마우스 올린 적만
+            local who = O("who")
+            local okU = eu == "target" or (who == "focus" and eu == "focus") or (who == "mouse" and eu == "mouseover")
+            if not okU then return end
+            -- 지금 보여주는 유닛이 아닌 쪽의 끝 소식은 무시, 시작 소식은 다시 고르기
+            if eu ~= b.unit and not (event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START") then return end
+        end
+        if event == "UPDATE_MOUSEOVER_UNIT" or event == "PLAYER_FOCUS_CHANGED" then
+            if O("who") == "target" then return end
+            if b.casting and b.unit == "target" then return end
+            b.finishToken = nil
+            Start(b)
+            return
+        end
         if event == "PLAYER_TARGET_CHANGED" then
             b.finishToken = nil
             Hide(b)
@@ -387,7 +576,13 @@ local function CreateCast(f, unit, mirrored, w, style)
         elseif b.borrowing then
             return   -- 빌린 시전바는 게임이 알아서 끝냄
         elseif event == "UNIT_SPELLCAST_INTERRUPTED" then
-            if SameCast(b, guid) then Finish(b, "fail", "차단됨") end
+            if SameCast(b, guid) then
+                if unit == "player" and O("gotKick") and b.casting and not b.finishing then
+                    b.shake:Stop(); b.shake:Play()
+                    pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_QUEST_FAILED) or 847, "Master")
+                end
+                Finish(b, "fail", "차단됨")
+            end
         elseif event == "UNIT_SPELLCAST_FAILED" then
             if SameCast(b, guid) then Finish(b, "fail", "실패") end
         elseif event == "UNIT_SPELLCAST_SUCCEEDED" or event == "UNIT_SPELLCAST_STOP" then
@@ -436,17 +631,20 @@ function ns:CreateHUDCasts(player, target, barX)
         return
     end
     -- 내 시전바: 기력바 시작점(barX + 14)에 맞춰, 마나선 아래
-    local pc = CreateCast(player, "player", false, 220)
+    local pc = CreateCast(player, "player", false, 220, "hud")
     pc:SetPoint("TOPLEFT", player, "TOPLEFT", barX + 14, -99)
     SetupBlizz(pc, PlayerCastingBarFrame or CastingBarFrame)
 
     -- 대상 시전바: 체력바 바로 아래, 시전 중엔 디버프를 한 칸 내림
-    local tc = CreateCast(target, "target", true, 230)
+    local tc = CreateCast(target, "target", true, 230, "hud")
     tc:SetPoint("TOPRIGHT", target.hp, "BOTTOMRIGHT", -14, -7)
     function tc:OnLayout()
+        -- 연계 점수 칸이 보이면 그만큼 아래로 (ns.ComboShift)
+        local D = ns.ComboShift or 0
+        self:ClearAllPoints(); self:SetPoint("TOPRIGHT", target.hp, "BOTTOMRIGHT", -14, -7 - D)
         local cont = target.debuffs
         if not cont then return end
-        local y = self:IsShown() and -51 or -17   -- 대상 자원 줄 자리만큼 아래로
+        local y = (self:IsShown() and -51 or -17) - D   -- 대상 자원 줄 자리만큼 아래로
         pcall(function()
             cont:ClearAllPoints()
             cont:SetPoint("TOPRIGHT", target.hp, "BOTTOMRIGHT", -28, y)
@@ -469,6 +667,7 @@ end
 function ns:SetCastPreview(on)
     local cs = ns.casts
     if not cs then return end
+    ns.castPv = on and true or false
     for unit, b in pairs(cs) do
         if on and unit ~= "player" and ns.db.castMineOnly then
             b:Hide()
@@ -484,10 +683,19 @@ function ns:SetCastPreview(on)
             b.icon:SetTexture(unit == "player" and 132222 or 136197)
             b.icon:Show()
             b.name:SetText(unit == "player" and "시전 예시" or "대상 시전 예시"); b.name:Show()
-            b.time:SetText(unit == "player" and "1.4" or "0.9"); b.time:Show()
+            local left, dur = unit == "player" and 1.4 or 0.9, unit == "player" and 2.5 or 1.5
+            local f = O("tfmt")
+            if f == "of" then b.time:SetFormattedText("%.1f / %.1f", dur - left, dur)
+            elseif f == "leftof" then b.time:SetFormattedText("%.1f / %.1f", left, dur)
+            else b.time:SetFormattedText("%.1f", left) end
+            b.time:Show()
             b:Show()
+            local w = b.bar:GetWidth()
+            Extras(b, (unit == "player" and O("lag")) and w * 0.12 or nil, (unit == "player" and O("ticks")) and 4 or nil)
+            Decor(b)
         else
             b.casting, b.finishing = false, false
+            Extras(b)
             b:Hide()
             Start(b)
         end
@@ -519,6 +727,7 @@ local function SmallIcon(b, size)
     local edge = b:CreateTexture(nil, "BORDER")
     edge:SetTexture(ns.MEDIA .. "circle"); edge:SetVertexColor(0.07, 0.05, 0.04, 1)
     edge:SetPoint("TOPLEFT", b.icon, -1.5, 1.5); edge:SetPoint("BOTTOMRIGHT", b.icon, 1.5, -1.5)
+    b.iconEdge = edge
     b.lock = b:CreateTexture(nil, "ARTWORK")
     b.lock:SetTexture(ns.MEDIA .. "lock")
     b.lock:SetVertexColor(0.73, 0.70, 0.70, 1)
@@ -538,6 +747,18 @@ local function TopRow(b, w, anchor, yoff)
     b.time = ns.Num(b, 18, C.tx)
     b.time:SetShadowOffset(0, -1)
     b.time:SetPoint("BOTTOMRIGHT", anchor, "TOPRIGHT", -4, yoff - 1)
+    function b:PlaceIcon(mode)
+        local a = mode == "off" and 0 or 1
+        self.icon:SetAlpha(a); self.iconEdge:SetAlpha(a)
+        self.icon:ClearAllPoints(); self.name:ClearAllPoints()
+        if mode == "left" then
+            self.icon:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 4, yoff)
+            self.name:SetPoint("LEFT", self.icon, "RIGHT", 6, 0)
+        else
+            self.name:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 4, yoff)
+            self.icon:SetPoint("LEFT", anchor, "RIGHT", 18, 0)
+        end
+    end
 end
 
 -- 글자 폭 (숨겨진 이름이면 폭도 숨겨져서 계산 불가 → 기본값)
@@ -555,8 +776,8 @@ local function PlaceTags(b)
 end
 
 -- 깡충 토끼: 알약 바 위를 토끼가 달려가고 끝에 하트(대상은 당근)
-BuildBunny = function(f, unit, w)
-    local b = ns.CreateSkewBar(f, w, 16, { inset = 3, noShadow = true, shape = "pill32" })
+BuildBunny = function(f, unit, w, h)
+    local b = ns.CreateSkewBar(f, w, h or 16, { inset = 3, noShadow = true, shape = "pill32" })
     b:SetFrameStrata("MEDIUM")
     TopRow(b, w, b, 5)
     b.goal = b.over:CreateTexture(nil, "OVERLAY")
@@ -588,8 +809,8 @@ BuildBunny = function(f, unit, w)
 end
 
 -- 발자국: 발자국 6개 줄이 왼쪽부터 칠해짐 (발자국 그림을 채움 막대로 써서 계산 없이)
-BuildPaw = function(f, unit)
-    local w, h = 208, 26
+BuildPaw = function(f, unit, lenK, thK)
+    local w, h = math.floor(208 * (lenK or 1) + 0.5), math.max(10, math.floor(26 * (thK or 1) + 0.5))
     local b = CreateFrame("Frame", nil, f)
     b:SetSize(w, h)
     b:SetFrameStrata("MEDIUM")
@@ -617,14 +838,26 @@ BuildPaw = function(f, unit)
     row:SetSize(10, 18)
     row:SetPoint("TOP", b, "BOTTOM", 0, -3)
     local function Layout()
+        local mode = O("icon")
         local nw = TextWidth(b.name, 220, 90)
         local extra = (b.kick:IsShown() and 40 or 0) + (b.lock:IsShown() and 16 or 0)
-        local total = 16 + 6 + nw + extra + 8 + 30
-        b.icon:ClearAllPoints(); b.icon:SetPoint("LEFT", row, "CENTER", -total / 2, 0)
-        b.name:ClearAllPoints(); b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, 0)
+        local total = (mode == "left" and 22 or 0) + nw + extra + 8 + 30 + (mode == "right" and 22 or 0)
+        b.icon:ClearAllPoints(); b.name:ClearAllPoints()
+        if mode == "left" then
+            b.icon:SetPoint("LEFT", row, "CENTER", -total / 2, 0)
+            b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, 0)
+        else
+            b.name:SetPoint("LEFT", row, "CENTER", -total / 2, 0)
+        end
         b.kick:ClearAllPoints(); b.kick:SetPoint("LEFT", b.name, "RIGHT", 6, 0)
         b.lock:ClearAllPoints(); b.lock:SetPoint("LEFT", b.name, "RIGHT", 5, 0)
         b.time:ClearAllPoints(); b.time:SetPoint("LEFT", b.name, "RIGHT", 8 + extra, -1)
+        if mode == "right" then b.icon:SetPoint("LEFT", b.time, "RIGHT", 6, 1) end
+    end
+    function b:PlaceIcon(mode)
+        local a = mode == "off" and 0 or 1
+        self.icon:SetAlpha(a); self.iconEdge:SetAlpha(a)
+        Layout()
     end
     function b:OnPaint(kind)
         self.kick:SetShown(kind == "int")
@@ -687,4 +920,59 @@ end
 function ns:ResetCastPosition()
     ns.db.castPoint = nil
     if ns.ApplyCastPosition then ns.ApplyCastPosition() end
+end
+
+----------------------------------------------------------------------
+-- 내가 적 시전을 끊으면 알림 (허브 > 시전바 > 끊었을 때 알림)
+----------------------------------------------------------------------
+do
+    local kf = CreateFrame("Frame")
+    local me
+    kf:SetScript("OnEvent", function()
+        local mode = O("kick")
+        if mode == "off" then return end
+        local ok, _, sub, _, sGUID, _, _, _, _, dName, _, _, _, _, _, _, xName = pcall(CombatLogGetCurrentEventInfo)
+        if not ok or sub ~= "SPELL_INTERRUPT" then return end
+        me = me or UnitGUID("player")
+        local pet = UnitGUID("pet")
+        local mine = false
+        pcall(function() mine = (sGUID == me) or (pet and sGUID == pet) end)
+        if not mine then return end
+        local msg = "끊음!"
+        pcall(function() if xName then msg = msg .. " " .. xName end end)
+        pcall(function() if dName then msg = msg .. "  (" .. dName .. ")" end end)
+        if mode == "screen" then
+            if UIErrorsFrame then UIErrorsFrame:AddMessage(msg, 0.95, 0.70, 0.76) end
+        elseif mode == "chat" then
+            DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[르엘 시전바]|r " .. msg)
+        elseif mode == "sound" then
+            pcall(PlaySound, (SOUNDKIT and SOUNDKIT.RAID_WARNING) or 8959, "Master")
+        end
+    end)
+    function ns.CastKickWatch()
+        if O("kick") ~= "off" then pcall(kf.RegisterEvent, kf, "COMBAT_LOG_EVENT_UNFILTERED")
+        else kf:UnregisterAllEvents() end
+    end
+    local boot = CreateFrame("Frame")
+    boot:RegisterEvent("PLAYER_LOGIN")
+    boot:SetScript("OnEvent", function() ns.CastKickWatch() end)
+end
+
+-- 허브 '바 길이 · 바 두께': 다시 불러오기 없이 바로
+function ns.CastApplySize()
+    local lenK = (tonumber(O("len")) or 100) / 100
+    local thK = (tonumber(O("thick")) or 100) / 100
+    for _, b in pairs(ns.casts or {}) do
+        if b.baseW then
+            local st = b.style
+            local w, h
+            if st == "paw" then w, h = math.floor(208 * lenK + 0.5), math.max(10, math.floor(26 * thK + 0.5))
+            elseif st == "bunny" then w, h = math.floor(b.baseW * lenK + 0.5), math.max(6, math.floor(16 * thK + 0.5))
+            else w, h = math.floor(b.baseW * lenK + 0.5), math.max(4, math.floor(H * thK + 0.5)) end
+            b:SetSize(w, h)
+            if st == "bunny" then b.name:SetWidth(math.max(40, w - 110))
+            elseif st ~= "paw" then b.name:SetWidth(math.max(40, w - 60)) end
+            if b.OnLayout then pcall(b.OnLayout, b) end
+        end
+    end
 end

@@ -20,7 +20,7 @@ local C = {
     cream = { 0.965, 0.925, 0.910 },
     dim   = { 0.80, 0.64, 0.62 },
 }
-local DEFAULTS = { on = true, all = false, size = 1.0, y = 0, key = true, stem = 34, loot = true, lootY = -70, lootSize = 1.0, lootBob = true, lootMulti = true, sparkle = true }
+local DEFAULTS = { on = true, all = false, size = 1.0, y = 0, key = true, stem = 34, loot = true, lootY = -70, lootSize = 1.0, lootBob = true, lootMulti = true, sparkle = true, prog = true, halo = true }   -- prog = 진행도 숫자 · halo = 숨쉬는 빛 (허브)
 local db
 
 local function P(msg) print("|cfff2b3c2[Leel Spot]|r " .. msg) end
@@ -473,17 +473,18 @@ local function Refresh()
     nameFS:SetText(okN and name or "")
     if a then
         progFS:SetText(a .. "/" .. b)
-        progFS:Show()
+        progFS:SetShown(db.prog ~= false)
+        if db.prog == false then progFS:SetText("") end
         rim:SetVertexColor(C.pink[1], C.pink[2], C.pink[3], 0.85)
         icon:SetDesaturated(false); icon:SetAlpha(1)
-        halo:Show(); ag:Play()
+        if db.halo ~= false then halo:Show(); ag:Play() else halo:Hide(); ag:Stop() end
     else
         progFS:SetText(""); progFS:Hide()
         rim:SetVertexColor(C.dim[1], C.dim[2], C.dim[3], 0.45)
         icon:SetDesaturated(true); icon:SetAlpha(0.8)
         halo:Hide(); ag:Stop()
     end
-    Layout(a ~= nil)
+    Layout(a ~= nil and db.prog ~= false)
 
     local kt = nil -- 줍기 키 칩은 안 씀 (오른쪽 클릭으로 줍기)
     if kt then

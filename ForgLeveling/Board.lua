@@ -708,6 +708,10 @@ local function QuestPos(e, m)
     -- 3) 게임이 알려주는 다음 갈 곳 (목표가 다른 지역 · 대륙에 있을 때 길목)
     do local x, y = GameWaypoint(e.id, m); if x then return x, y, "game" end end
     if e.done then
+        -- 길잡이 자료의 좌표는 "준 사람" 자리예요. Questie가 반납 NPC를 알면 (다른 지역 · 대륙이어도)
+        -- 준 사람 자리를 반납 자리로 쓰지 않아요 (예: 스톨리의 빚 = 무법항에서 받고 타나리스 스톨리에게 반납)
+        local c = qieCache[e.id]
+        if c and c.fin and #c.fin > 0 then return nil, nil, "none" end
         if g and g.x and IsHere(g.zone, m) then return g.x, g.y, "guide" end
         return nil, nil, "none"
     end
@@ -1201,7 +1205,7 @@ local function BuildItems()
             for _, e in ipairs(list) do items[#items + 1] = { e = e } end
         end
         if board.empty then
-            board.empty:SetText(total == 0 and ("\"%s\" 퀘는 퀘스트 목록에 없어요\n받은 퀘만 찾아요 · ✕ 를 누르면 전체 목록"):format(board.queryRaw or q)
+            board.empty:SetText(total == 0 and ("\"%s\" 퀘는 퀘스트 목록에 없어요\n받은 퀘만 찾아요 · 오른쪽 X를 누르면 전체 목록"):format(board.queryRaw or q)
                 or "여기엔 퀘가 없어요.\n왼쪽에서 다른 지역을 골라 보세요.")
         end
         return items
@@ -1320,6 +1324,20 @@ do
         if q.done then return "|cff8fe899완료|r" end
         return (q.prog and q.prog ~= "") and q.prog or "하는 중"
     end
+    -- 파티원 진행률 (0~1) · 목표별 "3/8" 목록 · 모르면 nil (상대가 르엘 UI가 아니면)
+    function PQ.Ratio(m, id)
+        local r = PQ.remote[m.name]
+        local q = r and r.q[id]
+        if not q then return nil end
+        if q.done then return 1, {} end
+        local have, need, list = 0, 0, {}
+        for a, b in (q.prog or ""):gmatch("(%d+)/(%d+)") do
+            a, b = tonumber(a), tonumber(b)
+            if b and b > 0 then have = have + math.min(a, b); need = need + b end
+            list[#list + 1] = { a, b }
+        end
+        return need > 0 and (have / need) or 0, list
+    end
     function PQ.ClassCol(cls)
         local c = cls and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cls]
         return c and { c.r, c.g, c.b } or { 0.8, 0.75, 0.72 }
@@ -1332,6 +1350,7 @@ do
     end
     function PQ.Send()
         if not (IsInGroup and IsInGroup()) or (IsInRaid and IsInRaid()) then return end
+        if DB and DB.partyShare == false then return end   -- 허브: 내 진행 보내기 끔
         if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
         local parts = {}
         for _, e in ipairs(log) do
@@ -1363,6 +1382,7 @@ do
     local function Repaint()
         PQ.at = 0
         if board and board:IsShown() and RefreshBoard then RefreshBoard() end
+        if RefreshTracker and _G.ForgLevelingFrame and _G.ForgLevelingFrame:IsShown() then pcall(RefreshTracker) end
     end
     local f = CreateFrame("Frame")
     f:RegisterEvent("CHAT_MSG_ADDON")
@@ -1376,10 +1396,20 @@ do
             local kind, data = a2:match("^(%a)|(.*)$")
             if not kind then return end
             local r = PQ.remote[who]
+            local old = r and r.q or {}
             if kind == "N" or not r then r = { q = {} }; PQ.remote[who] = r end
             for t in data:gmatch("[^;]+") do
                 local id, d, rest = t:match("^(%d+):(%d)(.*)$")
-                if id then r.q[tonumber(id)] = { done = d == "1", prog = (rest:gsub("^:", ""):gsub(",", " · ")) } end
+                if id then
+                    id = tonumber(id)
+                    local was = old[id]
+                    r.q[id] = { done = d == "1", prog = (rest:gsub("^:", ""):gsub(",", " · ")) }
+                    -- 허브: 파티원이 같은 퀘를 다 하면 알림 (처음 받은 목록은 알리지 않아요)
+                    if DB and DB.partyToast and d == "1" and was and not was.done and byId and byId[id] then
+                        Print(("|cff8fe899%s|r 님이 [%s] 다 했어요"):format(who, byId[id].title or "?"))
+                        if PlaySound and not DB.sndOff then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_QUEST_LIST_COMPLETE) or 878, "Master") end
+                    end
+                end
             end
             Repaint()
         elseif ev == "GROUP_ROSTER_UPDATE" then
@@ -3243,7 +3273,7 @@ local function MakeBoard()
         toast:SetFrameLevel(board:GetFrameLevel() + 30)
         toast:SetHeight(24); toast:SetPoint("TOPRIGHT", board.map, "TOPRIGHT", -10, -10)
         Plate(toast, 12, { 0.07, 0.05, 0.055, 0.94 }, { P.acc[1], P.acc[2], P.acc[3], 1 })
-        toast.fs = Font(toast, 12, P.tx); toast.fs:SetPoint("CENTER", 0, 0); toast.fs:SetText("↻ 길을 다시 짰어요")
+        toast.fs = Font(toast, 12, P.tx); toast.fs:SetPoint("CENTER", 0, 0); toast.fs:SetText("길을 다시 짰어요")
         toast:SetWidth(toast.fs:GetStringWidth() + 26)
         toast:Hide()
         local lastSig
@@ -3839,6 +3869,80 @@ local function NavRing(parent, size)
     return f
 end
 
+-- 파티원 얼굴 + 진행 고리 (B안): 직업 색 동그라미 + 이름 첫 글자, 둘레 초록 고리 = 그 사람 진행률
+local GREEN = { 0.56, 0.91, 0.6 }
+local function FaceRing(parent)
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(20, 20)
+    local edge = f:CreateTexture(nil, "BACKGROUND", nil, 0); edge:SetTexture(MEDIA .. "circle")
+    edge:SetPoint("TOPLEFT", -1, 1); edge:SetPoint("BOTTOMRIGHT", 1, -1); edge:SetVertexColor(0, 0, 0, 0.85)
+    local track = f:CreateTexture(nil, "BACKGROUND", nil, 1); track:SetTexture(FLM .. "nav_ring"); track:SetAllPoints()
+    track:SetVertexColor(0.227, 0.169, 0.157, 1)
+    f.track = track
+    local function Half(right)
+        local c = CreateFrame("Frame", nil, f)
+        if right then c:SetPoint("TOPLEFT", f, "TOP", 0, 0); c:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+        else c:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0); c:SetPoint("BOTTOMRIGHT", f, "BOTTOM", 0, 0) end
+        local okClip = pcall(c.SetClipsChildren, c, true)
+        local t = c:CreateTexture(nil, "ARTWORK"); t:SetTexture(FLM .. "nav_half")
+        t:SetSize(20, 20); t:SetPoint("CENTER", f, "CENTER", 0, 0)
+        t:SetVertexColor(GREEN[1], GREEN[2], GREEN[3], 1)
+        return c, t, okClip
+    end
+    f.cR, f.tR, f.clip = Half(true)
+    f.cL, f.tL = Half(false)
+    local inner = CreateFrame("Frame", nil, f); inner:SetAllPoints(); inner:SetFrameLevel(f:GetFrameLevel() + 5)
+    f.disc = inner:CreateTexture(nil, "ARTWORK"); f.disc:SetTexture(MEDIA .. "circle")
+    f.disc:SetPoint("TOPLEFT", 3, -3); f.disc:SetPoint("BOTTOMRIGHT", -3, 3)
+    f.fs = Font(inner, 9.5, P.ink); f.fs:SetPoint("CENTER", 0, 0); f.fs:SetShadowColor(0, 0, 0, 0)
+    function f:SetProgress(p)
+        if p == nil then self.cR:Hide(); self.cL:Hide(); self.track:SetVertexColor(0.35, 0.3, 0.28, 1) return end
+        self.track:SetVertexColor(0.227, 0.169, 0.157, 1)
+        p = math.max(0, math.min(1, p))
+        if not self.clip then self.cR:Hide(); self.cL:Hide(); return end
+        local tau = math.pi * 2
+        if p <= 0.5 then
+            self.tR:SetRotation(-p * tau); self.cR:SetShown(p > 0); self.cL:Hide()
+        else
+            self.tR:SetRotation(-math.pi); self.cR:Show()
+            self.tL:SetRotation(math.pi - (p - 0.5) * tau); self.cL:Show()
+        end
+    end
+    f:EnableMouse(true)
+    f:SetScript("OnEnter", function(self)
+        local m, e = self.m, self.e
+        if not (m and e) then return end
+        local c = ns.PQ.ClassCol(m.cls)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        local cname = m.unit and UnitClass(m.unit)
+        GameTooltip:SetText(m.name .. (cname and ("  |cff9a8a86" .. cname .. "|r") or ""), c[1], c[2], c[3])
+        local p, list = ns.PQ.Ratio(m, e.id)
+        if p == nil then
+            GameTooltip:AddLine("같은 퀘를 하고 있어요", 0.85, 0.85, 0.85)
+            GameTooltip:AddLine("진행 숫자는 상대도 르엘 UI일 때만 보여요", 0.6, 0.6, 0.6, true)
+        elseif p >= 1 and #list == 0 then
+            GameTooltip:AddLine("다 했어요 · 반납만 남았어요", GREEN[1], GREEN[2], GREEN[3])
+        else
+            local k = 0
+            for _, o in ipairs(e.objs or {}) do
+                if o.have and o.need then
+                    k = k + 1
+                    local pr = list[k]
+                    if pr then
+                        local done = pr[1] >= pr[2]
+                        GameTooltip:AddDoubleLine(o.text or "", pr[1] .. "/" .. pr[2], 0.85, 0.85, 0.85,
+                            done and GREEN[1] or 1, done and GREEN[2] or 1, done and GREEN[3] or 1)
+                    end
+                end
+            end
+            GameTooltip:AddLine(("전체 %d%%"):format(math.floor(p * 100 + 0.5)), 0.6, 0.6, 0.6)
+        end
+        GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return f
+end
+
 local function MakeRow(i)
     local r = CreateFrame("Button", nil, trk)
     r:SetHeight(20)
@@ -3961,8 +4065,10 @@ local function MakeTracker()
         l, t = l * ts / us, t * ts / us
         DB.trkPos = { "TOPLEFT", "BOTTOMLEFT", math.floor(l + 0.5), math.floor(t + 0.5) }
         trk:ClearAllPoints()
-        trk:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", DB.trkPos[3], DB.trkPos[4])
+        local k = trk:GetScale() or 1
+        trk:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", DB.trkPos[3] / k, DB.trkPos[4] / k)
     end
+    trk:SetScale(DB.trkScale or 1)   -- 허브 > 퀘스트 목록 > 창 크기
     trk:SetFrameStrata("MEDIUM")
     trk:SetClampedToScreen(true)
     trk:SetMovable(true)
@@ -4195,7 +4301,7 @@ local function MakeTracker()
 
 
     local tp = DB.trkPos
-    if tp then trk:SetPoint(tp[1], UIParent, tp[2], tp[3], tp[4]) else trk:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -24, -280) end
+    if tp then local k = trk:GetScale() or 1; trk:SetPoint(tp[1], UIParent, tp[2], tp[3] / k, tp[4] / k) else trk:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -24, -280) end
     -- 예전 방식(가운데 기준)으로 저장된 자리는 처음 한 번 왼쪽 위 기준으로 바꿔요
     if not tp or tp[1] ~= "TOPLEFT" then C_Timer.After(0.5, function() if trk:GetLeft() then trk.SavePos() end end) end
 
@@ -4681,7 +4787,36 @@ RefreshTracker = function()
         end
         r.stamp:SetShown(e.done and not it.group and not (stampFx and stampFx.id == e.id and stampFx.big) and true or false)
         local diffW = it.group and 0 or (r.diff:GetWidth() + 8)
-        r.title:SetWidth(math.min(r.title:GetStringWidth() + 2, W - 28 - diffW - (r.cur and 82 or 0) - ((e.done and not it.group) and 24 or 0)))
+        -- 같은 퀘 파티원 얼굴 + 진행 고리 (파티일 때만 · 반납 상자는 빼요)
+        r.faces = r.faces or {}
+        local pm0 = (not it.group and DB.partyFaces ~= false and ns.PQ and ns.PQ.Of(e)) or {}
+        local pm = pm0
+        if DB.partyHideDone then   -- 허브: 다 한 파티원은 얼굴 숨기기
+            pm = {}
+            for _, m in ipairs(pm0) do if (ns.PQ.Ratio(m, e.id)) ~= 1 then pm[#pm + 1] = m end end
+        end
+        local faceW = 0
+        for fi = 1, 4 do
+            local fc, m = r.faces[fi], pm[fi]
+            if m then
+                if not fc then fc = FaceRing(r); r.faces[fi] = fc end
+                local c = ns.PQ.ClassCol(m.cls)
+                fc.disc:SetVertexColor(c[1], c[2], c[3], 1)
+                fc.fs:SetText(m.name:match("^[%z\1-\127\194-\244][\128-\191]*") or "")
+                fc.m, fc.e = m, e
+                local pr = ns.PQ.Ratio(m, e.id)
+                fc:SetProgress(pr)
+                if DB.partyRing == false then fc.cR:Hide(); fc.cL:Hide(); fc.track:SetVertexColor(0, 0, 0, 0) end
+                fc:ClearAllPoints()
+                fc:SetPoint("LEFT", r.stamp:IsShown() and r.stamp or (it.group and r.title or r.diff), "RIGHT", 6 + (fi - 1) * 22, 0)
+                fc:Show()
+                faceW = faceW + 22
+            elseif fc then
+                fc:Hide(); fc.m, fc.e = nil, nil
+            end
+        end
+        if faceW > 0 then faceW = faceW + 4 end
+        r.title:SetWidth(math.min(r.title:GetStringWidth() + 2, W - 28 - diffW - faceW - (r.cur and 82 or 0) - ((e.done and not it.group) and 24 or 0)))
         r.ring:SetShown(r.cur and true or false); r.dist:SetShown(r.cur and true or false)
         if not r.cur then r.distKo:Hide() end
         if not r.cur then r.dist:SetText("") end
@@ -5081,6 +5216,31 @@ end
 
 -- 세계 지도: 지도 그림판(캔버스) 위에 그려요
 local wmLayer
+-- 번호 원을 누르면: 그 자리의 블리자드 퀘스트 아이콘을 누른 것처럼 (퀘스트 범위가 떠요)
+local function ClickBlizzQuest(id)
+    local map = _G.WorldMapFrame
+    id = tonumber(id)
+    if not (map and id) then return false end
+    if map.EnumerateAllPins then
+        local ok, done = pcall(function()
+            for pin in map:EnumerateAllPins() do
+                local pid = pin.questID or (type(pin.questInfo) == "table" and pin.questInfo.questID)
+                if pid == id and pin.IsShown and pin:IsShown() then
+                    if pin.OnMouseClickAction and pcall(pin.OnMouseClickAction, pin, "LeftButton") then return true end
+                    if pin.OnClick and pcall(pin.OnClick, pin, "LeftButton") then return true end
+                    local f = pin.GetScript and (pin:GetScript("OnClick") or pin:GetScript("OnMouseUp"))
+                    if f and pcall(f, pin, "LeftButton", true) then return true end
+                end
+            end
+        end)
+        if ok and done then return true end
+    end
+    -- 아이콘을 못 찾으면: 그 퀘를 고른 상태로만 (범위를 보여 주는 게임이면 같이 떠요)
+    local hit = false
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then hit = pcall(C_SuperTrack.SetSuperTrackedQuestID, id) or hit end
+    if map.SetFocusedQuestID then hit = pcall(map.SetFocusedQuestID, map, id) or hit end
+    return hit
+end
 local function PaintWorldMap()
     local wm = _G.WorldMapFrame
     if not (wm and wm:IsShown() and wm.ScrollContainer and wm.ScrollContainer.Child and CDB) then return end
@@ -5209,7 +5369,21 @@ local function PaintWorldMap()
                         GameTooltip:AddLine(("|cfff2b3c2%d|r  %s"):format(num, t), 1, 1, 1)
                     end
                 end
+                GameTooltip:AddLine("|cff9a8a86Shift + 클릭 = 르엘 퀘스트에서 보기|r")
                 GameTooltip:Show()
+            end)
+            mk:SetScript("OnMouseUp", function(self, btn)
+                if btn ~= "LeftButton" then return end
+                local gg = self.leelG
+                local e = gg and gg.es and gg.es[1]
+                if e and e.id and IsShiftKeyDown() and not IsAltKeyDown() and not IsControlKeyDown() then
+                    -- Shift + 클릭: Leel Quest 판에서 그 퀘 펼쳐 보기 (지도는 닫아요)
+                    local W = _G.WorldMapFrame
+                    if W and W:IsShown() then if HideUIPanel then pcall(HideUIPanel, W) else W:Hide() end end
+                    pcall(OpenQuestDetail, e)
+                    return
+                end
+                if e and e.id then ClickBlizzQuest(e.id) end
             end)
             mk:SetScript("OnLeave", function(self)
                 GameTooltip:Hide()
@@ -5739,6 +5913,17 @@ end
 ns.ToggleBoard = ToggleBoard
 ns.RabbitRec = FillGuide
 _G.LeelQuestBoard_Toggle = ToggleBoard
+-- 허브: 창 크기 (왼쪽 위 모서리는 그 자리에 그대로)
+_G.LeelQuestSetScale = function(v)
+    if not DB then return end
+    DB.trkScale = v
+    if trk then
+        if trk:GetLeft() then trk.SavePos() end
+        trk:SetScale(v)
+        if DB.trkPos then trk:ClearAllPoints(); trk:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", DB.trkPos[3] / v, DB.trkPos[4] / v) end
+    end
+end
+_G.LeelQuestRefresh = function() if trk and RefreshTracker then pcall(RefreshTracker) end end
 -- 큰 지도(Leel Map)가 따라가는 길을 그릴 때 씀: 내 지역 지도 번호와 길 점들 (0~1, 옆 지역은 범위 밖 값)
 _G.LeelQuestRoute = function()
     if not (CDB and CDB.route and #CDB.route > 0 and DB.mapLines ~= false) then return end
@@ -5829,6 +6014,9 @@ end
                 tip:AddLine(s)
             end
         end
+        local inLog = false
+        for _, id in ipairs(ids) do if byId and byId[id] then inLog = true end end
+        if inLog then tip:AddLine("|cff9a8a86Shift + 클릭 = 르엘 퀘스트에서 보기|r") end
         tip:Show()
     end
     local hooked
@@ -5876,9 +6064,130 @@ end
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_LOGIN")
     ev:SetScript("OnEvent", function() TryHook(); C_Timer.After(3, TryHook) end)
+    ------------------------------------------------------------------
+    -- Shift + 클릭 = 퀘 자세히 보기 (Questie 지도 아이콘)
+    --   받은 퀘 → 게임 퀘스트 일지를 그 퀘로 · 아직 안 받은 퀘 → 르엘 자세히 창
+    --   Questie 원래 기능(숨기기)은 Shift + Alt + 클릭
+    ------------------------------------------------------------------
+    -- 받은 퀘만: Leel Quest 판을 열고 그 퀘를 펼쳐서 (추적창 Shift+클릭과 같게) · 안 받은 퀘는 아무것도 안 해요
+    local function ShowQuest(id)
+        local e = byId and byId[id]
+        if not e then for _, x in ipairs(log or {}) do if x.id == id then e = x break end end end
+        if not e then return end
+        local W = _G.WorldMapFrame
+        if W and W:IsShown() then if HideUIPanel then pcall(HideUIPanel, W) else W:Hide() end end
+        OpenQuestDetail(e)
+    end
+    local shiftAt, nWrapped = 0, 0
+    local function IdFrom(fr)
+        local n = 0
+        while fr and n < 4 do
+            local d = fr.data
+            if type(d) == "table" and type(d.Id) == "number" and (d.QuestData or d.Type == "available" or d.Type == "complete") then return d.Id end
+            local q = QuestIdOf(fr)
+            if q and q > 0 then return q end
+            fr = fr.GetParent and fr:GetParent(); n = n + 1
+        end
+    end
+    local function ShiftOK()
+        return IsShiftKeyDown() and not IsAltKeyDown() and not IsControlKeyDown()
+            and not (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+    end
+    -- 지금 마우스 아래(또는 떠 있는 지도 툴팁)의 받은 퀘 번호 (여러 퀘가 겹치면 받은 퀘 먼저)
+    local function HoverQuest()
+        local cand = {}
+        local foci = GetMouseFoci and GetMouseFoci()
+        local fr = (type(foci) == "table" and foci[1]) or (GetMouseFocus and GetMouseFocus())
+        if fr and OnMap(fr) then local id = IdFrom(fr); if id then cand[#cand + 1] = id end end
+        local tt = GameTooltip
+        if tt and tt:IsShown() then
+            local own = tt:GetOwner()
+            if own and OnMap(own) then local id = IdFrom(own); if id then cand[#cand + 1] = id end end
+            if tt.ShownAsMapIcon and tt._showData and type(tt._showData.Id) == "number" then cand[#cand + 1] = tt._showData.Id end
+            for _, ic in ipairs(tt.ShownAsMapIcon and tt._showIcons or {}) do
+                if type(ic) == "table" and type(ic.data) == "table" and type(ic.data.Id) == "number" then cand[#cand + 1] = ic.data.Id end
+            end
+        end
+        for _, id in ipairs(cand) do if byId and byId[id] then return id, fr end end
+        return cand[1], fr
+    end
+    local function Go(why)
+        local id, fr = HoverQuest()
+        D(why, fr and fr.GetName and fr:GetName() or "?", tostring(id), tostring(id and byId and byId[id] and true))
+        if not id then return end
+        shiftAt = GetTime()
+        local ok, err = pcall(ShowQuest, id)
+        if not ok then D("오류", err) end
+    end
+    -- Shift + 클릭 (누르는 순간 · 아이콘 클릭 둘 다에서 잡아요)
+    local gm = CreateFrame("Frame")
+    pcall(gm.RegisterEvent, gm, "GLOBAL_MOUSE_DOWN")
+    gm:SetScript("OnEvent", function(_, _, a1)
+        if a1 ~= "LeftButton" or not ShiftOK() then return end
+        if GetTime() - shiftAt < 1 then return end
+        Go("Shift 클릭")
+    end)
+    -- Questie '숨기기' 확인 창은 방금 자세히 보기를 열었으면 안 띄워요
+    local popHooked
+    local function HookPopup()
+        if popHooked or not QuestieLoader then return end
+        local ok, Pop = pcall(QuestieLoader.ImportModule, QuestieLoader, "QuestiePopup")
+        if not ok or type(Pop) ~= "table" or type(Pop.Show) ~= "function" then return end
+        popHooked = true
+        local orig = Pop.Show
+        Pop.Show = function(name, ...)
+            if name == "QUESTIE_CONFIRMHIDE" and GetTime() - shiftAt < 1 then return end
+            return orig(name, ...)
+        end
+    end
+    -- 2) Questie 아이콘 클릭 (위에서 못 잡았을 때)
+    local function Wrap(fr)
+        if not fr or fr.leelShift or not fr.GetScript then return end
+        local orig = fr:GetScript("OnClick")
+        if not orig then return end
+        fr.leelShift = true
+        nWrapped = nWrapped + 1
+        fr:SetScript("OnClick", function(self, btn, ...)
+            if btn == "LeftButton" and ShiftOK() then
+                if GetTime() - shiftAt < 1 then return end   -- 누를 때 이미 열었어요
+                local id = IdFrom(self)
+                D("Shift 클릭", tostring(id))
+                if id then
+                    shiftAt = GetTime()
+                    local ok = pcall(ShowQuest, id)
+                    if ok then return end
+                end
+            end
+            -- Shift + Alt 는 Questie 원래 동작 (안 받은 퀘 숨기기)
+            return orig(self, btn, ...)
+        end)
+    end
+    local wrapped
+    local function HookShift()
+        if wrapped or not QuestieLoader then return end
+        local ok, QF = pcall(QuestieLoader.ImportModule, QuestieLoader, "QuestieFrame")
+        if not ok or type(QF) ~= "table" or type(QF.CreateIconFrame) ~= "function" then return end
+        wrapped = true
+        local orig = QF.CreateIconFrame
+        QF.CreateIconFrame = function(...)
+            local fr = orig(...)
+            pcall(Wrap, fr)
+            return fr
+        end
+        local i = 1
+        while _G["QuestieFrame" .. i] do pcall(Wrap, _G["QuestieFrame" .. i]); i = i + 1 end
+    end
+    local ev2 = CreateFrame("Frame")
+    ev2:RegisterEvent("PLAYER_LOGIN")
+    ev2:SetScript("OnEvent", function()
+        HookShift(); HookPopup()
+        C_Timer.After(3, function() HookShift(); HookPopup() end)
+    end)
+
     SLASH_LEELQPIN1 = "/르엘퀘핀"
     SlashCmdList.LEELQPIN = function(msg)
         if msg == "디버그" then dbg = not dbg; print("|cfff2b3c2르엘|r 퀘핀 디버그 " .. (dbg and "켜짐 · 지도 아이콘에 마우스를 올려 보세요" or "꺼짐")) return end
-        print("|cfff2b3c2르엘|r Questie 툴팁 연결: " .. tostring(hooked) .. " · Questie: " .. tostring(QuestieLoader ~= nil))
+        print("|cfff2b3c2르엘|r Questie 툴팁 연결: " .. tostring(hooked) .. " · Questie: " .. tostring(QuestieLoader ~= nil)
+            .. " · Shift 클릭: 아이콘 " .. nWrapped .. "개 · 창 " .. tostring(popHooked))
     end
 end)()

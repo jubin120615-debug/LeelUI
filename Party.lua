@@ -904,6 +904,7 @@ function ns.BuildPartyPreview(parent)
     for i = 1, 4 do members[i] = CreateMember(box, i, nil, true) end
     local me = CreateMember(box, 5, "player", true)
     members[5] = me
+    box.members = members   -- 허브 미리 보기 강조에 써요
     function box:Refresh()
         local W, H = CW(), CH()
         for i, f in ipairs(members) do

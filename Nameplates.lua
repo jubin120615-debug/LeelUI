@@ -13,6 +13,18 @@ local CAST_H, CAST_ICON = 10, 0
 local CAST_COLOR = { int = { 1, 0.54, 0.44 }, no = { C.grey[1], C.grey[2], C.grey[3] }, stop = { 0.85, 0.25, 0.30 } }
 local DEB_SIZE = 20
 
+-- 허브 > 적 이름표 세부 설정 (기본값 = 지금 모습)
+local NP_DEF = { cast = "all", deb = true, combo = true, size = 100, hpTxt = "pct", lvRank = "both", nameAdd = 0,
+                 shine = true, dim = 62, tapped = "grey", exec = "off", aggro = true, raid = "left" }
+local function NPO(k)
+    local t = ns.db and ns.db.npO
+    local v = t and t[k]
+    if v == nil then return NP_DEF[k] end
+    return v
+end
+ns.NPOpt = NPO
+local function SizeK() return (tonumber(NPO("size")) or 100) / 100 end
+
 ----------------------------------------------------------------------
 -- 블리자드(와 다른 애드온) 이름표 숨기기 / 되돌리기
 -- 게임이 대상 바꿀 때 투명도를 되돌리므로, 숨김 상태면 곧바로 0으로 고정
@@ -86,9 +98,10 @@ local function PaintPlate(f)
     -- 낮은(하찮은) 몹도 색은 그대로 (빨강 = 선공 · 크림 = 비선공), 대신 바를 얇게 + 흐리게 + 이름만 회색
     if f.aura then f.aura:Hide() end
     local low = f.trivial and true or false
-    if f.lowShape ~= low then
-        f.lowShape = low
-        f.hp:SetHeight(low and (H - 5) or H)
+    local k = SizeK()
+    if f.lowShape ~= low or f.sizeK ~= k then
+        f.lowShape, f.sizeK = low, k
+        f.hp:SetSize(math.floor(W * k + 0.5), math.max(5, math.floor((low and (H - 5) or H) * k + 0.5)))
         f.pct:SetFont(ns.NUM, low and 10 or 13, "OUTLINE")
     end
     if f.calm then
@@ -301,7 +314,13 @@ local function Build(plate)
     return f
 end
 
+local function PlaceRaid(f)
+    f.raid:ClearAllPoints()
+    if NPO("raid") == "top" then f.raid:SetPoint("BOTTOM", f.title, "TOP", 0, 2)
+    else f.raid:SetPoint("RIGHT", f.hp, "LEFT", -4, 0) end
+end
 local function UpdateRaid(f, unit)
+    PlaceRaid(f)
     -- 숨겨진 값이어도 에러 없이: 통째로 pcall
     local ok, shown = pcall(function()
         local idx = GetRaidTargetIndex(unit)
@@ -312,6 +331,21 @@ local function UpdateRaid(f, unit)
     f.raid:SetShown(ok and shown or false)
 end
 
+-- 허브: 레벨 · 등급 알약 보이기 · 이름 글씨 크기
+local function ApplyTitle(f)
+    local m = NPO("lvRank")
+    if m ~= "both" and f.head:IsShown() then
+        f.head:Hide()
+        f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.title, "LEFT", 0, 0)
+    end
+    f.lv:SetAlpha(m == "off" and 0 or 1)
+    f.name:ClearAllPoints()
+    if m == "off" then f.name:SetPoint("LEFT", f.title, "LEFT", 0, 0)
+    else f.name:SetPoint("LEFT", f.lv, "RIGHT", 4, 0) end
+    local add = tonumber(NPO("nameAdd")) or 0
+    if f.nameAdd ~= add then f.nameAdd = add; Outline(f.name, math.max(8, 13 + add)) end
+end
+
 -- 레벨+이름 묶음 가운데 정렬
 -- (전투 중 이름이 숨겨진 값이면 글자 폭도 숨겨져서 계산 불가 → 바 폭으로 대신)
 local function FitTitle(f)
@@ -320,7 +354,8 @@ local function FitTitle(f)
         return ok and v or fb
     end
     local pre = f.head:IsShown() and (f.head:GetWidth() + 5) or 0
-    f.title:SetWidth(pre + Wd(f.lv, 16) + 4 + Wd(f.name, W - 40))
+    local lvw = (NPO("lvRank") == "off") and 0 or (Wd(f.lv, 16) + 4)
+    f.title:SetWidth(pre + lvw + Wd(f.name, W - 40))
 end
 
 -- 블리자드 디버프 아이콘 줄을 우리 체력바 아래(debRow)에 고정
@@ -425,7 +460,7 @@ local function PlaceDebuffs(f)
     end
     f.cast:ClearAllPoints()
     f.cast:SetPoint("TOPLEFT", last, "BOTTOMLEFT", last == f.combo and -6 or 0, -4)
-    f.cast:SetWidth(W)
+    f.cast:SetWidth(math.floor(W * SizeK() + 0.5))
     f.debRow:ClearAllPoints()
     if f.cast:IsShown() then
         f.debRow:SetPoint("TOPLEFT", f.cast, "BOTTOMLEFT", 2, -21)
@@ -440,7 +475,7 @@ end
 -- 연계 점수: 연계 점수 쓰는 상태(기력)일 때, 지금 대상이거나 점수가 쌓인 몹에만
 local function UpdateCombo(f, unit)
     local show = false
-    if ns.UsesCombo() and not f.tapped then
+    if NPO("combo") and ns.UsesCombo() and not f.tapped then
         local n = ns.ComboOn(unit)
         local isTarget = Try(UnitIsUnit, unit, "target")
         local has = Try(function() return n and n > 0 end)
@@ -492,6 +527,8 @@ end
 local RefreshInfo   -- 아래 UpdateInfo (선점이 풀리면 레벨·등급을 다시 읽음)
 local function UpdateTap(f, unit)
     local tapped = UnitIsTapDenied and Try(UnitIsTapDenied, unit) or false
+    if NPO("tapped") == "keep" then tapped = false end   -- 허브 '남의 몹: 그대로'
+
     if tapped == f.tapped then return end
     -- 레벨 맞춤 지역: 남이 친 몹은 그 사람 레벨로 보이다가, 선점이 풀리면 내 레벨 기준으로 바뀜
     -- 이때 레벨 바뀜 알림이 안 와서 이름표 레벨이 예전 숫자로 남음 → 선점이 바뀔 때마다 다시 읽기
@@ -544,12 +581,43 @@ local function UpdateDead(f, unit)
     f:SetAlpha(dead and 0 or 1)
 end
 
+local function HpText(f, unit, cur, max)
+    local m = NPO("hpTxt")
+    if m == "off" then f.pct:SetText("") return end
+    if m == "pct" then ns.HealthPercentText(f.pct, unit, cur, max) return end
+    local ok = pcall(function()
+        local n = BreakUpLargeNumbers and BreakUpLargeNumbers(cur) or tostring(cur)
+        if m == "both" and max and max > 0 then
+            f.pct:SetFormattedText("%s · %d%%", n, math.floor(cur / max * 100 + 0.5))
+        else
+            f.pct:SetText(n)
+        end
+    end)
+    if not ok then
+        if m == "both" then ns.HealthPercentText(f.pct, unit, cur, max) else ns.SetText(f.pct, cur) end
+    end
+end
+-- 체력 낮으면 강조 (허브 '처형 구간'): 바를 주황으로
+local EXEC_COL = { 1, 0.62, 0.25 }
+local function UpdateExec(f, cur, max)
+    local th = NPO("exec")
+    local on = false
+    if th ~= "off" and not f.tapped then
+        local lim = (th == "35") and 0.35 or 0.20
+        local ok, r = pcall(function() return max and max > 0 and (cur / max) <= lim end)
+        on = ok and r and true or false
+    end
+    if f.execOn == on then return end
+    f.execOn = on
+    if on then ns.PaintFlat(f.hp, EXEC_COL) elseif not f.tapped then PaintPlate(f) end
+end
 local function UpdateHealth(f, unit)
     UpdateDead(f, unit)
     local cur, max = UnitHealth(unit), UnitHealthMax(unit)
     ns.SetBar(f.hp.bar, cur, max)
-    ns.HealthPercentText(f.pct, unit, cur, max)
+    HpText(f, unit, cur, max)
     UpdateTap(f, unit)
+    UpdateExec(f, cur, max)
 end
 
 local function UpdateInfo(f, unit)
@@ -619,8 +687,10 @@ local function UpdateInfo(f, unit)
     end
     f.calm = calm
     f:SetScale(R.small and 0.82 or 1)
+    f.execOn = nil
     PaintPlate(f)
     if f.trivial then f.lv:SetTextColor(0.60, 0.63, 0.67) end
+    ApplyTitle(f)
     FitTitle(f)
     f.tapped = nil
 end
@@ -630,7 +700,7 @@ RefreshInfo = UpdateInfo
 -- 대상이 있으면 대상이 아닌 이름표는 살짝 흐리게
 local function UpdateBorder(f, unit)
     local isTarget = Try(UnitIsUnit, unit, "target")
-    local aggro = Try(function()
+    local aggro = NPO("aggro") and Try(function()
         local st = UnitThreatSituation("player", unit)
         return st and st >= 2
     end)
@@ -644,7 +714,7 @@ local function UpdateBorder(f, unit)
         f.glow:SetVertexColor(1, 0.561, 0.639, 0.6); f.glow:Show()
     end
     if f.shine then
-        if isTarget and not f.dead then if not f.shine:IsShown() then f.shine.t = 0 end; f.shine:Show() else f.shine:Hide() end
+        if isTarget and not f.dead and NPO("shine") then if not f.shine:IsShown() then f.shine.t = 0 end; f.shine:Show() else f.shine:Hide() end
     end
     if f.sword and (ns.db.npMark or "aim") ~= "off" then
         local on = isTarget and not f.dead
@@ -660,7 +730,7 @@ local function UpdateBorder(f, unit)
     end
 
     local alpha = 1
-    if not isTarget and UnitExists("target") then alpha = 0.62 end
+    if not isTarget and UnitExists("target") then alpha = (tonumber(NPO("dim")) or 62) / 100 end
     if f.trivial then alpha = alpha * 0.68 end
     if f.dead then alpha = 0 end
     f:SetAlpha(alpha)
@@ -691,6 +761,8 @@ local function UpdateCast(f, unit)
             channel = true
         end
         if not name then StopCast(f) return end
+        local cm = NPO("cast")
+        if cm == "off" or (cm == "int" and notInt) then StopCast(f) return end
 
         local dur = endMS - startMS
         f.cast.bar:SetMinMaxValues(0, dur)
@@ -742,6 +814,7 @@ local function AttachAuras(f, plate)
     end
     -- 적 버프 줄은 숨김 (내 디버프만)
     if af.BuffListFrame then HideFrame(af.BuffListFrame, true) end
+    if not NPO("deb") then HideFrame(list, true) end
     PinAuras(af)
 end
 
@@ -788,6 +861,10 @@ local function SyncCast(cb)
             if ok2 and ni ~= nil then kind = ni and "no" or (kind == "stop" and "stop" or "int") end
             local c = CAST_COLOR[kind]
             f.cast.fill:SetVertexColor(c[1], c[2], c[3], 1)
+            local cm = NPO("cast")
+            local hide = cm == "off" or (cm == "int" and kind == "no")
+            local a = hide and 0 or 1
+            if f.castHidA ~= a then f.castHidA = a; f.cast:SetAlpha(a); f.castTag:SetAlpha(a); pcall(cb.SetAlpha, cb, a) end
             if kind == "no" then
                 f.castTag:SetText("차단 불가"); f.castTag:SetTextColor(C.tx2[1], C.tx2[2], C.tx2[3])
             else
@@ -1051,6 +1128,208 @@ local function OnRemoved(unit)
         if f.sword then f.sword:Off(); f.wasTarget = false end
         f:Hide()
         active[unit] = nil
+    end
+end
+
+----------------------------------------------------------------------
+-- 허브 미리 보기: 진짜 이름표와 같은 코드(Build)로 만든 모형 3개
+--   내 대상(선공 정예 · 퀘스트 원 · 시전 · 내 디버프) / 비선공 / 낮은 몹
+----------------------------------------------------------------------
+function ns.NPPreview(parent)
+    -- A: 작은 전투 장면 (풀밭 · 몹 실루엣 · 멀수록 작고 흐리게) · B: 상황 버튼 · D: 줄 올리면 그 부분 반짝
+    local o = CreateFrame("Frame", nil, parent)
+    o:SetSize(600, 170)
+    -- 이름표 3개: 내 대상(앞) · 비선공(뒤) · 낮은 몹(더 뒤)
+    local defs = {
+        { key = "tgt",  lv = 36, name = "붉은갈기 노움", rank = "elite", pct = 62, x = -140, y = 24, depth = 1,    body = { 50, 34 }, by = -68 },
+        { key = "calm", lv = 34, name = "바위 독수리", rank = "normal", pct = 100, x = 110, y = 40, depth = 0.86, body = { 40, 30 }, by = -20 },
+        { key = "low",  lv = 22, name = "들쥐", rank = "trivial", pct = 18, x = 235, y = 52, depth = 0.72, body = { 24, 18 }, by = -16 },
+    }
+    o.plates = {}
+    for _, d in ipairs(defs) do
+        local fake = CreateFrame("Frame", nil, o)
+        fake:SetSize(W + 30, 70)
+        local f = Build(fake)
+        f.def = d
+        f.hp.bar:SetMinMaxValues(0, 100); f.hp.bar:SetValue(d.pct)
+        f.pct:SetText(d.pct .. "%")
+        f.name:SetText(d.name)
+        -- 내 디버프 모형 (게임이 그리는 칸 대신 그림만)
+        f.pvDeb = {}
+        for i, tex in ipairs({ 135817, 136118, 132090 }) do
+            local b = CreateFrame("Frame", nil, f.debRow); b:SetSize(DEB_SIZE, DEB_SIZE)
+            b:SetPoint("LEFT", f.debRow, "LEFT", (i - 1) * (DEB_SIZE + 3), 0)
+            local bk = b:CreateTexture(nil, "BACKGROUND"); bk:SetColorTexture(0, 0, 0, 0.9); bk:SetPoint("TOPLEFT", -1, 1); bk:SetPoint("BOTTOMRIGHT", 1, -1)
+            local t = b:CreateTexture(nil, "ARTWORK"); t:SetAllPoints(); t:SetTexture(tex); t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local tm = ns.Num and ns.Num(b, 10, { 1, 1, 1 }) or b:CreateFontString(nil, "OVERLAY"); tm:SetPoint("BOTTOM", b, "BOTTOM", 0, -1); tm:SetText(({ "12", "5", "8" })[i])
+            f.pvDeb[i] = b
+        end
+        o.plates[#o.plates + 1] = f
+        f.fake = fake
+    end
+    o.state = "all"
+
+    -- 내 창 미리 보기처럼: 이름표 하나만 가운데 크게 (비선공 · 낮은 몹은 안 보여요)
+    function o:Arrange()
+        self:SetSize(W + 70, 120)
+        for i, f in ipairs(self.plates) do
+            f.fake:ClearAllPoints(); f.fake:SetPoint("CENTER", self, "CENTER", 0, 14)
+            f.fake:SetShown(i == 1)
+        end
+    end
+    o:Arrange()
+
+    function o:Apply()
+        local st = self.temp or self.state or "all"
+        for _, f in ipairs(self.plates) do
+            local d = f.def
+            local main = d.key == "tgt"
+            local isT = main and (st == "all" or st == "cast" or st == "quest" or st == "exec")
+            local pct = (main and st == "exec") and 18 or d.pct
+            f.hp.bar:SetValue(pct)
+            -- 등급 알약 · 레벨 색 (UpdateInfo와 같게)
+            local R = RANK[d.rank] or {}
+            if R.txt then
+                for _, t in ipairs(f.headParts) do
+                    if t.SetGradient and CreateColor then
+                        t:SetVertexColor(1, 1, 1, 1)
+                        t:SetGradient("VERTICAL", CreateColor(R.bot[1], R.bot[2], R.bot[3], 1), CreateColor(R.top[1], R.top[2], R.top[3], 1))
+                    else t:SetVertexColor(R.top[1], R.top[2], R.top[3], 1) end
+                    t:SetDesaturated(false)
+                end
+                f.headIcon:SetTexture(ns.MEDIA .. R.ic)
+                f.headTxt:SetText(R.txt); f.headTxt:SetTextColor(R.ink[1], R.ink[2], R.ink[3], 1)
+                f.head:SetWidth(math.max(15, (f.headTxt:GetStringWidth() or 20) + 9 + 2.5 + 12))
+                f.head:Show(); f.head:SetAlpha(1)
+                f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.head, "RIGHT", 5, 0)
+            else
+                f.head:Hide(); f.lv:ClearAllPoints(); f.lv:SetPoint("LEFT", f.title, "LEFT", 0, 0)
+            end
+            f.lv:SetText(d.lv)
+            local getColor = GetCreatureDifficultyColor or GetQuestDifficultyColor
+            local c = getColor and getColor(d.lv)
+            if c then f.lv:SetTextColor(c.r, c.g, c.b) end
+            f.trivial = d.key == "low"
+            f.calm = (d.key == "calm" or (main and st == "calm")) and ns.db.npAggro ~= false
+            f.tapped = nil
+            f.sizeK = nil
+            ns.SetTapped(f.hp, false); ns.SetStrike(f.name, false)
+            PaintPlate(f)
+            local th = NPO("exec")
+            if th ~= "off" and pct <= ((th == "35") and 35 or 20) then ns.PaintFlat(f.hp, EXEC_COL) end
+            if f.trivial then f.lv:SetTextColor(0.60, 0.63, 0.67) end
+            -- 남의 몹: 회색 바 + 이름 줄 + 알약 흑백
+            local tap = main and st == "tap" and NPO("tapped") ~= "keep"
+            if tap then
+                ns.SetTapped(f.hp, true); ns.SetStrike(f.name, true)
+                f.name:SetTextColor(0.76, 0.73, 0.74); f.lv:SetTextColor(0.72, 0.69, 0.70)
+                for _, t in ipairs(f.headParts) do t:SetDesaturated(true) end
+                f.head:SetAlpha(0.7)
+            end
+            ApplyTitle(f)
+            FitTitle(f)
+            -- 체력 글씨
+            local hm = NPO("hpTxt")
+            local hpN = BreakUpLargeNumbers and BreakUpLargeNumbers(pct * 20) or tostring(pct * 20)
+            if hm == "off" then f.pct:SetText("")
+            elseif hm == "num" then f.pct:SetText(hpN)
+            elseif hm == "both" then f.pct:SetText(hpN .. " · " .. pct .. "%")
+            else f.pct:SetText(pct .. "%") end
+            -- 징표 (앞 몹: 해골)
+            if main then SetRaidTargetIconTexture(f.raid, 8); PlaceRaid(f); f.raid:Show() else f.raid:Hide() end
+            -- 테두리 · 빛 · 표시
+            f.glow:Hide()
+            local aggro = main and st == "aggro" and NPO("aggro")
+            if isT then
+                f.hp.border:SetVertexColor(1, 0.561, 0.639, 1)
+                f.glow:SetVertexColor(1, 0.561, 0.639, 0.6); f.glow:Show()
+                if NPO("shine") then if not f.shine:IsShown() then f.shine.t = 0 end; f.shine:Show() else f.shine:Hide() end
+                if not tap then f.name:SetTextColor(1, 1, 1) end
+                if (ns.db.npMark or "aim") ~= "off" then
+                    if f.sword.style ~= (ns.db.npMark or "aim") or f.sword.ms ~= (tonumber(ns.db.npMarkScale) or 100) / 100 or not f.sword:IsShown() then f.sword:Stab() end
+                else f.sword:Off() end
+            else
+                if aggro then
+                    f.hp.border:SetVertexColor(C.dmg[1], C.dmg[2], C.dmg[3], 1)
+                    f.glow:SetVertexColor(C.dmg[1], C.dmg[2], C.dmg[3], 0.45); f.glow:Show()
+                else
+                    f.hp.border:SetVertexColor(C.edge[1], C.edge[2], C.edge[3], C.edge[4])
+                end
+                f.shine:Hide(); f.sword:Off()
+            end
+            -- 퀘스트 원
+            local q = f.quest
+            if main and (st == "all" or st == "quest") and ns.db.questCircle ~= false then
+                q.fill:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+                q.icon:SetTexture(ns.MEDIA .. "q_slay")
+                q.tagBg:SetColor(C.accHi); q.count:SetTextColor(C.ink[1], C.ink[2], C.ink[3])
+                q.count:SetText("3/8"); q.tag:SetWidth(q.count:GetStringWidth() + 9); q.tag:Show()
+                q.badge:Hide(); q:Show()
+            else q:Hide() end
+            PlacePct(f)
+            -- 시전바
+            if main and (st == "all" or st == "cast") and NPO("cast") ~= "off" then
+                f.cast.bar:SetMinMaxValues(0, 1); f.cast.bar:SetValue(0.55)
+                f.cast.fill:SetVertexColor(1, 0.54, 0.44, 1)
+                f.castName:SetText("화염 화살"); f.castName:SetTextColor(1, 0.70, 0.65)
+                f.castTag:SetText("차단 가능"); f.castTag:SetTextColor(1, 0.70, 0.65)
+                f.cast:SetAlpha(1); f.cast:Show(); f.castName:Show(); f.castTag:Show()
+            else
+                f.cast:Hide(); f.castName:Hide(); f.castTag:Hide()
+            end
+            for _, b in ipairs(f.pvDeb) do b:SetShown(main and (st == "all" or st == "cast") and NPO("deb") and true or false) end
+            -- 연계 점수 구슬 (도적 · 드루면 늘, 아니면 그 줄에 마우스를 올릴 때만)
+            local comboOn = main and NPO("combo") and (st == "combo" or (st == "all" and ns.UsesCombo and ns.UsesCombo()))
+            if comboOn then pcall(f.combo.SetCount, f.combo, 3); f.combo:Show() else f.combo:Hide() end
+            PlaceDebuffs(f)
+            -- 대상이 있으면 나머지는 흐리게 · 낮은 몹은 더 흐리게 · 멀수록 작게
+            local a = (main and st == "others") and (tonumber(NPO("dim")) or 62) / 100 or 1
+            if f.trivial then a = a * 0.68 end
+            f:SetAlpha(a)
+            f:SetScale((ns.db.npScale or 1) * (isT and 1.08 or 1) * ((R.small) and 0.82 or 1))
+        end
+    end
+
+    -- 줄에 마우스: 상황이 필요한 줄은 그 모습으로 잠깐 (시전 · 퀘스트 · 남의 몹 · 처형 · 공격 · 비선공 · 흐리게)
+    local STATE_OF = { cast = "cast", quest = "quest", tap = "tap", exec = "exec", aggro = "aggro", calm = "calm", others = "others", combo = "combo" }
+    function o:Temp(key)
+        local want = key and STATE_OF[key] or nil
+        if self.temp ~= want then self.temp = want; self:Apply() end
+    end
+    -- 강조할 부분 (허브가 그 둘레를 밝게)
+    function o:Elem(key)
+        local f = self.plates[1]
+        if key == "bar" or key == "exec" or key == "aggro" or key == "tap" or key == "calm" then return f.hp
+        elseif key == "pct" then return f.pct
+        elseif key == "lv" or key == "name" then return f.title
+        elseif key == "mark" then return (f.sword:IsShown() and f.sword) or f.title
+        elseif key == "cast" then return f.cast, f.castName
+        elseif key == "deb" then return f.debRow
+        elseif key == "combo" then return f.combo
+        elseif key == "quest" then return f.quest
+        elseif key == "raid" then return f.raid
+        end
+        return f.hp, f.debRow:IsShown() and f.debRow or f.hp
+    end
+    o:Apply()
+    ns.npPv = o
+    return o
+end
+
+function ns.SetNPOpt(k, v)
+    ns.db.npO = ns.db.npO or {}
+    ns.db.npO[k] = v
+    for u, f in pairs(active) do
+        f.execOn = nil; f.sizeK = nil
+        if k == "tapped" then f.tapped = nil end
+        UpdateInfo(f, u); UpdateHealth(f, u); UpdateBorder(f, u); UpdateRaid(f, u)
+        pcall(UpdateCombo, f, u)
+        if f.auras then
+            local list = f.auras.DebuffListFrame or f.auras
+            HideFrame(list, not NPO("deb"))
+        end
+        f.castHidA = nil
+        PlaceDebuffs(f)
     end
 end
 

@@ -705,6 +705,90 @@ local function Chipify(f, text)
     return out
 end
 
+-- 시간 · 내 이름 강조 (허브)
+-- 알림 소리 (허브에서 고르면 한 번 들려줘요)
+--   pager = 삐삐 호출 "삐빅 삐빅" (르엘 소리 media/leel_at_pager.ogg, 기본)
+--   게임 소리: ready = 준비 확인 · warn = 공격대 경보 · ding = 귓말 띵
+--   새 소리 파일은 게임을 껐다 켜야 읽혀요 → 못 틀면 준비 확인 소리로 대신
+local OWN = { pager = "leel_at_pager" }
+function ns.ChatAtSound(snd)
+    snd = snd or "pager"
+    if snd ~= "off" and snd ~= "ready" and snd ~= "warn" and snd ~= "ding" then snd = "pager" end   -- 예전에 고른 시험 소리는 삐삐로
+    if snd == "off" then return end
+    if OWN[snd] then
+        local ok, will = pcall(PlaySoundFile, ns.MEDIA .. OWN[snd] .. ".ogg", "Master")
+        if ok and will then return end
+        snd = "ready"
+    end
+    local id = (snd == "ready" and ((SOUNDKIT and SOUNDKIT.READY_CHECK) or 8960))
+        or (snd == "warn" and ((SOUNDKIT and SOUNDKIT.RAID_WARNING) or 8959))
+        or (snd == "pop" and 856)
+        or ((SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081)
+    pcall(PlaySound, id, "Master")
+end
+
+-- @불러 주기 (A안): 누가 "@내이름" 을 쓰면 그 줄 왼쪽 분홍 띠 + @이름 분홍 글씨 + 띵 (내가 쓴 말은 빼요)
+local atSnd = 0
+local function Mention(f, text, d)
+    if d.atOn == false then return text end
+    local me = UnitName("player")
+    if type(me) ~= "string" or me == "" then return text end
+    local who = text:match("|Hplayer:([^:|]+)")
+    if who and who:gsub("%-.*$", "") == me then return text end
+    -- 링크 · 색 코드를 뺀 글에서 "@이름" 찾기 (영어 이름은 대소문자 무시)
+    local plain = text:gsub("|H.-|h(.-)|h", "%1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    local lp, lm = plain:lower(), ("@" .. me):lower()
+    local s0, e0 = lp:find(lm, 1, true)
+    if not s0 then return text end
+    local nx = plain:sub(e0 + 1, e0 + 1)
+    if nx ~= "" and nx:match("%w") then return text end   -- 영어 이름이 더 길면 (@Leel → @Leelu) 아니에요 · 한글은 "@르엘님"도 알아들어요
+    -- 글 안의 "@이름" 을 분홍으로 (링크 밖 글자만)
+    local out, i, low = {}, 1, text:lower()
+    while true do
+        local a, b = low:find(lm, i, true)
+        if not a then break end
+        out[#out + 1] = text:sub(i, a - 1)
+        out[#out + 1] = "|cffffb3c6" .. text:sub(a, b) .. "|r"
+        i = b + 1
+    end
+    out[#out + 1] = text:sub(i)
+    text = table.concat(out)
+    local _, size = f:GetFont()
+    local h = math.floor((size or 13) + 2.5)
+    text = ("|TInterface\\Buttons\\WHITE8X8:%d:3:0:0:8:8:0:8:0:8:242:179:194|t "):format(h) .. text
+    if not d.atSndV then d.atSnd = "pager"; d.atSndV = 1 end   -- 삐삐 호출로 정했어요 (한 번만)
+    local snd = d.atSnd or "pager"
+    if snd ~= "off" and GetTime() - atSnd > 1.5 and not (d.atCombat and InCombatLockdown()) then
+        atSnd = GetTime()
+        ns.ChatAtSound(snd)
+    end
+    return text
+end
+
+local function Decorate(f, text)
+    if type(text) ~= "string" then return text end
+    if issecretvalue and issecretvalue(text) then return text end
+    local d = DB()
+    do local ok, t = pcall(Mention, f, text, d); if ok and t then text = t end end
+    if d.myName then
+        local me = UnitName("player")
+        if me and me ~= "" then
+            local plain = text:gsub("|H.-|h.-|h", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            if plain:find(me, 1, true) then
+                local _, size = f:GetFont()
+                local h = math.floor((size or 13) + 0.5)
+                text = ("|T%sfx_heart:%d:%d:0:0:64:64:0:64:0:64:242:179:194|t "):format(ns.MEDIA, h, h) .. text
+            end
+        end
+    end
+    local ts = d.ts or "off"
+    if ts ~= "off" then
+        text = "|cff8a7a78" .. date(ts == "hms" and "%H:%M:%S" or "%H:%M") .. "|r " .. text
+    end
+    return text
+end
+ns.ChatDecorate = Decorate
+
 local function HookMessages(f)
     if f.leelChip or f == ChatFrame2 then return end
     f.leelChip = true
@@ -714,8 +798,33 @@ local function HookMessages(f)
             local ok, t2 = pcall(Chipify, self, text)
             if ok and t2 then text = t2 end
         end
+        local ok, t3 = pcall(Decorate, self, text)
+        if ok and t3 then text = t3 end
         return orig(self, text, ...)
     end
+end
+
+-- 글씨 크기 · 글 흐려지기 (허브)
+function ns.ChatApplyLook(user)
+    local d = DB()
+    for _, f in ipairs(Docked()) do
+        if d.fsize and user then
+            if FCF_SetChatWindowFontSize then pcall(FCF_SetChatWindowFontSize, nil, f, d.fsize)
+            else local font, _, fl = f:GetFont(); pcall(f.SetFont, f, font, d.fsize, fl) end
+        end
+        if f.SetFading then pcall(f.SetFading, f, d.fade ~= false) end
+    end
+end
+-- 귓말 소리 (허브)
+do
+    local wf = CreateFrame("Frame")
+    wf:RegisterEvent("CHAT_MSG_WHISPER"); pcall(wf.RegisterEvent, wf, "CHAT_MSG_BN_WHISPER")
+    wf:RegisterEvent("PLAYER_LOGIN")
+    wf:SetScript("OnEvent", function(_, ev)
+        if not ns.db then return end
+        if ev == "PLAYER_LOGIN" then C_Timer.After(1, function() if DB().fade == false then ns.ChatApplyLook() end end) return end
+        if DB().wSound then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.TELL_MESSAGE) or 3081, "Master") end
+    end)
 end
 
 -- 입력 알약 오른쪽 보내기 단추
@@ -1179,6 +1288,7 @@ do
     end
     local function OnArrow(eb, key)
         if not On() or (IsAltKeyDown and IsAltKeyDown()) then return end
+        if ns.ChatAtOpen and ns.ChatAtOpen(eb) then return end   -- @이름 고르기 목록이 떠 있으면 그쪽이 화살표를 써요
         local now = GetTime()
         if now == lastKey then return end   -- 같은 누름이 두 번 오지 않게
         lastKey = now
@@ -1260,6 +1370,180 @@ do
         C_Timer.After(1.5, function()
             for i = 1, (NUM_CHAT_WINDOWS or 10) do Hook(_G["ChatFrame" .. i .. "EditBox"]) end
         end)
+    end)
+end
+
+----------------------------------------------------------------------
+-- @이름 고르기 (D안): 입력칸에 @ 를 치면 파티원 · 접속 중 길드원 · 최근 말한 사람 목록이 입력칸 위로
+--   ↑ ↓ 로 고르면 바로 "@이름 " 이 채워져요 · Tab = 맨 위 이름으로 채우기 · 계속 치면 좁혀져요
+--   허브 > 채팅창 > @ 치면 이름 고르기
+----------------------------------------------------------------------
+do
+    local SHOW, RH = 6, 22
+    local pop, owner, list, cur, filling = nil, nil, {}, 0, false
+    local recent = {}   -- { name, cls } 최근 말한 사람 (새 것이 앞)
+    local function On() return DB().atPick ~= false end
+    local function Short(n) return type(n) == "string" and not (issecretvalue and issecretvalue(n)) and (n:gsub("%-.*$", "")) or nil end
+    local function Push(name, cls)
+        name = Short(name)
+        if not name or name == Short(UnitName("player")) then return end
+        for i = #recent, 1, -1 do if recent[i][1] == name then table.remove(recent, i) end end
+        table.insert(recent, 1, { name, cls })
+        while #recent > 30 do table.remove(recent) end
+    end
+    local function Candidates(q)
+        local out, seen = {}, {}
+        local lq = (q or ""):lower()
+        local function Add(name, cls, tag)
+            name = Short(name)
+            if not name or seen[name] or name == Short(UnitName("player")) then return end
+            if lq ~= "" and name:lower():sub(1, #lq) ~= lq then return end
+            seen[name] = true
+            out[#out + 1] = { name = name, cls = cls, tag = tag }
+        end
+        if IsInRaid and IsInRaid() then
+            for i = 1, 40 do local u = "raid" .. i; if UnitExists(u) then local _, c = UnitClass(u); Add(UnitName(u), c, "공대") end end
+        else
+            for i = 1, 4 do local u = "party" .. i; if UnitExists(u) then local _, c = UnitClass(u); Add(UnitName(u), c, "파티") end end
+        end
+        for _, r in ipairs(recent) do Add(r[1], r[2], "최근") end
+        if IsInGuild and IsInGuild() and GetNumGuildMembers then
+            local n = GetNumGuildMembers() or 0
+            for i = 1, math.min(n, 500) do
+                local ok, name, _, _, _, _, _, _, _, online, _, cls = pcall(GetGuildRosterInfo, i)
+                if ok and online then Add(name, cls, "길드") end
+                if #out >= 30 then break end
+            end
+        end
+        return out
+    end
+    local function Query(eb)
+        local t = eb:GetText() or ""
+        local pos = eb:GetCursorPosition() or #t
+        local before = t:sub(1, pos)
+        if before:sub(1, 1) == "/" then return nil end
+        local a, q = before:match("()@([^%s@]*)$")
+        if not a then return nil end
+        if a > 1 and not before:sub(a - 1, a - 1):match("%s") then return nil end   -- 메일 주소처럼 글자 뒤 @ 는 빼요
+        return a, q, pos
+    end
+    local function Fill(eb, name)
+        local a, _, pos = Query(eb)
+        if not a then return end
+        local t = eb:GetText() or ""
+        local nt = t:sub(1, a - 1) .. "@" .. name .. " " .. t:sub(pos + 1)
+        filling = true
+        eb:SetText(nt); eb:SetCursorPosition(a + #name + 1)
+        filling = false
+    end
+    local function Close() if pop then pop:Hide() end; cur = 0 end
+    local function ClassCol(c) local cc = c and RAID_CLASS_COLORS and RAID_CLASS_COLORS[c]; return cc and { cc.r, cc.g, cc.b } or { 0.85, 0.8, 0.78 } end
+    local function Make()
+        pop = CreateFrame("Frame", "LeelUI_ChatAt", UIParent)
+        pop:SetFrameStrata("DIALOG"); pop:SetClampedToScreen(true)
+        pop.edge = ns.RoundRect(pop, 12, { 0.949, 0.702, 0.761 }, "BACKGROUND", -1, -1); pop.edge:SetColor({ 0.949, 0.702, 0.761 }, 0.6)
+        pop.bg = ns.RoundRect(pop, 12, { 0.118, 0.086, 0.078 }, "BACKGROUND", 0, 0); pop.bg:SetColor({ 0.118, 0.086, 0.078 }, 0.97)
+        pop.hint = ns.Font(pop, 10, { 0.54, 0.46, 0.45 }); pop.hint:SetPoint("BOTTOMLEFT", 12, 6); pop.hint:SetText("↑ ↓ 고르기 · Tab 채우기")
+        pop.rows = {}
+        function pop.Paint()
+            local n = math.min(SHOW, #list)
+            for i = 1, SHOW do
+                local r = pop.rows[i]
+                if not r then
+                    r = CreateFrame("Button", nil, pop); r:SetHeight(RH)
+                    r.hl = ns.RoundRect(r, 8, { 0.949, 0.702, 0.761 }, "BACKGROUND", 1, 0)
+                    r.dot = r:CreateTexture(nil, "ARTWORK"); r.dot:SetTexture(ns.MEDIA .. "circle"); r.dot:SetSize(12, 12); r.dot:SetPoint("LEFT", 8, 0)
+                    r.fs = ns.Font(r, 12.5); r.fs:SetPoint("LEFT", r.dot, "RIGHT", 7, 0)
+                    r.tag = ns.Font(r, 10, { 0.6, 0.52, 0.5 }); r.tag:SetPoint("RIGHT", -8, 0)
+                    r:SetScript("OnClick", function(self) if owner and self.c then Fill(owner, self.c.name); Close(); owner:SetFocus() end end)
+                    pop.rows[i] = r
+                end
+                local c = list[i]
+                if i <= n and c then
+                    r.c = c
+                    local col = ClassCol(c.cls)
+                    r.dot:SetVertexColor(col[1], col[2], col[3], 1)
+                    r.fs:SetText(c.name); r.tag:SetText(c.tag or "")
+                    r.hl:SetColor({ 0.949, 0.702, 0.761 }, i == cur and 0.22 or 0)
+                    r:ClearAllPoints(); r:SetPoint("TOPLEFT", 6, -6 - (i - 1) * RH); r:SetPoint("TOPRIGHT", -6, -6 - (i - 1) * RH)
+                    r:Show()
+                else
+                    r:Hide(); r.c = nil
+                end
+            end
+            pop:SetHeight(12 + n * RH + 18)
+        end
+    end
+    local function Update(eb)
+        if not On() or filling then return end
+        local a, q = Query(eb)
+        if not a then Close() return end
+        list = Candidates(q)
+        if #list == 0 then Close() return end
+        if not pop then Make() end
+        owner = eb
+        if cur > #list or cur < 0 then cur = 0 end
+        pop:ClearAllPoints(); pop:SetPoint("BOTTOMLEFT", eb, "TOPLEFT", 0, 6); pop:SetWidth(220)
+        pop:SetScale(eb:GetEffectiveScale() / UIParent:GetEffectiveScale())
+        pop:Show(); pop.Paint()
+    end
+    ns.ChatAtOpen = function(eb) return pop and pop:IsShown() and owner == eb end
+    local function Pick(eb, step)
+        local n = math.min(SHOW, #list)
+        if n == 0 then return end
+        cur = cur + step
+        if cur < 1 then cur = n elseif cur > n then cur = 1 end
+        local t = eb:GetText()
+        local name = list[cur].name
+        -- 게임 기본 기록이 화살표에 글을 바꿔서, 한 박자 뒤 우리 글로 다시
+        C_Timer.After(0, function()
+            filling = true; eb:SetText(t); filling = false
+            pop.Paint()
+        end)
+        pop.Paint()
+        eb.leelAtPick = name
+    end
+    local function Hook(eb)
+        if not eb or eb.leelAt then return end
+        eb.leelAt = true
+        eb:HookScript("OnTextChanged", function(self, user) if user then Update(self) end end)
+        eb:HookScript("OnKeyDown", function(self, key)
+            if not ns.ChatAtOpen(self) then return end
+            if key == "UP" then Pick(self, -1) elseif key == "DOWN" then Pick(self, 1)
+            elseif key == "ESCAPE" then Close() end
+        end)
+        eb:HookScript("OnTabPressed", function(self)
+            if not ns.ChatAtOpen(self) then return end
+            local c = list[(cur > 0) and cur or 1]
+            local t = self:GetText()
+            if c then
+                -- 게임 기본 Tab(채널 바꾸기 · 이름 완성)이 글을 바꿨으면 되돌린 뒤 채워요
+                C_Timer.After(0, function() filling = true; self:SetText(t); filling = false; Fill(self, c.name); Close() end)
+            end
+        end)
+        eb:HookScript("OnEnterPressed", function() Close() end)
+        eb:HookScript("OnEscapePressed", function() Close() end)
+        eb:HookScript("OnHide", function(self) if owner == self then Close() end end)
+        eb:HookScript("OnEditFocusLost", function(self)
+            if owner == self and not (pop and pop:IsMouseOver()) then Close() end
+        end)
+    end
+    -- 화살표로 고른 이름은 Enter 대신 Tab 으로 채워요 (고른 줄 = 분홍)
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    for _, e in ipairs({ "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
+                         "CHAT_MSG_GUILD", "CHAT_MSG_WHISPER", "CHAT_MSG_CHANNEL", "CHAT_MSG_INSTANCE_CHAT" }) do pcall(f.RegisterEvent, f, e) end
+    f:SetScript("OnEvent", function(_, ev, _, sender, ...)
+        if ev == "PLAYER_LOGIN" then
+            C_Timer.After(1.6, function() for i = 1, (NUM_CHAT_WINDOWS or 10) do Hook(_G["ChatFrame" .. i .. "EditBox"]) end end)
+            return
+        end
+        local guid = select(10, ...)
+        local cls
+        if type(guid) == "string" and not (issecretvalue and issecretvalue(guid)) and GetPlayerInfoByGUID then
+            local ok, _, c = pcall(GetPlayerInfoByGUID, guid); if ok then cls = c end
+        end
+        pcall(Push, sender, cls)
     end)
 end
 
