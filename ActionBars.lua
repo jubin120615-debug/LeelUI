@@ -7,6 +7,9 @@
 local _, ns = ...
 local C = ns.C
 
+-- 잠금: 다음 업데이트 전까지 르엘 액션바는 안 켜져요 (게임 기본 바 그대로)
+ns.ABAR_LOCKED = true
+
 local BASE_SIZE, GAP, BASE_PET = 40, 6, 34
 local SIZE, PET = BASE_SIZE, BASE_PET
 
@@ -17,6 +20,8 @@ local function DB()
     -- 처음 켰을 때 기본값 = 슈엘 화면 (화면 아래 가운데, 액션바 80%, 토끼 메뉴 80%)
     if d.scale == nil then d.scale = 80 end
     if d.mscale == nil then d.mscale = 80 end
+    if d.style == nil then d.style = "float" end   -- float = 둥둥 3줄 · wing = 날개 (왼쪽 5×2 페이지 · 오른쪽 5×2 고정)
+    if d.pgKeys == nil then d.pgKeys = "off" end   -- 페이지 넘기기 키 (off · zx)
     return d
 end
 ns.ABarDB = DB
@@ -331,6 +336,283 @@ local function PlaceSmall(btns, y)
     return any
 end
 
+
+----------------------------------------------------------------------
+-- 날개 모양: 왼쪽 5×2 (페이지로 바뀜) · 가운데 페이지 원 · 오른쪽 5×2 (고정)
+--  * 왼쪽 = 블리자드 주 바 1~10 (Z · X 또는 원을 누르면 다음 · 이전 페이지, 변신하면 저절로)
+--  * 오른쪽 = 왼쪽 아래 바 1~10
+--  * 페이지 넘기기는 블리자드 쪽 넘기기 버튼을 대신 눌러서 전투 중에도 돼요
+----------------------------------------------------------------------
+local wing   -- { L, R, core, big, prev, next, hp, mp, ... }
+local WG, WPAD = 4, 8
+
+local function WBar(parent, r, g, b)
+    local bar = CreateFrame("StatusBar", nil, parent)
+    bar:SetStatusBarTexture(ns.WHITE or "Interface\\Buttons\\WHITE8x8")
+    bar:SetStatusBarColor(r, g, b, 1)
+    local m = bar:CreateMaskTexture()
+    m:SetTexture(ns.MEDIA .. "pill16", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    m:SetAllPoints()
+    bar:GetStatusBarTexture():AddMaskTexture(m)
+    local bg = bar:CreateTexture(nil, "BACKGROUND")
+    bg:SetTexture(ns.MEDIA .. "pill16"); bg:SetVertexColor(0.07, 0.05, 0.047, 0.9); bg:SetAllPoints()
+    local edge = bar:CreateTexture(nil, "BACKGROUND", nil, -1)
+    edge:SetTexture(ns.MEDIA .. "pill16"); edge:SetVertexColor(0.788, 0.42, 0.51, 0.45)
+    edge:SetPoint("TOPLEFT", -1, 1); edge:SetPoint("BOTTOMRIGHT", 1, -1)
+    bar.t = ns.Font(bar, 10, { 1, 0.96, 0.97 }, "OVERLAY")
+    bar.t:SetPoint("CENTER", bar, "CENTER", 0, 0)
+    pcall(bar.t.SetShadowOffset, bar.t, 1, -1)
+    return bar
+end
+
+local function WOrb(parent, big)
+    local o = CreateFrame("Frame", nil, parent)
+    o.edge = o:CreateTexture(nil, "BACKGROUND", nil, -2)
+    o.edge:SetTexture(ns.MEDIA .. "circle")
+    o.edge:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], big and 1 or 0.45)
+    o.edge:SetPoint("TOPLEFT", big and -3 or -2, big and 3 or 2); o.edge:SetPoint("BOTTOMRIGHT", big and 3 or 2, big and -3 or -2)
+    o.ring = o:CreateTexture(nil, "BACKGROUND", nil, -3)
+    o.ring:SetTexture(ns.MEDIA .. "circle"); o.ring:SetVertexColor(0.1, 0.07, 0.07, 1)
+    o.ring:SetPoint("TOPLEFT", big and -6 or -4, big and 6 or 4); o.ring:SetPoint("BOTTOMRIGHT", big and 6 or 4, big and -6 or -4)
+    o.fill = o:CreateTexture(nil, "BACKGROUND", nil, -1)
+    o.fill:SetTexture(ns.MEDIA .. "circle")
+    if big then o.fill:SetVertexColor(0.27, 0.19, 0.24, 1) else o.fill:SetVertexColor(0.07, 0.05, 0.047, 1) end
+    o.fill:SetAllPoints()
+    return o
+end
+
+-- 페이지 넘기기 버튼 (보안 버튼: 블리자드 쪽 넘기기 버튼을 대신 눌러요)
+local function WPager(name, parent, target, key)
+    local b = CreateFrame("Button", name, parent, "SecureActionButtonTemplate")
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    local real = G(target)
+    if not real then
+        local mb = G("MainMenuBar") or G("MainActionBar")
+        local pn = mb and mb.ActionBarPageNumber
+        real = pn and pn[key]
+    end
+    if real then
+        b:SetAttribute("type", "click"); b:SetAttribute("clickbutton", real)
+    end
+    return b
+end
+
+local function WUpdatePage()
+    if not wing then return end
+    local page = (GetActionBarPage and GetActionBarPage()) or 1
+    local bonus = (GetBonusBarOffset and GetBonusBarOffset()) or 0
+    local n = (NUM_ACTIONBAR_PAGES or 6)
+    local prev = page - 1; if prev < 1 then prev = n end
+    local nxt = page + 1; if nxt > n then nxt = 1 end
+    wing.prev.n:SetText(prev); wing.next.n:SetText(nxt)
+    wing.badge.t:SetText(page)
+    if bonus > 0 and page == 1 then
+        local form = GetShapeshiftForm and GetShapeshiftForm() or 0
+        local name
+        if form and form > 0 and GetShapeshiftFormInfo then
+            local _, nm = GetShapeshiftFormInfo(form)
+            if type(nm) == "string" then name = nm end
+            if not name and GetSpellInfo then
+                local _, _, _, sid = GetShapeshiftFormInfo(form)
+                if sid then name = GetSpellInfo(sid) end
+            end
+        end
+        wing.lab:SetText(name or "변신")
+    else
+        wing.lab:SetText(page .. "페이지")
+    end
+    if wing.lastPage and wing.lastPage ~= page .. ":" .. bonus then
+        wing.flash:Stop(); wing.flash:Play()
+    end
+    wing.lastPage = page .. ":" .. bonus
+end
+
+local function WUpdateBars()
+    if not wing then return end
+    local h, hm = UnitHealth("player"), UnitHealthMax("player")
+    ns.SetBar(wing.hp, h, hm)
+    if not pcall(function() wing.hp.t:SetFormattedText("%s / %s", BreakUpLargeNumbers(h), BreakUpLargeNumbers(hm)) end) then
+        wing.hp.t:SetText("")
+    end
+    local pt = UnitPowerType("player") or 0
+    local p, pm = UnitPower("player", pt), UnitPowerMax("player", pt)
+    ns.SetBar(wing.mp, p, pm)
+    local col = PowerBarColor and PowerBarColor[pt]
+    if pt == 0 then wing.mp:SetStatusBarColor(0.44, 0.58, 0.86, 1)
+    elseif col then wing.mp:SetStatusBarColor(col.r, col.g, col.b, 1) end
+    if not pcall(function() wing.mp.t:SetFormattedText("%s / %s", BreakUpLargeNumbers(p), BreakUpLargeNumbers(pm)) end) then
+        wing.mp.t:SetText("")
+    end
+end
+
+local function WKeys()
+    if not wing then return end
+    if InCombatLockdown() then wing.keysPending = true return end
+    ClearOverrideBindings(wing.core)
+    if DB().pgKeys == "zx" then
+        SetOverrideBindingClick(wing.core, false, "Z", "LeelUI_ABarPrev", "LeftButton")
+        SetOverrideBindingClick(wing.core, false, "X", "LeelUI_ABarNext", "LeftButton")
+    end
+end
+ns.ABarKeys = WKeys
+
+local function BuildWing()
+    wing = {}
+    local function Panel(label, hot)
+        local f = CreateFrame("Frame", nil, holder)
+        f:SetFrameLevel(math.max(1, holder:GetFrameLevel()))
+        ns.RoundPlate(f, 10, { 0.05, 0.04, 0.035, 0.72 }, { C.acc[1], C.acc[2], C.acc[3], hot and 0.65 or 0.25 })
+        local tag = CreateFrame("Frame", nil, f)
+        tag:SetHeight(15)
+        ns.RoundPlate(tag, 7, hot and { C.acc[1], C.acc[2], C.acc[3], 1 } or { 0.23, 0.17, 0.16, 1 }, hot and { C.acc[1], C.acc[2], C.acc[3], 1 } or { 0.23, 0.17, 0.16, 1 })
+        tag.t = ns.Font(tag, 10, hot and { 0.16, 0.1, 0.11 } or { 0.79, 0.71, 0.68 })
+        tag.t:SetPoint("CENTER", 0, 0); tag.t:SetText(label)
+        tag:SetWidth((tag.t:GetStringWidth() or 30) + 16)
+        tag:SetFrameLevel(f:GetFrameLevel() + 20)
+        f.tag = tag
+        return f
+    end
+    wing.L = Panel("페이지", true)
+    wing.L.tag:SetPoint("BOTTOMLEFT", wing.L, "TOPLEFT", 10, -8)
+    wing.R = Panel("고정", false)
+    wing.R.tag:SetPoint("BOTTOMRIGHT", wing.R, "TOPRIGHT", -10, -8)
+    -- 페이지 원이 바뀌면 왼쪽 판 테가 반짝
+
+    wing.hp = WBar(holder, 0.95, 0.70, 0.76)
+    wing.mp = WBar(holder, 0.44, 0.58, 0.86)
+
+    wing.core = CreateFrame("Frame", nil, holder)
+    wing.prev = WOrb(wing.core, false)
+    wing.next = WOrb(wing.core, false)
+    wing.big = WOrb(wing.core, true)
+    wing.big:SetFrameLevel(wing.prev:GetFrameLevel() + 3)
+    for _, o in ipairs({ wing.prev, wing.next }) do
+        o.n = ns.Font(o, 16, { 0.79, 0.71, 0.68 }); o.n:SetPoint("CENTER", 0, 1)
+    end
+    local bun = wing.big:CreateTexture(nil, "ARTWORK")
+    bun:SetTexture(ns.MEDIA .. "icon"); bun:SetPoint("CENTER", 0, 4)
+    wing.bun = bun
+    local badge = CreateFrame("Frame", nil, wing.big)
+    badge:SetSize(22, 22); badge:SetPoint("CENTER", wing.big, "BOTTOMRIGHT", -10, 12)
+    badge:SetFrameLevel(wing.big:GetFrameLevel() + 2)
+    local bt = badge:CreateTexture(nil, "ARTWORK"); bt:SetTexture(ns.MEDIA .. "circle"); bt:SetAllPoints()
+    bt:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+    badge.t = ns.Font(badge, 12, { 0.16, 0.1, 0.11 }); badge.t:SetPoint("CENTER", 0, 0)
+    wing.badge = badge
+    wing.lab = ns.Font(wing.core, 11, C.accHi or C.acc); wing.lab:SetPoint("TOP", wing.big, "BOTTOM", 0, -3)
+    wing.zk = ns.Font(wing.core, 12, { 1, 0.96, 0.97 }); wing.zk:SetText("Z")
+    wing.xk = ns.Font(wing.core, 12, { 1, 0.96, 0.97 }); wing.xk:SetText("X")
+
+    -- 반짝 (페이지 바뀔 때)
+    local glow = wing.big:CreateTexture(nil, "BACKGROUND", nil, -4)
+    glow:SetTexture(ns.MEDIA .. "circle"); glow:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+    glow:SetPoint("TOPLEFT", -12, 12); glow:SetPoint("BOTTOMRIGHT", 12, -12); glow:SetAlpha(0)
+    local ag = glow:CreateAnimationGroup()
+    local a1 = ag:CreateAnimation("Alpha"); a1:SetFromAlpha(0); a1:SetToAlpha(0.55); a1:SetDuration(0.08); a1:SetOrder(1)
+    local a2 = ag:CreateAnimation("Alpha"); a2:SetFromAlpha(0.55); a2:SetToAlpha(0); a2:SetDuration(0.45); a2:SetOrder(2)
+    wing.flash = ag
+
+    -- 눌러서 넘기기 (원 · 키)
+    wing.prevBtn = WPager("LeelUI_ABarPrev", wing.prev, "ActionBarDownButton", "DownButton")
+    wing.prevBtn:SetAllPoints(wing.prev)
+    wing.nextBtn = WPager("LeelUI_ABarNext", wing.next, "ActionBarUpButton", "UpButton")
+    wing.nextBtn:SetAllPoints(wing.next)
+    for _, pair in ipairs({ { wing.prevBtn, "이전 페이지", "Z" }, { wing.nextBtn, "다음 페이지", "X" } }) do
+        local b = pair[1]
+        local hl = b:CreateTexture(nil, "HIGHLIGHT"); hl:SetTexture(ns.MEDIA .. "circle"); hl:SetAllPoints()
+        hl:SetVertexColor(1, 1, 1, 0.15); hl:SetBlendMode("ADD")
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(pair[2], C.acc[1], C.acc[2], C.acc[3])
+            GameTooltip:AddLine("왼쪽 10칸만 바뀌어요 · 오른쪽은 그대로", 1, 1, 1)
+            if DB().pgKeys == "zx" then GameTooltip:AddLine("키: " .. pair[3], 0.85, 0.78, 0.76)
+            else GameTooltip:AddLine("허브에서 Z · X 키로 넘기게 할 수 있어요", 0.85, 0.78, 0.76) end
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    local hf = CreateFrame("Frame")
+    hf:RegisterUnitEvent("UNIT_HEALTH", "player")
+    pcall(hf.RegisterUnitEvent, hf, "UNIT_HEALTH_FREQUENT", "player")
+    hf:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
+    hf:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
+    pcall(hf.RegisterUnitEvent, hf, "UNIT_POWER_FREQUENT", "player")
+    hf:RegisterUnitEvent("UNIT_MAXPOWER", "player")
+    hf:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
+    hf:RegisterEvent("PLAYER_ENTERING_WORLD")
+    hf:SetScript("OnEvent", WUpdateBars)
+    local pf = CreateFrame("Frame")
+    for _, e in ipairs({ "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR", "UPDATE_SHAPESHIFT_FORM", "PLAYER_ENTERING_WORLD" }) do
+        pcall(pf.RegisterEvent, pf, e)
+    end
+    pf:SetScript("OnEvent", function() C_Timer.After(0, WUpdatePage) end)
+    WKeys()
+end
+
+-- 날개에 안 쓰는 칸 (주 바 11 · 12, 왼쪽 아래 11 · 12, 오른쪽 아래 바)은 안 보이게 (단축키는 그대로 동작)
+local function WGhost(b)
+    if not b then return end
+    b:SetAlpha(0)
+    pcall(b.EnableMouse, b, false)
+    b:ClearAllPoints(); b:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 0, 0)
+end
+
+local function LayoutWing()
+    if not wing then BuildWing() end
+    local S = SIZE
+    local PW = 5 * S + 4 * WG + 2 * WPAD
+    local PH = 2 * S + WG + 2 * WPAD + 4
+    local CW = math.floor(S * 3.0 + 0.5)
+    local base = 14   -- 경험치 바 자리
+    wing.L:ClearAllPoints(); wing.L:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 0, base); wing.L:SetSize(PW, PH)
+    wing.R:ClearAllPoints(); wing.R:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", PW + CW, base); wing.R:SetSize(PW, PH)
+    local function Grid(btns, x0)
+        for i, b in ipairs(btns) do
+            if i <= 10 then
+                local c, r = (i - 1) % 5, math.floor((i - 1) / 5)
+                b:ClearAllPoints(); b:SetSize(S, S)
+                b:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", x0 + WPAD + c * (S + WG), base + WPAD + (1 - r) * (S + WG))
+                b:SetAlpha(1); pcall(b.EnableMouse, b, true)
+            else
+                WGhost(b)
+            end
+        end
+    end
+    Grid(ROWS[1].btns, 0)
+    Grid(ROWS[2].btns, PW + CW)
+    for _, b in ipairs(ROWS[3].btns) do WGhost(b) end
+    -- 체력 · 마나 줄
+    local by = base + PH + 6
+    wing.hp:ClearAllPoints(); wing.hp:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 4, by); wing.hp:SetSize(PW - 4, 13)
+    wing.mp:ClearAllPoints(); wing.mp:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", PW + CW, by); wing.mp:SetSize(PW - 4, 13)
+    -- 가운데 원
+    local D, d = math.floor(S * 2.05 + 0.5), math.floor(S * 1.25 + 0.5)
+    wing.core:ClearAllPoints(); wing.core:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", PW, base); wing.core:SetSize(CW, PH + 30)
+    wing.big:ClearAllPoints(); wing.big:SetSize(D, D); wing.big:SetPoint("BOTTOM", wing.core, "BOTTOM", 0, 18)
+    wing.prev:ClearAllPoints(); wing.prev:SetSize(d, d); wing.prev:SetPoint("BOTTOMLEFT", wing.core, "BOTTOMLEFT", 2, 10)
+    wing.next:ClearAllPoints(); wing.next:SetSize(d, d); wing.next:SetPoint("BOTTOMRIGHT", wing.core, "BOTTOMRIGHT", -2, 10)
+    wing.zk:ClearAllPoints(); wing.zk:SetPoint("BOTTOM", wing.prev, "TOP", 0, 4)
+    wing.xk:ClearAllPoints(); wing.xk:SetPoint("BOTTOM", wing.next, "TOP", 0, 4)
+    wing.zk:SetShown(DB().pgKeys == "zx"); wing.xk:SetShown(DB().pgKeys == "zx")
+    wing.bun:SetSize(math.floor(D * 0.5), math.floor(D * 0.5))
+    local W = 2 * PW + CW
+    -- 변신 · 펫 바: 왼쪽 판 위
+    local stance = Buttons("StanceButton", 10)
+    if #stance == 0 then stance = Buttons("ShapeshiftButton", 10) end
+    local pet = Buttons("PetActionButton", 10)
+    local top = by + 13 + 10
+    if (GetNumShapeshiftForms and GetNumShapeshiftForms() or 0) > 0 and PlaceSmall(stance, top) then
+        top = top + PET + GAP + 8
+    end
+    if PetHasActionBar and PetHasActionBar() then PlaceSmall(pet, top) end
+    holder:SetSize(W, top + PET)
+    xp:SetWidth(W)
+    local ex = G("ExtraActionButton1")
+    if ex then ex:ClearAllPoints(); ex:SetPoint("BOTTOMRIGHT", holder, "BOTTOMLEFT", -18, 14) end
+    WUpdateBars(); WUpdatePage()
+end
+
 local function Layout()
     if not holder or not DB().on then return end
     if InCombatLockdown() then pending = true return end
@@ -338,6 +620,7 @@ local function Layout()
     SIZE = math.floor(BASE_SIZE * sc + 0.5)
     PET = math.floor(BASE_PET * sc + 0.5)
     placing = true
+    if DB().style == "wing" then LayoutWing(); placing = false; return end
     local y = 14  -- 경험치 바 자리
     for _, row in ipairs(ROWS) do
         if #row.btns > 0 and (not row.bar or row.bar:IsShown()) then
@@ -706,6 +989,7 @@ local function Hooks()
 end
 
 local function Start()
+    if ns.ABAR_LOCKED then return end
     local d = DB()
     if not d.on or holder then return end
     Collect()
@@ -752,6 +1036,7 @@ ev:SetScript("OnEvent", function(_, event)
     end
     if event == "PLAYER_REGEN_ENABLED" then
         if pending then pending = false; Layout() end
+        if wing and wing.keysPending then wing.keysPending = false; WKeys() end
         if launchHolder and math.abs(launchHolder:GetScale() - (DB().mscale or 100) / 100) > 0.001 then
             launchHolder:SetScale((DB().mscale or 100) / 100); FanPlace()
         end
@@ -771,11 +1056,20 @@ SLASH_LEELABAR1 = "/르엘바"
 SLASH_LEELABAR2 = "/leelbar"
 SlashCmdList.LEELABAR = function(msg)
     msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if ns.ABAR_LOCKED then P("르엘 액션바는 준비 중이에요. 다음 업데이트에서 열려요.") return end
     if msg == "켜기" or msg == "on" then
         DB().on = true; P("켰어요. /reload 하면 적용돼요.")
         return
     elseif msg == "끄기" or msg == "off" then
         DB().on = false; P("껐어요. /reload 하면 원래 바로 돌아가요.")
+        return
+    elseif msg == "날개" or msg == "둥둥" then
+        DB().style = (msg == "날개") and "wing" or "float"; P("모양: " .. msg .. ". /reload 하면 적용돼요.")
+        return
+    elseif msg == "키" then
+        DB().pgKeys = (DB().pgKeys == "zx") and "off" or "zx"
+        if ns.ABarKeys then ns.ABarKeys() end
+        P("페이지 넘기기 Z · X: " .. (DB().pgKeys == "zx" and "켬" or "끔"))
         return
     elseif msg == "위치" then
         ns:ResetABarPosition(); P("액션바·토끼 메뉴 자리를 처음대로.")
