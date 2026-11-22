@@ -8,9 +8,12 @@ local C = ns.C
 local Try = ns.Try
 
 -- 칸 크기 · 사이: 허브 > 파티 프레임 > 세부 설정 (가로 · 세로 따로)
-local function CW() return tonumber(ns.db and ns.db.partyW) or 152 end
-local function CH() return tonumber(ns.db and ns.db.partyH) or 76 end
-local function CG() return tonumber(ns.db and ns.db.partyGap) or 8 end
+-- 모양: tile = 힐러 타일 (처음) · modern = 로아식 세로 줄 (왼쪽 각진 직업 문장 + 이름 위 + 번호 칸 체력 줄) · 다시 불러오기 후 적용
+local function Modern() return ns.db and ns.db.partyStyle == "modern" end
+ns.PartyModern = Modern
+local function CW() if Modern() then return 300 end return tonumber(ns.db and ns.db.partyW) or 152 end
+local function CH() if Modern() then return 64 end return tonumber(ns.db and ns.db.partyH) or 76 end
+local function CG() if Modern() then return 12 end return tonumber(ns.db and ns.db.partyGap) or 8 end
 local PAD = 8
 local LOW_HP, CRIT_HP, LOW_MANA = 0.35, 0.20, 0.20
 local HEALERS = { PRIEST = true, DRUID = true, SHAMAN = true, PALADIN = true }
@@ -226,6 +229,76 @@ local function MaskedBar(f, level)
     return b
 end
 
+-- 모던 (로아식): 왼쪽 각진 직업 문장 + 금 꺾쇠 · 위 이름 · 번호 칸 + 직업 색 체력 줄 · 아래 자원 줄 · 오른쪽 밖 해제할 디버프
+function ns.PartyModernSkin(f)
+    f.modern = true
+    local MASK = ns.MEDIA .. "ab_tac_mask"
+    local EM, BX = 46, 56
+    f.sh:Hide(); f.shine:Hide(); f.stripes:SetAlpha(0.35)
+    local area = CreateFrame("Frame", nil, f)
+    area:SetPoint("TOPLEFT", f, "TOPLEFT", BX, -18); area:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, -18); area:SetHeight(22)
+    f.area = area
+    f.mask:ClearAllPoints()
+    f.mask:SetTexture(MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    f.mask:SetAllPoints(area)
+    f.hp:ClearAllPoints(); f.hp:SetAllPoints(area)
+    f.bg:SetTexture(MASK); f.bg:ClearAllPoints(); f.bg:SetAllPoints(area); f.bg:SetVertexColor(0.04, 0.04, 0.05, 0.92)
+    f.rim:SetTexture(MASK); f.rim:ClearAllPoints()
+    f.rim:SetPoint("TOPLEFT", area, "TOPLEFT", -2, 2); f.rim:SetPoint("BOTTOMRIGHT", area, "BOTTOMRIGHT", 2, -2)
+    f.glow:ClearAllPoints(); f.glow:SetPoint("TOPLEFT", area, -14, 12); f.glow:SetPoint("BOTTOMRIGHT", area, 14, -12)
+    -- 자원 줄: 체력 줄 아래 (틀 밖이라 가림 빼기)
+    pcall(f.pw:GetStatusBarTexture().RemoveMaskTexture, f.pw:GetStatusBarTexture(), f.mask)
+    pcall(f.pbg.RemoveMaskTexture, f.pbg, f.mask)
+    f.pw:ClearAllPoints()
+    f.pw:SetPoint("TOPLEFT", area, "BOTTOMLEFT", 0, -3); f.pw:SetPoint("TOPRIGHT", area, "BOTTOMRIGHT", 0, -3); f.pw:SetHeight(4)
+    -- 눈금 (액션바와 같은 느낌)
+    f.ticks = {}
+    for k = 1, 9 do
+        local t = f.top:CreateTexture(nil, "ARTWORK"); t:SetColorTexture(1, 1, 1, 0.22); t:SetSize(1, (k % 5 == 0) and 4 or 2)
+        f.ticks[k] = t
+    end
+    area:SetScript("OnSizeChanged", function(a, w)
+        for k, t in ipairs(f.ticks) do t:ClearAllPoints(); t:SetPoint("TOP", a, "BOTTOMLEFT", (w or a:GetWidth()) * k / 10, -9) end
+    end)
+    -- 번호 칸 (금)
+    local idx = CreateFrame("Frame", nil, f.top); idx:SetSize(22, 22); idx:SetPoint("TOPLEFT", area, "TOPLEFT", 0, 0)
+    local ib = idx:CreateTexture(nil, "ARTWORK"); ib:SetAllPoints(); ib:SetColorTexture(0.91, 0.75, 0.38, 1)
+    idx.t = idx:CreateFontString(nil, "OVERLAY"); idx.t:SetFont(ns.NUM or ns.FONT, 13, ""); idx.t:SetTextColor(0.1, 0.08, 0.07); idx.t:SetPoint("CENTER", 0, 0)
+    f.mIdx = idx
+    -- 직업 문장: 각진 네모 · 테 = 직업 색 · 금 꺾쇠
+    f.pf:ClearAllPoints(); f.pf:SetSize(EM, EM); f.pf:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -9)
+    f.pout:SetTexture(MASK); f.pout:SetVertexColor(0, 0, 0, 0.6)
+    f.pring:SetTexture(MASK); f.pring:ClearAllPoints(); f.pring:SetPoint("TOPLEFT", 0, 0); f.pring:SetPoint("BOTTOMRIGHT", 0, 0)
+    local inner = f.pf:CreateTexture(nil, "BACKGROUND", nil, 2); inner:SetTexture(MASK); inner:SetVertexColor(0.07, 0.07, 0.08, 1)
+    inner:SetPoint("TOPLEFT", 2, -2); inner:SetPoint("BOTTOMRIGHT", -2, 2)
+    f.por:ClearAllPoints(); f.por:SetPoint("TOPLEFT", 4, -4); f.por:SetPoint("BOTTOMRIGHT", -4, 4)
+    f.pmask:SetTexture(MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    local G = { 0.91, 0.75, 0.38 }
+    for _, c in ipairs({ { "TOPLEFT", -4, 4 }, { "BOTTOMRIGHT", 4, -4 } }) do
+        local h = f.top:CreateTexture(nil, "OVERLAY"); h:SetColorTexture(G[1], G[2], G[3], 1); h:SetSize(10, 2); h:SetPoint(c[1], f.pf, c[1], c[2], c[3])
+        local v = f.top:CreateTexture(nil, "OVERLAY"); v:SetColorTexture(G[1], G[2], G[3], 1); v:SetSize(2, 10); v:SetPoint(c[1], f.pf, c[1], c[2], c[3])
+    end
+    f.lead:ClearAllPoints(); f.lead:SetPoint("CENTER", f.pf, "TOPLEFT", 2, 2)
+    -- 이름 (체력 줄 위) · 마나 부족은 이름 줄 오른쪽
+    f.name:ClearAllPoints(); f.name:SetPoint("BOTTOMLEFT", area, "TOPLEFT", 2, 3)
+    f.name:SetWidth(170); f.name:SetFont(ns.FONT, 13, "OUTLINE")
+    f.mana:ClearAllPoints(); f.mana:SetPoint("BOTTOMRIGHT", area, "TOPRIGHT", 0, 3)
+    -- 체력 글씨: 줄 안 오른쪽
+    f.pct:ClearAllPoints(); f.pct:SetPoint("RIGHT", area, "RIGHT", -6, 0); f.pct:SetFont(ns.NUM or ns.FONT, 10, "OUTLINE")
+    f.val:ClearAllPoints(); f.val:SetPoint("RIGHT", f.pct, "LEFT", -1, 0); f.val:SetFont(ns.NUM or ns.FONT, 13, "OUTLINE")
+    f.state:ClearAllPoints(); f.state:SetPoint("LEFT", area, "LEFT", 30, 0)
+    -- 해제할 디버프: 테 색으로 (세로 줄은 안 씀) · 디버프 칸은 줄 오른쪽 밖
+    f.dspBar:SetAlpha(0)
+    f.dspRF:ClearAllPoints(); f.dspRF:SetPoint("CENTER", f, "TOPRIGHT", 8 + DSIZE / 2, -18 - 11)
+    if f.debuffs then pcall(function()
+        f.debuffs:ClearAllPoints(); f.debuffs:SetPoint("LEFT", f, "TOPRIGHT", 8, -29)
+        if f.debuffs.SetFlowLayoutAnchorPoint then f.debuffs:SetFlowLayoutAnchorPoint("LEFT") end
+    end) end
+    if f.buffs then pcall(function()
+        f.buffs:ClearAllPoints(); f.buffs:SetPoint("TOPRIGHT", area, "BOTTOMRIGHT", 0, -14)
+    end) end
+end
+
 local function CreateMember(parent, i, unit, preview)
     unit = unit or ("party" .. i)
     -- preview = 허브 미리 보기용 모형 (이름 없는 보통 프레임 · 클릭 · 이벤트 없음, 생김새는 진짜와 같아요)
@@ -264,12 +337,12 @@ local function CreateMember(parent, i, unit, preview)
     f.pulse:Hide()
 
     -- 그림자, 테두리, 바탕
-    local sh = TileTex(f, "BACKGROUND", -6, { 0, 0, 0 }, 0.45)
+    local sh = TileTex(f, "BACKGROUND", -6, { 0, 0, 0 }, 0.45); f.sh = sh
     sh:SetPoint("TOPLEFT", 0, -3); sh:SetPoint("BOTTOMRIGHT", 0, -5)
     f.rim = TileTex(f, "BACKGROUND", -5, RIM, 1)
     f.rim:SetPoint("TOPLEFT", -2, 2); f.rim:SetPoint("BOTTOMRIGHT", 2, -2)
     local bg = TileTex(f, "BACKGROUND", -4, { 0.102, 0.075, 0.07 }, 0.96)
-    bg:SetAllPoints()
+    bg:SetAllPoints(); f.bg = bg
 
     f.mask = f:CreateMaskTexture()
     f.mask:SetTexture(TILE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
@@ -289,13 +362,13 @@ local function CreateMember(parent, i, unit, preview)
     stripes:SetHorizTile(true); stripes:SetVertTile(true)
     stripes:SetAllPoints(f.heal:GetStatusBarTexture())
     stripes:SetVertexColor(1, 1, 1, 0.25)
-    stripes:AddMaskTexture(f.mask)
+    stripes:AddMaskTexture(f.mask); f.stripes = stripes
     -- 위쪽 윤기
     local shine = f.hp:CreateTexture(nil, "OVERLAY")
     shine:SetTexture(ns.WHITE)
     shine:SetAllPoints(f)
     shine:SetGradient("VERTICAL", CreateColor(0, 0, 0, 0.10), CreateColor(1, 1, 1, 0.16))
-    shine:AddMaskTexture(f.mask)
+    shine:AddMaskTexture(f.mask); f.shine = shine
 
     -- 해제할 디버프 (D안): 칸 왼쪽 가장자리 세로 줄 + 디버프 아이콘 둘레 링 맥박 (직업색 칸은 그대로)
     local dsp = CreateFrame("Frame", nil, f)
@@ -306,7 +379,7 @@ local function CreateMember(parent, i, unit, preview)
     local rf = CreateFrame("Frame", nil, dsp)
     rf:SetSize(DSIZE + 12, DSIZE + 12)
     rf:SetPoint("CENTER", f, "BOTTOMLEFT", PAD + DSIZE / 2, PAD + 4 + DSIZE / 2)
-    rf:SetFrameLevel(lv + 3)   -- 디버프 아이콘 밑에 (링이 아이콘보다 커서 둘레만 보여요)
+    rf:SetFrameLevel(lv + 3); f.dspRF = rf   -- 디버프 아이콘 밑에 (링이 아이콘보다 커서 둘레만 보여요)
     f.dspRing = rf:CreateTexture(nil, "OVERLAY")
     f.dspRing:SetTexture(ns.MEDIA .. "ring"); f.dspRing:SetAllPoints()
     f.dspGlow = rf:CreateTexture(nil, "BORDER")
@@ -328,7 +401,7 @@ local function CreateMember(parent, i, unit, preview)
     f.pw:SetPoint("BOTTOMLEFT"); f.pw:SetPoint("BOTTOMRIGHT"); f.pw:SetHeight(4)
     local pbg = f.pw:CreateTexture(nil, "BACKGROUND")
     pbg:SetTexture(ns.WHITE); pbg:SetAllPoints(); pbg:SetVertexColor(0.08, 0.06, 0.055, 0.85)
-    pbg:AddMaskTexture(f.mask)
+    pbg:AddMaskTexture(f.mask); f.pbg = pbg
 
     -- 글씨·아이콘 층
     local top = CreateFrame("Frame", nil, f)
@@ -342,7 +415,7 @@ local function CreateMember(parent, i, unit, preview)
     pf:SetPoint("TOPLEFT", PAD, -PAD + 1)
     local pout = pf:CreateTexture(nil, "BACKGROUND", nil, -1)
     pout:SetTexture(ns.MEDIA .. "circle"); pout:SetVertexColor(0.11, 0.07, 0.06, 0.95)
-    pout:SetPoint("TOPLEFT", -4, 4); pout:SetPoint("BOTTOMRIGHT", 4, -4)
+    pout:SetPoint("TOPLEFT", -4, 4); pout:SetPoint("BOTTOMRIGHT", 4, -4); f.pout = pout
     local pring = pf:CreateTexture(nil, "BACKGROUND")
     pring:SetTexture(ns.MEDIA .. "circle"); pring:SetVertexColor(0.16, 0.09, 0.08, 0.9)
     pring:SetPoint("TOPLEFT", -2.5, 2.5); pring:SetPoint("BOTTOMRIGHT", 2.5, -2.5)
@@ -352,7 +425,7 @@ local function CreateMember(parent, i, unit, preview)
     local pm = pf:CreateMaskTexture()
     pm:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     pm:SetAllPoints(f.por)
-    f.por:AddMaskTexture(pm)
+    f.por:AddMaskTexture(pm); f.pmask = pm
     local rlf = CreateFrame("Frame", nil, pf)   -- 직업 아이콘보다 위 층 (안 그러면 아이콘 뒤로 가려져요)
     rlf:SetAllPoints(pf); rlf:SetFrameLevel(pf:GetFrameLevel() + 3)
     f.role = rlf:CreateTexture(nil, "OVERLAY", nil, 4)
@@ -400,6 +473,7 @@ local function CreateMember(parent, i, unit, preview)
     f.buffs = AuraBox(f, "leelMine", "HELPFUL|PLAYER", 3, BSIZE, "mm_squircle", "TOPRIGHT", -PAD + 2, -PAD + 2)
     f.debuffs = AuraBox(f, "leelDispel", "HARMFUL|RAID", 2, DSIZE, "mm_squircle", "BOTTOMLEFT", PAD, PAD + 4)
     end
+    if Modern() then ns.PartyModernSkin(f) end
     return f
 end
 
@@ -446,9 +520,10 @@ local function UpdateHealth(f)
 
     f.mid:Hide(); f.state:Hide()
     f.val:Show(); f.pct:SetText("%")
-    f.name:SetTextColor(1, 0.97, 0.955)
-    local col = Pastel(f.classFile)
-    f.hp:SetStatusBarColor(col[1], col[2], col[3], 0.9)
+    local col = f.modern and ClassColor(f.classFile) or Pastel(f.classFile)
+    if f.modern and not f.classFile then col = C.acc end
+    if f.modern then f.name:SetTextColor(col[1], col[2], col[3]) else f.name:SetTextColor(1, 0.97, 0.955) end
+    f.hp:SetStatusBarColor(col[1], col[2], col[3], f.modern and 1 or 0.9)
 
     local cur, max = UnitHealth(u), UnitHealthMax(u)
     ns.SetBar(f.hp, cur, max)
@@ -543,7 +618,11 @@ end
 
 -- 테두리: 어그로 빨강 > 내 대상 흰색 > 평소 진한 갈색
 local function PaintRim(f)
-    if f.aggroOn then
+    if f.modern and f.dspCol and not f.aggroOn then
+        f.rim:SetVertexColor(f.dspCol[1], f.dspCol[2], f.dspCol[3], 1)
+    elseif f.modern and not (f.aggroOn or f.selOn or f.blackOn) then
+        f.rim:SetVertexColor(1, 1, 1, 0.14)
+    elseif f.aggroOn then
         f.rim:SetVertexColor(1, 0.35, 0.35, 1)
     elseif f.selOn then
         f.rim:SetVertexColor(1, 0.953, 0.965, 1)
@@ -692,7 +771,7 @@ local function Layout(pbox, pmembers, pme)
     if not box then return end
     local run = pbox and function(_, fn) fn() end or function(_, fn) ns:RunOutOfCombat("partyLayout", fn) end
     run(nil, function()
-        local mode = ns.db.partyLayout or "row"
+        local mode = Modern() and "col" or (ns.db.partyLayout or "row")
         local W, H, G = CW(), CH(), CG()
         local party, me = {}, pbox and pme or ns.partyMe
         for i = 1, 4 do party[i] = members[i] end
@@ -707,6 +786,7 @@ local function Layout(pbox, pmembers, pme)
             list = party
         end
         for _, f in ipairs(members) do f:SetSize(W, H); f.heal:SetSize(W, H) end
+        for i, f in ipairs(list) do if f.mIdx then f.mIdx.t:SetText(i) end end
         local n = #list
         if mode == "grid" and n == 5 then
             -- 2×2 + 넓은 칸 하나: 탱커가 있으면 탱커, 없으면 나
@@ -761,9 +841,11 @@ function ns:ApplyPartyCells()
         for _, f in ipairs(members) do
             f:SetSize(W, H)
             f.heal:SetSize(W, H)
+            if not f.modern then
             f.name:SetWidth(math.max(30, W - PAD * 2 - 33 - (auras and 56 or 0)))
             local vs = math.max(14, math.min(26, math.floor(H * 0.34)))
             f.val:SetFont(ns.NUM, vs, "OUTLINE")
+            end
             if f.buffs then f.buffs:SetShown(auras) end
             if f.debuffs then f.debuffs:SetShown(auras) end
             if not ns.party.preview then UpdateAll(f) end

@@ -94,6 +94,7 @@ local function MakeInit(opt)
     pcall(btn.SetApplicationCount, btn, count)
   end
 end
+ns.AuraDurFmt = DurationFormatter   -- 액션바(각진 전술형) 내 버프 · 디버프 줄도 같은 숫자 서식
 local InitDebuff = MakeInit({ size = SIZE, ring = C.acc, num = 16 })
 local BSIZE, BMAX = 28, 8
 local InitBuff = MakeInit({ size = BSIZE, ring = { 0.62, 0.90, 0.76 }, num = 13 })   -- 버프: 민트 링, 조금 작게

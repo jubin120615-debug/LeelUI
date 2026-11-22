@@ -14,7 +14,11 @@ ns.MINIMAP_STYLES = {
 }
 
 -- 르엘 미니맵은 D(동그라미 + 아래 버튼 줄)로 고정. 끄면 블리자드 기본
-local function Style() return (ns.db and ns.db.mmStyle == "blizz") and "blizz" or "bar" end
+local function Style()
+    local v = ns.db and ns.db.mmStyle
+    if v == "blizz" then return "blizz" elseif v == "tac" then return "tac" end
+    return "bar"
+end
 
 local hidden = CreateFrame("Frame"); hidden:Hide()
 local function Bury(obj)
@@ -464,6 +468,83 @@ styles.bar = function()
     styles.barFrame = bar
 end
 
+
+-- E. 네모 · 꺾쇠 (각진 전술형과 짝): 네모 지도 + 네 모서리 진영 색 꺾쇠 + 아래 안쪽 지역 띠(이름 · 좌표 · 시계)
+--    단추는 지도 오른쪽 바깥에 네모 칸으로 세로 줄
+styles.tac = function()
+    Common("tac_square")
+    pcall(Minimap.SetMaskTexture, Minimap, "Interface\\ChatFrame\\ChatFrameBackground")
+    GetMinimapShape = function() return "SQUARE" end
+    local fac = UnitFactionGroup and UnitFactionGroup("player")
+    local acc = (fac == "Horde" and { 1, 0.29, 0.24 }) or (fac == "Alliance" and { 0.29, 0.55, 1 }) or C.acc
+    local back = BackFrame()
+    local bd = back:CreateTexture(nil, "BACKGROUND", nil, 0); bd:SetColorTexture(0, 0, 0, 0.55)
+    bd:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -1, 1); bd:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", 1, -1)
+    -- 얇은 테 + 꺾쇠
+    for _, sd in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local e = skin:CreateTexture(nil, "OVERLAY", nil, 1); e:SetColorTexture(1, 1, 1, 0.14)
+        if sd == "TOP" or sd == "BOTTOM" then e:SetPoint(sd .. "LEFT"); e:SetPoint(sd .. "RIGHT"); e:SetHeight(1)
+        else e:SetPoint("TOP" .. sd); e:SetPoint("BOTTOM" .. sd); e:SetWidth(1) end
+    end
+    local c = 16
+    for _, pt in ipairs({ "TOPLEFT", "TOPRIGHT", "BOTTOMRIGHT", "BOTTOMLEFT" }) do
+        local h = skin:CreateTexture(nil, "OVERLAY", nil, 3); h:SetColorTexture(acc[1], acc[2], acc[3], 1); h:SetSize(c, 2); h:SetPoint(pt)
+        local v = skin:CreateTexture(nil, "OVERLAY", nil, 3); v:SetColorTexture(acc[1], acc[2], acc[3], 1); v:SetSize(2, c); v:SetPoint(pt)
+    end
+    -- 아래 안쪽 지역 띠
+    local band = CreateFrame("Frame", nil, skin); band:SetHeight(24)
+    band:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", 0, 0); band:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", 0, 0)
+    band:SetFrameLevel(skin:GetFrameLevel() + 2)
+    local bb = band:CreateTexture(nil, "BACKGROUND"); bb:SetAllPoints(); bb:SetColorTexture(0, 0, 0, 0.62)
+    cardHead = Font(band, 12.5); cardHead:SetPoint("LEFT", 8, 0); cardHead:SetWordWrap(false); cardHead:SetJustifyH("LEFT")
+    coordPill = { fs = ns.Num(band, 12, { 0.81, 0.78, 0.77 }), Set = function(self, t) self.fs:SetText(t) end }
+    clockPill = ClockButton(band, true)
+    clockPill:SetPoint("RIGHT", band, "RIGHT", -2, 0)
+    coordPill.fs:SetPoint("RIGHT", clockPill, "LEFT", -2, 0)
+    cardHead:SetPoint("RIGHT", coordPill.fs, "LEFT", -6, 0)
+    -- 단추: 지도 오른쪽 바깥 네모 칸 세로 줄 (보이는 것만 위에서부터)
+    local col = CreateFrame("Frame", nil, skin); col:SetSize(32, 10); col:SetPoint("TOPLEFT", Minimap, "TOPRIGHT", 6, 0)
+    local list, plates = {}, {}
+    for _, k in ipairs({ "mail", "track", "cal", "sun", "comp", "lfg", "pvp" }) do
+        if B[k] then Orb(B[k], 22, true); list[#list + 1] = B[k] end
+    end
+    local bun = BunnyButton(skin, 22)
+    local function Plate(i)
+        local p = plates[i]
+        if not p then
+            p = CreateFrame("Frame", nil, col); p:SetSize(30, 30); p:SetFrameLevel(Minimap:GetFrameLevel() + 6)
+            local t = p:CreateTexture(nil, "BACKGROUND"); t:SetAllPoints(); t:SetColorTexture(0.04, 0.05, 0.07, 0.75)
+            for _, sd in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                local e = p:CreateTexture(nil, "BORDER"); e:SetColorTexture(1, 1, 1, 0.14)
+                if sd == "TOP" or sd == "BOTTOM" then e:SetPoint(sd .. "LEFT"); e:SetPoint(sd .. "RIGHT"); e:SetHeight(1)
+                else e:SetPoint("TOP" .. sd); e:SetPoint("BOTTOM" .. sd); e:SetWidth(1) end
+            end
+            plates[i] = p
+        end
+        return p
+    end
+    local function Lay()
+        local n = 0
+        for _, btn in ipairs(list) do
+            if btn:IsShown() then
+                n = n + 1
+                local p = Plate(n); p:ClearAllPoints(); p:SetPoint("TOPLEFT", col, "TOPLEFT", 0, -(n - 1) * 36); p:Show()
+                Put(btn, "CENTER", p, "CENTER", 0, 0)
+            end
+        end
+        n = n + 1
+        local p = Plate(n); p:ClearAllPoints(); p:SetPoint("TOPLEFT", col, "TOPLEFT", 0, -(n - 1) * 36); p:Show()
+        bun:ClearAllPoints(); bun:SetPoint("CENTER", p, "CENTER", 0, 0); bun:SetFrameLevel(p:GetFrameLevel() + 2)
+        for i = n + 1, #plates do plates[i]:Hide() end
+    end
+    for _, btn in ipairs(list) do
+        btn:HookScript("OnShow", function() C_Timer.After(0, Lay) end)
+        btn:HookScript("OnHide", function() C_Timer.After(0, Lay) end)
+    end
+    Lay()
+    ns.MinimapFoot = Minimap
+end
+
 ----------------------------------------------------------------------
 local function Update()
     local z = ZoneText()
@@ -755,7 +836,7 @@ local function Apply()
     local st = Style()
     if st == "blizz" or not styles[st] or not Minimap then return end
     B = Buttons()
-    ns.mmLine = (st == "bar")      -- 알약 줄 모양이면 분홍 선 아이콘
+    ns.mmLine = (st == "bar" or st == "tac")      -- 알약 줄 모양이면 분홍 선 아이콘
     pcall(TidyCompartment, B.comp)
     local ok, err = pcall(styles[st])
     if not ok then ns.Print("미니맵 꾸미기 오류: " .. tostring(err)) return end
@@ -783,7 +864,7 @@ local function Apply()
         chip:SetPoint("TOP", ns.MinimapFoot, "BOTTOM", 0, -6)
     end
     -- 토끼 버튼이 들어간 모양(B, D)은 미니맵 둘레 토끼 아이콘은 숨김
-    if st == "card" or st == "bar" then
+    if st == "card" or st == "bar" or st == "tac" then
         local Icon = LibStub and LibStub("LibDBIcon-1.0", true)
         if Icon then pcall(Icon.Hide, Icon, "LeelUI") end
     end
