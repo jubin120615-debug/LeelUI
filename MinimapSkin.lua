@@ -903,6 +903,7 @@ local function BuildMover()
     end)
     m:SetScript("OnDragStop", function() m:SetScript("OnUpdate", nil) end)
     m:Hide()
+    C_Timer.After(0, function() if ns.MoveSkin then ns.MoveSkin(m, "미니맵") end end)
     if ns.SetMoveMode then
         hooksecurefunc(ns, "SetMoveMode", function() m:SetShown(ns.moving and true or false) end)
     end

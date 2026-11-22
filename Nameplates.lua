@@ -322,13 +322,14 @@ end
 local function UpdateRaid(f, unit)
     PlaceRaid(f)
     -- 숨겨진 값이어도 에러 없이: 통째로 pcall
-    local ok, shown = pcall(function()
-        local idx = GetRaidTargetIndex(unit)
-        if not idx then return false end
-        SetRaidTargetIconTexture(f.raid, idx)
-        return true
+    local ok, shown, idx = pcall(function()
+        local i = GetRaidTargetIndex(unit)
+        if not i then return false end
+        SetRaidTargetIconTexture(f.raid, i)
+        return true, (i >= 1 and i <= 8) and i or nil
     end)
     f.raid:SetShown(ok and shown or false)
+    if ns.MarkOrderPaint then ns.MarkOrderPaint(f, unit, ok and shown and idx or nil) end
 end
 
 -- 허브: 레벨 · 등급 알약 보이기 · 이름 글씨 크기
@@ -1389,6 +1390,7 @@ function ns:EnableNameplates()
             end
         elseif event == "RAID_TARGET_UPDATE" then
             for u, f in pairs(active) do UpdateRaid(f, u) end
+            if ns.MarkOrderScan then ns.MarkOrderScan(active) end
         elseif event == "PLAYER_TARGET_CHANGED" then
             for u, f in pairs(active) do UpdateBorder(f, u); UpdateCombo(f, u) end
         elseif event == "UNIT_POWER_FREQUENT" then
@@ -1438,4 +1440,148 @@ SlashCmdList.LEELNPDEB = function()
     print(("|cffff8fab르엘|r 디버프 칸: 보임=%s 투명도=%.2f 숨김표시=%s · 목록 보임=%s 투명도=%.2f · 아이콘 %d개(보임 %d) · CVar=%s"):format(
         tostring(af:IsShown()), af:GetAlpha() or -1, tostring(af.leelHidden), tostring(list:IsShown()), list:GetAlpha() or -1, n, shown,
         tostring(GetCVar("nameplateShowDebuffs"))))
+end
+
+----------------------------------------------------------------------
+-- Leel Mark 약속표 → 이름표: 징 옆 "잡는 순서" 숫자 · CC 징 = 자물쇠 + 남은 시간 · 앞 순서가 사라지면 다음 몹 "다음!"
+--   (르엘 이름표에서만 · Leel Mark 가 없으면 해골 1 · X 2 만)
+----------------------------------------------------------------------
+do
+    local CC_SPELLS = { 118, 12824, 12825, 12826, 28271, 28272, 3355, 14308, 14309, 6770, 2070, 11297, 9484, 9485, 10955, 2637, 18657, 18658 }
+    local ccNames
+    local function CCNames()
+        if ccNames then return ccNames end
+        ccNames = {}
+        for _, id in ipairs(CC_SPELLS) do
+            local ok, n = pcall(function() return (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)) or (GetSpellInfo and GetSpellInfo(id)) end)
+            if ok and type(n) == "string" then ccNames[n] = true end
+        end
+        return ccNames
+    end
+    local function PlanOf()
+        local api = _G.LeelMarkAPI
+        if api then
+            if api.OrderOn and not api.OrderOn() then return nil end
+            local ok, p = pcall(api.Plan)
+            if ok and p then return p end
+        end
+        return { [8] = { kind = "kill", n = 1 }, [7] = { kind = "kill", n = 2 } }
+    end
+    local function Badge(f)
+        if f.ordB then return f.ordB end
+        local b = CreateFrame("Frame", nil, f); b:SetSize(15, 15); b:SetFrameLevel(f:GetFrameLevel() + 6)
+        local r = b:CreateTexture(nil, "ARTWORK"); r:SetTexture(ns.MEDIA .. "circle"); r:SetPoint("CENTER"); r:SetSize(18, 18); r:SetVertexColor(0.1, 0.07, 0.065)
+        local d = b:CreateTexture(nil, "ARTWORK", nil, 1); d:SetTexture(ns.MEDIA .. "circle"); d:SetAllPoints(); d:SetVertexColor(C.acc[1], C.acc[2], C.acc[3])
+        b.fs = b:CreateFontString(nil, "OVERLAY"); b.fs:SetFont(ns.NUM or ns.FONT, 10.5, ""); b.fs:SetPoint("CENTER", 0, 0); b.fs:SetTextColor(C.ink[1], C.ink[2], C.ink[3])
+        f.ordB = b
+        -- 다음! 꼬리표 + 징 둘레 빛
+        local n = CreateFrame("Frame", nil, f); n:SetSize(40, 18); n:SetFrameLevel(f:GetFrameLevel() + 6)
+        n.bg = ns.RoundRect(n, 9, C.acc, "BACKGROUND", 0, 0); n.bg:SetColor(C.acc, 1)
+        n.fs = ns.Font(n, 11.5, C.ink); n.fs:SetShadowColor(0, 0, 0, 0); n.fs:SetPoint("CENTER", 0, 0); n.fs:SetText("다음!")
+        n:SetWidth(n.fs:GetStringWidth() + 16)
+        n.glow = f:CreateTexture(nil, "OVERLAY", nil, 6); n.glow:SetTexture(ns.MEDIA .. "soft_glow"); n.glow:SetBlendMode("ADD")
+        n.glow:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+        n:Hide(); n.glow:Hide()
+        f.nextT = n
+        -- 자물쇠 줄 (CC 징)
+        local l = CreateFrame("Frame", nil, f); l:SetHeight(16); l:SetFrameLevel(f:GetFrameLevel() + 6)
+        l.bg = ns.RoundRect(l, 8, { 0.11, 0.08, 0.075 }, "BACKGROUND", 0, 0); l.bg:SetColor({ 0.11, 0.08, 0.075 }, 0.92)
+        l.ic = l:CreateTexture(nil, "ARTWORK"); l.ic:SetTexture(ns.MEDIA .. "ic_lock"); l.ic:SetSize(10, 10); l.ic:SetPoint("LEFT", 6, 0)
+        l.ic:SetVertexColor(0.74, 0.82, 0.92)
+        l.fs = ns.Font(l, 10, { 0.74, 0.82, 0.92 }); l.fs:SetPoint("LEFT", l.ic, "RIGHT", 4, 0)
+        l:Hide()
+        f.lockT = l
+        return b
+    end
+    local function CCLeft(unit)
+        local names = CCNames()
+        local left
+        pcall(function()
+            for i = 1, 40 do
+                local name, exp
+                if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+                    local a = C_UnitAuras.GetAuraDataByIndex(unit, i, "HARMFUL")
+                    if not a then break end
+                    name, exp = a.name, a.expirationTime
+                else
+                    local n, _, _, _, _, e = UnitAura(unit, i, "HARMFUL")
+                    if not n then break end
+                    name, exp = n, e
+                end
+                if issecretvalue and (issecretvalue(name) or issecretvalue(exp)) then break end
+                if name and names[name] then
+                    left = (exp and exp > 0) and math.max(0, exp - GetTime()) or -1
+                    break
+                end
+            end
+        end)
+        return left
+    end
+    local lockTick = CreateFrame("Frame")
+    local locked = {}
+    local function PaintLock(f, unit, p)
+        local l = f.lockT
+        local left = CCLeft(unit)
+        local t = (p.who and p.who ~= "" and (p.who .. " ") or "") .. p.role
+        if left and left >= 0 then t = t .. " 중 · " .. math.ceil(left) .. "초" elseif left then t = t .. " 중" end
+        l.fs:SetText(t .. " · 건드리지 마요")
+        l:SetWidth(6 + 10 + 4 + l.fs:GetStringWidth() + 8)
+        l:ClearAllPoints(); l:SetPoint("TOP", f.hp, "BOTTOM", 0, -3)
+        l:Show()
+    end
+    lockTick:SetScript("OnUpdate", function(self, e)
+        self.t = (self.t or 0) + e
+        if self.t < 0.25 then return end
+        self.t = 0
+        for f, d in pairs(locked) do
+            if f.lockT:IsShown() and f.unit == d.unit then PaintLock(f, d.unit, d.p) else locked[f] = nil end
+        end
+    end)
+
+    function ns.MarkOrderPaint(f, unit, idx)
+        local plan = idx and PlanOf()
+        local p = plan and plan[idx]
+        if f.ordB then f.ordB:Hide(); f.lockT:Hide(); locked[f] = nil end
+        f.markIdx = idx; f.markN = p and p.kind == "kill" and p.n or nil
+        if not p or not f.raid:IsShown() then if f.nextT then f.nextT:Hide(); f.nextT.glow:Hide() end return end
+        local b = Badge(f)
+        if p.kind == "kill" then
+            b.fs:SetText(p.n)
+            b:ClearAllPoints(); b:SetPoint("CENTER", f.raid, "TOPRIGHT", -1, -2); b:Show()
+        else
+            f.unit = unit
+            locked[f] = { unit = unit, p = p }
+            PaintLock(f, unit, p)
+        end
+    end
+
+    -- 앞 순서 징이 사라지면 (죽거나 지워지면) 남은 것 중 가장 앞 몹이 "다음!"
+    local lastMin, lastIdx
+    function ns.MarkOrderScan(act)
+        local minN, minF
+        local seen = {}
+        for _, f in pairs(act) do
+            if f.markN and f.raid:IsShown() then
+                seen[f.markIdx] = true
+                if not minN or f.markN < minN then minN, minF = f.markN, f end
+            end
+        end
+        local fire = lastMin and lastIdx and not seen[lastIdx] and minN and minN > lastMin
+        lastMin, lastIdx = minN, minF and minF.markIdx
+        if not fire or not (UnitAffectingCombat("player") or IsInGroup()) then return end
+        local n = minF.nextT
+        if not n then return end
+        n:ClearAllPoints(); n:SetPoint("RIGHT", minF.raid, "LEFT", -4, 0)
+        n.glow:ClearAllPoints(); n.glow:SetPoint("CENTER", minF.raid); n.glow:SetSize(54, 54)
+        n:Show(); n.glow:Show(); n:SetAlpha(1); n.glow:SetAlpha(1)
+        local t = 0
+        n:SetScript("OnUpdate", function(self, e)
+            t = t + e
+            -- 두 번 콩콩 반짝이고 천천히 사라짐
+            local pulse = 0.55 + 0.45 * math.abs(math.sin(t * 7))
+            self.glow:SetAlpha(t < 0.9 and pulse or math.max(0, 1 - (t - 0.9) / 0.8))
+            if t > 1.8 then self:SetAlpha(math.max(0, 1 - (t - 1.8) / 0.4)) end
+            if t > 2.2 then self:Hide(); self.glow:Hide(); self:SetScript("OnUpdate", nil) end
+        end)
+    end
 end

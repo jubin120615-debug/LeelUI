@@ -910,6 +910,7 @@ function ns:CreateCastHolder()
     end)
     m:Hide()
     h.mover = m
+    C_Timer.After(0, function() if ns.MoveSkin then ns.MoveSkin(m, "시전바") end end)
     if ns.SetMoveMode then
         hooksecurefunc(ns, "SetMoveMode", function() m:SetShown(ns.moving and true or false) end)
     end

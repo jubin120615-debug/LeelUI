@@ -28,7 +28,7 @@ local C = {
 local MARK_NAME = { "별", "동그라미", "다이아", "세모", "달", "네모", "X", "해골" }
 local BAR_ORDER = { 8, 7, 6, 5, 4, 3, 2, 1 }
 
-local defaults = { pos = nil, show = "group", announce = false, scale = 1 }
+local defaults = { pos = nil, show = "group", announce = false, scale = 1, order = true }
 local db
 
 local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Mark]|r " .. msg) end
@@ -247,10 +247,132 @@ local function BuildAutoMacro()
 end
 
 ----------------------------------------------------------------------
+-- 징 약속표: 징마다 뜻 (잡는 순서 · CC 맡은 사람)
+--   기본 = 파티 직업을 보고 자동 (해골 1번 · X 2번 · 사냥꾼 네모 덫 · 마법사 달 변이 · 도적 별 혼절 · 나머지 3번…)
+--   징 아래 글씨를 누르면 바꾸기: 자동 → 순서 → 변이 → 덫 → 혼절 → 안 씀
+--   [약속 알리기] = 파티 채팅 한 줄 (징 그림) + 르엘 UI 쓰는 파티원에게 약속표 보내기 (이름표 순서가 같아져요)
+----------------------------------------------------------------------
+local CC_CLASS = { ["변이"] = "MAGE", ["덫"] = "HUNTER", ["혼절"] = "ROGUE" }
+local CC_MARK = { [6] = "덫", [5] = "변이", [1] = "혼절" }
+local CYCLE = { "auto", "kill", "변이", "덫", "혼절", "off" }
+local PREFIX = "LEELMARK"
+local remote   -- 다른 파티원이 보낸 약속표 { plan = {}, from = 이름 }
+
+local function ClassColorHex(file)
+    local c = file and RAID_CLASS_COLORS and RAID_CLASS_COLORS[file]
+    return c and { c.r, c.g, c.b } or { 0.85, 0.78, 0.76 }
+end
+
+local function MyPlan()
+    local has, who = GroupClasses()
+    local roles = db.roles or {}
+    local plan, kill = {}, {}
+    for _, idx in ipairs({ 8, 7, 4, 3, 2, 6, 5, 1 }) do
+        local r = roles[idx] or "auto"
+        if r == "auto" then
+            local cc = CC_MARK[idx]
+            if cc and has[CC_CLASS[cc]] then r = cc else r = "kill" end
+        end
+        if r == "kill" then kill[#kill + 1] = idx
+        elseif r ~= "off" then
+            local cls = CC_CLASS[r]
+            plan[idx] = { kind = "cc", role = r, who = (cls and who[cls]) or "", cls = cls }
+        end
+    end
+    for n, idx in ipairs(kill) do plan[idx] = { kind = "kill", n = n } end
+    return plan
+end
+
+local function Plan()
+    if remote and remote.plan and IsInGroup() then return remote.plan, remote.from end
+    return MyPlan()
+end
+
+local function PackPlan(plan)
+    local t = {}
+    for idx = 1, 8 do
+        local p = plan[idx]
+        if p then t[#t + 1] = idx .. ":" .. (p.kind == "kill" and ("k" .. p.n) or ("c" .. p.role .. ":" .. (p.who or "") .. ":" .. (p.cls or ""))) end
+    end
+    return "P1;" .. table.concat(t, ";")
+end
+local function UnpackPlan(msg)
+    if not msg or msg:sub(1, 3) ~= "P1;" then return nil end
+    local plan = {}
+    for part in msg:sub(4):gmatch("[^;]+") do
+        local idx, rest = part:match("^(%d):(.+)$")
+        idx = tonumber(idx)
+        if idx and rest then
+            local n = rest:match("^k(%d+)$")
+            if n then plan[idx] = { kind = "kill", n = tonumber(n) }
+            else
+                local role, who, cls = rest:match("^c([^:]*):([^:]*):?(.*)$")
+                if role then plan[idx] = { kind = "cc", role = role, who = who, cls = (cls ~= "" and cls) or nil } end
+            end
+        end
+    end
+    return plan
+end
+
+-- 지금 보이는 적에게 찍힌 징
+local function UsedMarks()
+    local used = {}
+    for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
+        local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
+        local m = u and GetMark(u)
+        if m then used[m] = true end
+    end
+    local tm = GetMark("target"); if tm then used[tm] = true end
+    return used
+end
+
+local RT = { "{rt1}", "{rt2}", "{rt3}", "{rt4}", "{rt5}", "{rt6}", "{rt7}", "{rt8}" }
+local function PlanText(plan)
+    local used = UsedMarks()
+    local any = next(used) ~= nil
+    local kills = {}
+    for idx, p in pairs(plan) do
+        if p.kind == "kill" and ((any and used[idx]) or (not any and p.n <= 2)) then kills[#kills + 1] = { idx, p.n } end
+    end
+    table.sort(kills, function(a, b) return a[2] < b[2] end)
+    local parts, chain = {}, {}
+    for i, k in ipairs(kills) do
+        chain[#chain + 1] = RT[k[1]] .. (i == 1 and " 먼저" or (i == 2 and " 다음" or (" " .. i .. "번")))
+    end
+    if #chain > 0 then parts[#parts + 1] = table.concat(chain, " → ") end
+    for _, idx in ipairs({ 5, 6, 1, 2, 3, 4, 7, 8 }) do
+        local p = plan[idx]
+        if p and p.kind == "cc" and (not any or used[idx]) then
+            parts[#parts + 1] = RT[idx] .. " " .. ((p.who ~= "" and (p.who .. " ")) or "") .. p.role
+        end
+    end
+    return table.concat(parts, " · ")
+end
+
+local function SendPlan()
+    if not IsInGroup() then Print("파티에 있을 때 알릴 수 있어요.") return end
+    local plan = MyPlan()
+    remote = nil
+    local text = PlanText(plan)
+    local ch = IsInRaid() and "RAID" or "PARTY"
+    if IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and not IsInGroup(LE_PARTY_CATEGORY_HOME) then ch = "INSTANCE_CHAT" end
+    if text ~= "" then pcall(SendChatMessage, "[Leel Mark] " .. text, ch) end
+    if C_ChatInfo and C_ChatInfo.SendAddonMessage then pcall(C_ChatInfo.SendAddonMessage, PREFIX, PackPlan(plan), ch) end
+end
+
+_G.LeelMarkAPI = {
+    -- 징 번호 → { kind = "kill", n = 순서 } 또는 { kind = "cc", role = "변이", who = 이름 }
+    Plan = function() if not db then return {} end return (Plan()) end,
+    OrderOn = function() return db and db.order ~= false end,
+}
+
+----------------------------------------------------------------------
 -- 바 (르엘 UI: 어두운 알약 + 분홍 테)
 ----------------------------------------------------------------------
 local bar
 local ResetSweep
+local labels = {}
+local PaintLabels
 
 local function Slice(t, m) pcall(t.SetTextureSliceMargins, t, m, m, m, m) end
 
@@ -272,56 +394,192 @@ local function Tip(b, title, line)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
-local function MarkButton(parent, idx)
+-- B안: 평소엔 작은 바 (징 + 순서 배지) · 징에 마우스를 올리면 아래로 약속 서랍
+--   징 왼쪽 클릭 = 지금 대상에 그 징 · 오른쪽 클릭 = 대상 징 지우기 (보안 단추)
+--   징 순서 = 약속표 순서 (1번 · 2번 … → CC → 안 씀) · 전투 중엔 순서를 못 바꿔서 끝나면 다시 세워요
+--   서랍: [징] 자동 · 순서 · 변이 · 덫 · 혼절 · 안 씀 (전투 중엔 안 열려요)
+local BTN, GAP = 30, 6
+local rows = {}
+local drawer, drawerIdx
+local OpenDrawer
+local function MarkBtn(parent, idx)
     local b = CreateFrame("Button", "LeelMarkBtn" .. idx, parent, "SecureActionButtonTemplate")
-    b:SetSize(30, 30)
+    b:SetSize(BTN, BTN)
     b:SetAttribute("type", "raidtarget")
     b:SetAttribute("unit", "target")
     b:SetAttribute("marker", idx)
     b:SetAttribute("action1", "toggle")
     b:SetAttribute("action2", "clear")
-    local bg = b:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture(MEDIA .. "circle"); bg:SetAllPoints()
+    b:RegisterForClicks("AnyUp", "AnyDown")
+    b:SetAttribute("useOnKeyDown", false)
+    local bg = b:CreateTexture(nil, "BACKGROUND"); bg:SetTexture(MEDIA .. "circle"); bg:SetAllPoints()
     bg:SetVertexColor(C.btn[1], C.btn[2], C.btn[3], 1)
-    local ring = b:CreateTexture(nil, "BORDER")
-    ring:SetTexture(MEDIA .. "ring"); ring:SetAllPoints()
-    ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.35)
+    b.ring = b:CreateTexture(nil, "BORDER"); b.ring:SetTexture(MEDIA .. "ring"); b.ring:SetAllPoints()
+    b.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.35)
     local ic = b:CreateTexture(nil, "ARTWORK")
     ic:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
     SetRaidTargetIconTexture(ic, idx)
     ic:SetSize(19, 19); ic:SetPoint("CENTER")
-    b:RegisterForClicks("AnyUp", "AnyDown")
-    b:SetAttribute("useOnKeyDown", false)
-    Tip(b, MARK_NAME[idx], "왼쪽 클릭: 대상에 찍기 · 오른쪽 클릭: 대상 징 지우기")
-    b:HookScript("OnEnter", function() ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) end)
-    b:HookScript("OnLeave", function() ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.35) end)
+    -- 순서 배지 (이름표와 같은 분홍 동그라미) · CC 징 = 맡은 사람 직업 색 점
+    b.badge = CreateFrame("Frame", nil, b); b.badge:SetSize(15, 15); b.badge:SetPoint("CENTER", b, "TOPRIGHT", -3, -3)
+    b.badge:SetFrameLevel(b:GetFrameLevel() + 3)
+    local bo = b.badge:CreateTexture(nil, "ARTWORK"); bo:SetTexture(MEDIA .. "circle"); bo:SetPoint("CENTER"); bo:SetSize(18, 18)
+    bo:SetVertexColor(C.plate[1], C.plate[2], C.plate[3], 1)
+    b.badgeIn = b.badge:CreateTexture(nil, "ARTWORK", nil, 1); b.badgeIn:SetTexture(MEDIA .. "circle"); b.badgeIn:SetAllPoints()
+    b.badgeFs = b.badge:CreateFontString(nil, "OVERLAY"); LeelFont(b.badgeFs, 10, ""); b.badgeFs:SetPoint("CENTER", 0, 0)
+    b.badgeFs:SetTextColor(C.ink[1], C.ink[2], C.ink[3])
+    b:SetScript("OnEnter", function(self)
+        self.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(MARK_NAME[idx], 1, 1, 1)
+        local p = self.plan
+        if p and p.kind == "kill" then GameTooltip:AddLine(p.n .. "번째로 잡아요", 1, 0.84, 0.88)
+        elseif p then GameTooltip:AddLine(((p.who ~= "" and (p.who .. " ")) or "") .. p.role, 1, 0.84, 0.88)
+        else GameTooltip:AddLine("안 씀", 0.6, 0.55, 0.53) end
+        GameTooltip:AddLine("왼쪽 클릭: 대상에 찍기 · 오른쪽 클릭: 대상 징 지우기", C.tx2[1], C.tx2[2], C.tx2[3])
+        GameTooltip:Show()
+        if OpenDrawer then OpenDrawer(idx) end
+    end)
+    b:SetScript("OnLeave", function(self)
+        self.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], self.hot and 1 or 0.35)
+        GameTooltip:Hide()
+    end)
+    rows[idx] = b
     return b
 end
 
-local function PillButton(parent, name, label, icon, filled, tipTitle, tipLine)
-    local b = CreateFrame("Button", name, parent, "SecureActionButtonTemplate")
-    b:RegisterForClicks("AnyUp", "AnyDown")
-    b:SetAttribute("useOnKeyDown", false)   -- 마우스·단축키 모두 손을 뗄 때 한 번만
-    b:SetHeight(28)
-    local bg = PillTex(b, "pill22", 11, filled and C.acc or C.btn, 1)
-    bg:SetAllPoints()
-    if not filled then
-        local rim = PillTex(b, "pill22rim", 11, C.acc, 0.45, "BORDER")
-        rim:SetAllPoints()
+-- 약속 서랍
+local CHIPS = { { "auto", "자동" }, { "kill", "순서" }, { "변이", "변이" }, { "덫", "덫" }, { "혼절", "혼절" }, { "off", "안 씀" } }
+local function BuildDrawer()
+    drawer = CreateFrame("Frame", nil, bar)
+    drawer:SetHeight(30); drawer:SetFrameLevel(bar:GetFrameLevel() + 10)
+    local bg = PillTex(drawer, "pill22", 11, C.plate, 0.98); bg:SetAllPoints()
+    local rim = PillTex(drawer, "pill22rim", 11, C.acc, 0.5, "BORDER"); rim:SetAllPoints()
+    drawer.ic = drawer:CreateTexture(nil, "ARTWORK"); drawer.ic:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+    drawer.ic:SetSize(18, 18); drawer.ic:SetPoint("LEFT", 8, 0)
+    drawer.chips = {}
+    local x = 8 + 18 + 6
+    for k, c in ipairs(CHIPS) do
+        local ch = CreateFrame("Button", nil, drawer); ch:SetHeight(22)
+        ch.bg = PillTex(ch, "pill22", 11, C.btn, 1); ch.bg:SetAllPoints()
+        ch.fs = ch:CreateFontString(nil, "OVERLAY"); LeelFont(ch.fs, 11.5, ""); ch.fs:SetPoint("CENTER")
+        ch.key = c[1]
+        ch:SetScript("OnClick", function(self)
+            if not drawerIdx then return end
+            db.roles = db.roles or {}
+            db.roles[drawerIdx] = (self.key ~= "auto") and self.key or nil
+            remote = nil
+            PaintLabels()
+        end)
+        ch:SetScript("OnEnter", function(self) if not self.on then self.fs:SetTextColor(1, 1, 1) end end)
+        ch:SetScript("OnLeave", function(self) if not self.on then self.fs:SetTextColor(C.tx[1], C.tx[2], C.tx[3]) end end)
+        drawer.chips[k] = ch
     end
-    local ic = b:CreateTexture(nil, "ARTWORK")
-    ic:SetTexture(MEDIA .. icon); ic:SetSize(14, 14)
-    ic:SetPoint("LEFT", 12, 0)
-    local col = filled and C.ink or C.tx
-    ic:SetVertexColor(col[1], col[2], col[3], 1)
-    local fs = b:CreateFontString(nil, "OVERLAY")
-    LeelFont(fs, 12.5, "")
-    fs:SetTextColor(col[1], col[2], col[3])
-    fs:SetText(label)
-    fs:SetPoint("LEFT", ic, "RIGHT", 5, 0)
-    b:SetWidth(12 + 14 + 5 + fs:GetStringWidth() + 14)
-    Tip(b, tipTitle, tipLine)
-    return b
+    drawer:Hide()
+    -- 바 · 서랍 밖으로 마우스가 나가면 닫기
+    drawer:SetScript("OnUpdate", function(self, e)
+        self.t = (self.t or 0) + e
+        if self.t < 0.25 then return end
+        self.t = 0
+        if InCombatLockdown() or not (bar:IsMouseOver(4, -4, -4, 4) or self:IsMouseOver(4, -4, -4, 4)) then self:Hide() end
+    end)
+end
+local function PaintDrawer()
+    if not (drawer and drawer:IsShown() and drawerIdx) then return end
+    SetRaidTargetIconTexture(drawer.ic, drawerIdx)
+    local has, who = GroupClasses()
+    local cur = (db.roles and db.roles[drawerIdx]) or "auto"
+    local x = 8 + 18 + 6
+    for _, ch in ipairs(drawer.chips) do
+        local t = ch.key == "auto" and "자동" or (ch.key == "kill" and "순서" or (ch.key == "off" and "안 씀" or ch.key))
+        local cls = CC_CLASS[ch.key]
+        if cls and who[cls] then t = t .. " · " .. who[cls] end
+        ch.fs:SetText(t)
+        ch:SetWidth(ch.fs:GetStringWidth() + 18)
+        ch:ClearAllPoints(); ch:SetPoint("LEFT", drawer, "LEFT", x, 0); x = x + ch:GetWidth() + 4
+        ch.on = (cur == ch.key)
+        ch.bg:SetVertexColor((ch.on and C.acc or C.btn)[1], (ch.on and C.acc or C.btn)[2], (ch.on and C.acc or C.btn)[3], 1)
+        local fc = ch.on and C.ink or ((cls and not has[cls]) and { 0.6, 0.55, 0.53 } or C.tx)
+        ch.fs:SetTextColor(fc[1], fc[2], fc[3])
+    end
+    drawer:SetWidth(x + 4)
+end
+OpenDrawer = function(idx)
+    if InCombatLockdown() or not bar then return end
+    if not drawer then BuildDrawer() end
+    drawerIdx = idx
+    local b = rows[idx]
+    drawer:ClearAllPoints(); drawer:SetPoint("TOP", bar, "BOTTOM", 0, -4)
+    drawer:Show()
+    PaintDrawer()
+end
+
+-- 동그란 아이콘 단추 (자동 = 분홍 · 나머지 = 어두운)
+local function RoundIcon(b, icon, filled)
+    b:SetSize(32, 32)
+    local bg = b:CreateTexture(nil, "BACKGROUND"); bg:SetTexture(MEDIA .. "circle"); bg:SetAllPoints()
+    local c = filled and C.acc or C.btn; bg:SetVertexColor(c[1], c[2], c[3], 1)
+    local ring = b:CreateTexture(nil, "BORDER"); ring:SetTexture(MEDIA .. "ring"); ring:SetAllPoints()
+    ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], filled and 0 or 0.45)
+    local ic = b:CreateTexture(nil, "ARTWORK"); ic:SetTexture(MEDIA .. icon); ic:SetSize(15, 15); ic:SetPoint("CENTER")
+    local fc = filled and C.ink or C.tx; ic:SetVertexColor(fc[1], fc[2], fc[3], 1)
+    b:HookScript("OnEnter", function() ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) end)
+    b:HookScript("OnLeave", function() ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], filled and 0 or 0.45) end)
+end
+
+-- 줄 순서 · 글씨 · 흐리게
+local orderPending = false
+local function ROrder(plan)
+    local list = {}
+    for idx = 1, 8 do
+        local p = plan[idx]
+        local key
+        if not p then key = 300 + idx
+        elseif p.kind == "kill" then key = p.n
+        else local cr = ({ [5] = 1, [6] = 2, [1] = 3 })[idx]; key = cr and (100 + cr) or (150 + idx) end
+        list[#list + 1] = { idx, key }
+    end
+    table.sort(list, function(a, b) return a[2] < b[2] end)
+    return list
+end
+PaintLabels = function()
+    if not bar then return end
+    local plan, from = Plan()
+    local used = UsedMarks()
+    local any = next(used) ~= nil
+    local tm = GetMark("target")
+    for idx, r in pairs(rows) do
+        local p = plan[idx]
+        r.plan = p
+        if p and p.kind == "kill" then
+            r.badge:Show(); r.badgeIn:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1); r.badgeFs:SetText(p.n)
+        elseif p then
+            local c = ClassColorHex(p.cls)
+            r.badge:Show(); r.badgeIn:SetVertexColor(c[1], c[2], c[3], 1); r.badgeFs:SetText("")
+        else
+            r.badge:Hide()
+        end
+        r:SetAlpha((not p) and 0.35 or ((any and not used[idx]) and 0.45 or 1))
+        r.hot = (tm == idx)
+        r.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], (r.hot or r:IsMouseOver()) and 1 or 0.35)
+    end
+    if bar.fromFs then bar.fromFs:SetText(from and (from .. " 님 약속") or "") end
+    PaintDrawer()
+    -- 징 순서 다시 세우기 (전투 밖에서만)
+    local key = ""
+    local list = ROrder(plan)
+    for _, e in ipairs(list) do key = key .. e[1] end
+    if key ~= bar.orderKey then
+        if InCombatLockdown() then orderPending = true return end
+        orderPending = false
+        bar.orderKey = key
+        local x = 8 + 30 + 12
+        for _, e in ipairs(list) do
+            local r = rows[e[1]]
+            r:ClearAllPoints(); r:SetPoint("LEFT", bar, "LEFT", x, 0)
+            x = x + BTN + GAP
+        end
+    end
 end
 
 local function SavePos()
@@ -372,7 +630,7 @@ end
 
 local function CreateBar()
     bar = CreateFrame("Frame", "LeelMarkBar", UIParent)
-    bar:SetHeight(42)
+    bar:SetHeight(44)
     bar:SetScale(db.scale or 1)
     bar:SetMovable(true)
     bar:SetClampedToScreen(true)
@@ -384,23 +642,29 @@ local function CreateBar()
     -- 토끼: 끌어서 옮기기
     local bun = CreateFrame("Button", nil, bar)
     bun:SetSize(30, 30)
-    bun:SetPoint("LEFT", 6, 0)
+    bun:SetPoint("LEFT", 8, 0)
     local bt = bun:CreateTexture(nil, "ARTWORK")
     bt:SetTexture(MEDIA .. "icon"); bt:SetAllPoints()
     bun:RegisterForDrag("LeftButton")
     bun:SetScript("OnDragStart", function() bar:StartMoving() end)
     bun:SetScript("OnDragStop", function() bar:StopMovingOrSizing(); SavePos(); ApplyPos() end)
-    Tip(bun, "Leel Mark", "끌어서 옮기기 · 단축키(애드온 > Leel Mark)로 마우스 올린 몹에 순서대로 징 · /lmark")
+    Tip(bun, "Leel Mark", "끌어서 옮기기 · 징에 마우스 = 약속 서랍 · 단축키(애드온 > Leel Mark) · /lmark")
+    -- 다른 파티원 약속을 따를 때: 바 위에 작게
+    bar.fromFs = bar:CreateFontString(nil, "OVERLAY"); LeelFont(bar.fromFs, 10.5, ""); bar.fromFs:SetTextColor(1, 0.84, 0.88)
+    bar.fromFs:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", 14, 2)
 
-    local prev = bun
-    for _, idx in ipairs(BAR_ORDER) do
-        local b = MarkButton(bar, idx)
-        b:SetPoint("LEFT", prev, "RIGHT", prev == bun and 8 or 4, 0)
-        prev = b
+    for idx = 1, 8 do MarkBtn(bar, idx) end
+    local marksEnd = 8 + 30 + 12 + 8 * BTN + 7 * GAP
+    local function Sep(x)
+        local t = bar:CreateTexture(nil, "BORDER"); t:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.3); t:SetSize(1, 22)
+        t:SetPoint("LEFT", bar, "LEFT", x, 0)
     end
-    -- 자동: 매크로 단추. 전투 밖에서 누르는 순간 매크로를 새로 만듦
-    local auto = PillButton(bar, "LeelMarkAuto", "자동", "ic_wand", true,
-        "자동", "대상(없으면 가장 가까운 몹) 둘레 무리에만 우선순위대로 빈 징을 채워요 (시전 몹·정예 먼저). 전투 밖에서만")
+    Sep(8 + 30 + 5); Sep(marksEnd + 6)
+
+    local auto = CreateFrame("Button", "LeelMarkAuto", bar, "SecureActionButtonTemplate")
+    auto:RegisterForClicks("AnyUp", "AnyDown"); auto:SetAttribute("useOnKeyDown", false)
+    RoundIcon(auto, "ic_wand", true)
+    Tip(auto, "자동", "대상(없으면 가장 가까운 몹) 둘레 무리에만 약속표 순서대로 빈 징을 채워요 (시전 몹·정예 먼저). 전투 밖에서만")
     auto:SetAttribute("type", "macro")
     auto:SetAttribute("macrotext", "")
     auto:SetScript("PreClick", function(self, _, down)
@@ -413,17 +677,27 @@ local function CreateBar()
         if not text then Print(msg) elseif msg ~= "" then Announce(msg) end
         ResetSweep()
     end)
-    auto:SetPoint("LEFT", prev, "RIGHT", 8, 0)
-    -- 지우기: 블리자드 보안 단추의 "모두 지우기"
-    local clr = PillButton(bar, "LeelMarkClear", "지우기", "ic_eraser", false, "지우기", "모든 징을 지워요")
+    local tell = CreateFrame("Button", nil, bar)
+    RoundIcon(tell, "ic_horn", false)
+    Tip(tell, "약속 알리기", "파티 채팅에 징 약속을 한 줄로 (징 그림) · 르엘 UI 쓰는 파티원 이름표에도 같은 순서가 보여요")
+    tell:SetScript("OnClick", function() SendPlan() end)
+    local clr = CreateFrame("Button", "LeelMarkClear", bar, "SecureActionButtonTemplate")
+    clr:RegisterForClicks("AnyUp", "AnyDown"); clr:SetAttribute("useOnKeyDown", false)
+    RoundIcon(clr, "ic_eraser", false)
+    Tip(clr, "지우기", "모든 징을 지워요")
     clr:SetAttribute("type", "raidtarget")
     clr:SetAttribute("action", "clear-all")
     clr:HookScript("OnClick", function(_, _, down) if not down then ResetSweep() end end)
-    clr:SetPoint("LEFT", auto, "RIGHT", 6, 0)
+    auto:SetPoint("LEFT", bar, "LEFT", marksEnd + 13, 0)
+    tell:SetPoint("LEFT", auto, "RIGHT", 6, 0)
+    clr:SetPoint("LEFT", tell, "RIGHT", 6, 0)
+    bar:SetWidth(marksEnd + 13 + 3 * 32 + 2 * 6 + 8)
 
-    bar:SetWidth(6 + 30 + 8 + 8 * 30 + 7 * 4 + 8 + auto:GetWidth() + 6 + clr:GetWidth() + 8)
     ApplyPos()
     UpdateShown()
+    local t0 = 0
+    bar:SetScript("OnUpdate", function(_, e) t0 = t0 + e; if t0 > 0.4 then t0 = 0; PaintLabels() end end)
+    PaintLabels()
 end
 
 ----------------------------------------------------------------------
@@ -440,7 +714,8 @@ ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("GROUP_ROSTER_UPDATE")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")
-ev:SetScript("OnEvent", function(_, event, arg1)
+ev:RegisterEvent("CHAT_MSG_ADDON")
+ev:SetScript("OnEvent", function(_, event, arg1, ...)
     if event == "ADDON_LOADED" and arg1 == ADDON then
         LeelMarkDB = LeelMarkDB or {}
         for k, v in pairs(defaults) do if LeelMarkDB[k] == nil then LeelMarkDB[k] = v end end
@@ -448,10 +723,26 @@ ev:SetScript("OnEvent", function(_, event, arg1)
     elseif event == "PLAYER_LOGIN" then
         CreateSweep()
         CreateBar()
+        if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX) end
+    elseif event == "CHAT_MSG_ADDON" then
+        local prefix, msg, _, sender = arg1, select(1, ...)
+        if prefix ~= PREFIX or not sender then return end
+        local me = UnitName("player")
+        local short = sender:match("^([^%-]+)") or sender
+        if short == me then return end
+        local plan = UnpackPlan(msg)
+        if plan then
+            remote = { plan = plan, from = short }
+            Print(short .. " 님의 징 약속표를 받았어요 (이름표 순서가 같아져요)")
+            if PaintLabels then PaintLabels() end
+        end
     elseif event == "GROUP_ROSTER_UPDATE" then
         UpdateShown()
+        if not IsInGroup() then remote = nil end
+        if PaintLabels then PaintLabels() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         if pendingShow then UpdateShown() end
+        if orderPending and PaintLabels then PaintLabels() end
         ResetSweep()
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- 전투 직전: 낡은 자동 매크로가 엉뚱한 몹에 찍지 않게 비움

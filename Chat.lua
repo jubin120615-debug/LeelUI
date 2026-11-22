@@ -1065,6 +1065,7 @@ function ns:SetChatMoveMode(on)
         lb:SetPoint("CENTER"); lb:SetText("채팅창\n끌면 옮기기 · 오른쪽 위 손잡이로 크기")
         mover:SetScript("OnDragStart", ns.ChatStartMove)
         mover:SetScript("OnDragStop", ns.ChatStopMove)
+        if ns.MoveSkin then ns.MoveSkin(mover, "채팅창") end
         -- 크기 손잡이 (아래 끝은 그대로, 위·오른쪽으로 늘리고 줄여요)
         local grip = CreateFrame("Button", nil, mover)
         grip:SetSize(22, 22); grip:SetPoint("TOPRIGHT", -2, -2)

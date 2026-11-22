@@ -595,7 +595,7 @@ local function MakeBadge()
     local lab = ns.Font(m, 12, C.accHi); lab:SetPoint("BOTTOM", m, "TOP", 0, 4); lab:SetText("주사위 토끼")
     m:SetScript("OnDragStart", function() if not InCombatLockdown() then b:StartMoving() end end)
     m:SetScript("OnDragStop", function() b:StopMovingOrSizing(); ns.RollSavePos() end)
-    if ns.MoveSizeHook then ns.MoveSizeHook(m, "주사위 창 · 토끼 단추 크기", "주사위 토끼") end
+    -- 이동 모드 목록 · 테두리에서는 빼요 (토끼는 언제든 끌기 = 옮기기 · Shift + 휠 = 크기)
     m:Hide()
     b.mover = m; ns.RollMover = m
     return b
@@ -606,7 +606,7 @@ if ns.SetMoveMode then
         if ns.moving and DB().on and not badge then MakeBadge() end
         if not badge then return end
         PaintBadge()
-        badge.mover:SetShown(ns.moving and badge:IsShown() and not InCombatLockdown() and true or false)
+        badge.mover:Hide()
     end)
 end
 
@@ -2053,6 +2053,19 @@ function ns.RollTest()
         end
     end
     C_Timer.After(32, function() test = false end)
+end
+-- 미리 보기 바로 끝내기 (허브 [실제 자리에서 보기] → 허브로 돌아갈 때)
+function ns.RollTestStop()
+    for id, e in pairs(entries) do
+        if e.test then
+            e.done = true
+            local f = CardFor(e)
+            if f then Free(f) end
+            entries[id] = nil
+        end
+    end
+    test = false
+    if ns.RollPaintBadge then ns.RollPaintBadge() end
 end
 
 ----------------------------------------------------------------------

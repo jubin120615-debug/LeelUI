@@ -1023,7 +1023,7 @@ local MODULES = {
               options = { { "끔", "off" }, { "마우스 올리면", "mine" }, { "항상 펼치기", "all" } },
               get = function() return ns.RollDB and ns.RollDB().board or "mine" end,
               set = function(v) ns.RollDB().board = v; if ns.RollApply then ns.RollApply() end end },
-            { moveOnly = true, t = "slider", label = "주사위 창 · 토끼 단추 크기", min = 60, max = 150,
+            { noPeek = true, t = "slider", label = "주사위 창 · 토끼 단추 크기", min = 60, max = 150,
               get = function() return ns.RollDB and ns.RollDB().scale or 100 end,
               set = function(v) if ns.RollSetScale then ns.RollSetScale(v) end end },
             { t = "toggle", label = "토끼 단추 항상 보이기", hint = "끄면 파티 · 공격대에서만 · 클릭 = 기록장",
@@ -1144,7 +1144,12 @@ local MODULES = {
                       if ps then bb:ClearAllPoints(); bb:SetPoint("CENTER", UIParent, "BOTTOMLEFT", ps[1], ps[2]) end
                   end
               end },
+            { sec = 3, t = "toggle", label = "이름표에 잡는 순서", hl = "order", hint = "르엘 이름표: 징 옆 순서 숫자 · 앞 몹이 죽으면 다음! 반짝 · CC 징은 자물쇠",
+              get = function() return MarkDB().order ~= false end,
+              set = function(v) if LeelMarkDB then LeelMarkDB.order = v and true or false end; if ns.RefreshNameplates then ns:RefreshNameplates() end end },
             { sec = 4, t = "toggle", label = "파티 채팅 알림", hl = "auto", hint = "[자동]으로 찍을 때 파티 채팅에 한 줄", get = function() return MarkDB().announce end, cmd = "알림" },
+            { sec = 5, t = "button", label = "징 약속 처음대로", hl = "order", hint = "징 아래 글씨로 바꾼 약속을 모두 자동으로",
+              run = function() if LeelMarkDB then LeelMarkDB.roles = nil end end },
             { sec = 5, t = "button", label = "바 위치 초기화", cmd = "위치" },
         },
     },
@@ -1553,6 +1558,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.42", "이동 모드 새 단장 · Leel Mark 잡는 순서 · 주사위 토끼 미리 보기", "위 가운데 캡슐 바 · 들어갈 때 효과 · 목록(찾기 · 크기 초기화 · 잠깐 숨기기) · HUD 조각 안내선 · 착 붙기 · 방향키 · 징 순서 번호 · 군중 제어 역할 · 계획 알리기 · 이름표에 순서 · CC 남은 시간" },
     { "1.3.41", "르엘 허브 새 단장: 탭마다 미리 보기 + 세부 설정", "위쪽 미리 보기 · 줄에 마우스 = 그 부분 반짝 · 시전바 · 이름표 · 툴팁 · 마우스 · 채팅 · 글씨 · 퀘스트 · 지도 · 미니맵 · 파티 · 줍기 · 상점 · 장비 비교 · 액션바는 잠시 쉬어요" },
     { "1.3.40", "@불러 주기 알림 · 단축바 주문 레벨 알림 · 파티원 퀘 진행도", "@내이름 = 분홍 띠 + 삐삐 · @ 치면 이름 고르기 · 낮은 레벨 칸 표시 · Leel Quest 파티원 얼굴 고리 · Shift+클릭 = Leel Quest에서 보기" },
     { "1.3.39", "이동 모드에서 HUD 조각마다 크기 · 가운데는 숫자와 효과만", "내 창 · 가운데 · 대상 창 따로 크기 · 대상의 대상 · 펫 창 크기 · 주사위 토끼 · 토끼 메뉴는 이동 모드에서 · 설정 나누기 빨라짐" },
@@ -1608,7 +1614,45 @@ local PREVIEW = {
     LeelUI_Party = { "가짜 파티 띄우기", function()
         if InCombatLockdown() then Print("전투가 끝나면 볼 수 있어요.") return end
         if ns.SetPartyPreview then local b = ns.party; ns:SetPartyPreview(not (b and b.preview)) end end },
-    LeelUI_Roll = { "주사위 창 미리 보기", function() if ns.RollTest then ns.RollTest() end end },
+    -- A안: 탭을 열 땐 조용히 · 누르면 허브가 잠깐 숨고 진짜 주사위 창이 진짜 자리에 (위 알약 = 남은 시간 · 허브로 돌아가기)
+    LeelUI_Roll = { "실제 자리에서 보기", function()
+        if InCombatLockdown() then Print("전투가 끝나면 볼 수 있어요.") return end
+        if not ns.RollTest then return end
+        local P = ns.hubRollPeek
+        if not P then
+            P = CreateFrame("Frame", nil, UIParent); P:SetFrameStrata("FULLSCREEN_DIALOG"); P:SetHeight(36)
+            P:SetPoint("TOP", UIParent, "TOP", 0, -12)
+            local e = ns.RoundRect(P, 18, C.acc, "BACKGROUND", 0, -1); e:SetColor(C.acc, 0.7)
+            local f = ns.RoundRect(P, 18, { 0.114, 0.082, 0.078 }, "BACKGROUND", 1, 0); f:SetColor({ 0.114, 0.082, 0.078 }, 0.97)
+            P.ring = P:CreateTexture(nil, "ARTWORK"); P.ring:SetTexture(ns.MEDIA .. "ring_thin"); P.ring:SetSize(18, 18); P.ring:SetPoint("LEFT", 12, 0)
+            P.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3])
+            P.t = ns.Font(P, 12.5, C.accHi); P.t:SetPoint("LEFT", P.ring, "RIGHT", 8, 0); P.t:SetText("주사위 창 미리 보기 중")
+            P.n = ns.Font(P, 11.5, C.tx2); P.n:SetPoint("LEFT", P.t, "RIGHT", 8, 0)
+            P.b = ns.MakeButton(P, "허브로 돌아가기", true, function() P.Back() end); P.b:SetHeight(26)
+            P.b:SetPoint("LEFT", P.n, "RIGHT", 10, 0)
+            P:EnableKeyboard(true)
+            P:SetScript("OnKeyDown", function(self, key)
+                if key == "ESCAPE" then self:SetPropagateKeyboardInput(false); P.Back() else self:SetPropagateKeyboardInput(true) end
+            end)
+            function P.Back()
+                P:SetScript("OnUpdate", nil); P:Hide()
+                if ns.RollTestStop then ns.RollTestStop() end
+                if hub and not hub:IsShown() then hub:Show() end
+            end
+            P:Hide()
+            ns.hubRollPeek = P
+        end
+        hub:Hide()
+        ns.RollTest()
+        local endAt = GetTime() + 30
+        P:Show()
+        P:SetScript("OnUpdate", function(self)
+            local left = endAt - GetTime()
+            if left <= 0 then self.Back() return end
+            self.n:SetText(math.ceil(left) .. "초")
+            self:SetWidth(12 + 18 + 8 + self.t:GetStringWidth() + 8 + self.n:GetStringWidth() + 10 + self.b:GetWidth() + 6)
+        end)
+    end },
     LeelUI_Loot = { "상자 미리 보기 5초", function() if LeelSpotAPI and LeelSpotAPI.Preview then LeelSpotAPI.Preview(5) end end },
 }
 
@@ -1776,10 +1820,10 @@ XP.BAND = {
     LeelUI_Cast = { move = true, title = "시전바", reset = { "시전바 위치 초기화" } },
     LeelUI_Minimap = { move = true, title = "미니맵", reset = { "미니맵 위치 초기화" } },
     LeelUI_Chat = { move = true, title = "채팅창" },
-    LeelUI_Roll = { ms = true, reset = { "처음 자리 · 크기로" } },
+    LeelUI_Roll = { title = "주사위 토끼", note = "토끼를 끌어서 옮겨요 · Shift + 휠 = 크기", sz = "주사위 창 · 토끼 단추 크기", reset = { "처음 자리 · 크기로" } },
     LeelUI_Party = { ms = true, reset = { "위치 초기화" } },
     LeelMap = { title = "지도 창", note = "지도 창 머리를 끌어서 옮겨요", sz = "지도 창 크기", reset = { "지도 위치 초기화", "지도 크기 처음으로" } },
-    LeelMark = { title = "징 바", note = "바를 끌어서 옮겨요", reset = { "바 위치 초기화" } },
+    LeelMark = { title = "징 바", note = "토끼를 끌어서 옮겨요 · 징에 마우스 = 약속 서랍", reset = { "바 위치 초기화" } },
     LeelUI_Bags = { title = "가방 창", note = "창 머리를 끌어서 옮겨요", sz = "가방 창 크기", reset = { "위치 초기화", "크기 처음으로" } },
     ForgLeveling = { title = "Leel Quest 창", note = "창을 끌어서 옮겨요 · 크기는 오른쪽 아래 손잡이" },
 }   -- snap: 허브를 열 때 값 (줄마다 처음 볼 때 기억)
@@ -4489,36 +4533,101 @@ PV.LeelUI_Cast = function(st)
     return v
 end
 
--- 주사위 창: 템 카드 + 입찰 · 차비 · 포기
+-- 주사위 창: 실제 창과 같은 모양 (유리 카드 · 동그란 아이콘 + 시간 링 · 초 · 글자 탭 + 접힌 줄 · 주사위 토끼)
 PV.LeelUI_Roll = function(st)
-    local v = CreateFrame("Frame", nil, st); v:SetSize(260, 120); v:SetPoint("CENTER")
-    local card = CreateFrame("Frame", nil, v); card:SetSize(210, 92); card:SetPoint("LEFT")
-    ns.RoundPlate(card, 14, { 0.13, 0.1, 0.09, 0.97 }, { 0.949, 0.702, 0.761, 0.7 })
-    local ic = Tex(card, "roll_dice", 34, 34, "ARTWORK"); ic:SetPoint("TOPLEFT", 10, -10)
-    local nm = ns.Font(card, 12.5, { 0.5, 0.7, 1 }); nm:SetPoint("TOPLEFT", ic, "TOPRIGHT", 8, -2); nm:SetText("늑대 가죽 장화")
-    v.adv = ns.Font(card, 10.5, { 1, 0.84, 0.35 }); v.adv:SetPoint("TOPLEFT", nm, "BOTTOMLEFT", 0, -3); v.adv:SetText("● 지금 장비보다 좋아요")
-    v.btns = {}
-    local x = 10
-    for i, b in ipairs({ { "roll_btn_need", "입찰" }, { "roll_btn_greed", "차비" }, { "roll_btn_pass", "" } }) do
-        local f = CreateFrame("Frame", nil, card); f:SetSize(i == 3 and 30 or 76, 24); f:SetPoint("BOTTOMLEFT", x, 10)
-        f.rr = ns.RoundRect(f, 12, { 0.23, 0.18, 0.17 }, "ARTWORK", 0, 0)
-        local t = Tex(f, b[1], 16, 16); t:SetPoint(i == 3 and "CENTER" or "LEFT", i == 3 and 0 or 10, 0)
-        if b[2] ~= "" then local fs = ns.Font(f, 12); fs:SetPoint("LEFT", t, "RIGHT", 5, 0); fs:SetText(b[2]); f.fs = fs end
-        x = x + f:GetWidth() + 6
-        v.btns[i] = f
+    local W0, PX = 230, 8
+    local v = CreateFrame("Frame", nil, st); v:SetSize(W0 + 70, 160); v:SetPoint("CENTER")
+    local function Glass(f, h)
+        f:SetSize(W0, h)
+        local rim = ns.RoundRect(f, 10, { 1, 1, 1 }, "BACKGROUND", -1, -1); rim:SetColor({ 1, 1, 1 }, 0.12)
+        local bg = ns.RoundRect(f, 10, { 0.07, 0.047, 0.047 }, "BACKGROUND", 0, 0); bg:SetColor({ 0.07, 0.047, 0.047 }, 0.86)
     end
-    v.bun = Tex(v, "roll_badge", 42, 42); v.bun:SetPoint("LEFT", card, "RIGHT", 6, 0)
+    local function Icon(f, file, sz, ring)
+        local ic = CreateFrame("Frame", nil, f); ic:SetSize(sz, sz)
+        local t = ic:CreateTexture(nil, "ARTWORK"); t:SetAllPoints(); t:SetTexture(file); t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local mk = ic:CreateMaskTexture(); mk:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); mk:SetAllPoints(t)
+        t:AddMaskTexture(mk)
+        if ring then
+            local tr = ic:CreateTexture(nil, "BACKGROUND", nil, 1); tr:SetTexture(ns.MEDIA .. "ring_thin")
+            tr:SetPoint("TOPLEFT", -4, 4); tr:SetPoint("BOTTOMRIGHT", 4, -4); tr:SetVertexColor(1, 1, 1, 0.12)
+            -- 남은 시간 (분홍 링 3/4)
+            local cd = CreateFrame("Cooldown", nil, ic, "CooldownFrameTemplate")
+            cd:SetPoint("TOPLEFT", -4, 4); cd:SetPoint("BOTTOMRIGHT", 4, -4)
+            cd:SetSwipeTexture(ns.MEDIA .. "ring_thin"); cd:SetSwipeColor(1, 0.561, 0.639, 1)
+            cd:SetReverse(true); cd:SetDrawEdge(false); cd:SetDrawBling(false)
+            if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
+            ic.cd = cd
+        end
+        return ic
+    end
+    -- 펼친 카드
+    local card = CreateFrame("Frame", nil, v); Glass(card, 92); card:SetPoint("TOPLEFT", 0, 0)
+    local ic = Icon(card, "Interface\\Icons\\INV_Belt_04", 28, true); ic:SetPoint("TOPLEFT", PX, -6)
+    v.ic = ic
+    local nm = ns.Font(card, 12, { 0.12, 1, 0 }); nm:SetPoint("TOPLEFT", ic, "TOPRIGHT", 8, 1); nm:SetText("두꺼운 가죽 허리띠")
+    v.adv = ns.Font(card, 10, { 1, 0.84, 0.35 }); v.adv:SetPoint("TOPLEFT", nm, "BOTTOMLEFT", 0, -3); v.adv:SetText("● 지금 허리 장비가 더 좋아요")
+    v.secs = card:CreateFontString(nil, "OVERLAY"); v.secs:SetFont(ns.NUM or ns.FONT, 20, ""); v.secs:SetPoint("TOPRIGHT", -PX, -6)
+    v.secs:SetText("29"); v.secs:SetTextColor(1, 0.84, 0.88)
+    local seg = CreateFrame("Frame", nil, card); seg:SetHeight(26)
+    seg:SetPoint("BOTTOMLEFT", PX, 10); seg:SetPoint("BOTTOMRIGHT", -PX, 10)
+    local sl = card:CreateTexture(nil, "BORDER"); sl:SetTexture(ns.WHITE); sl:SetHeight(1); sl:SetVertexColor(1, 1, 1, 0.12)
+    sl:SetPoint("BOTTOMLEFT", seg, "TOPLEFT", -2, 1); sl:SetPoint("BOTTOMRIGHT", seg, "TOPRIGHT", 2, 1)
+    v.tabs = {}
+    local tw = (W0 - PX * 2) / 3
+    for i, lab in ipairs({ "입찰", "차비", "포기" }) do
+        local t = CreateFrame("Frame", nil, seg); t:SetSize(tw, 26); t:SetPoint("LEFT", (i - 1) * tw, 0)
+        t.fs = ns.Font(t, 12); t.fs:SetShadowColor(0, 0, 0, 0); t.fs:SetPoint("CENTER", 0, 1); t.lab = lab
+        t.ul = t:CreateTexture(nil, "ARTWORK"); t.ul:SetTexture(ns.WHITE); t.ul:SetHeight(2.5)
+        t.ul:SetPoint("BOTTOMLEFT", 16, 0); t.ul:SetPoint("BOTTOMRIGHT", -16, 0); t.ul:SetVertexColor(1, 0.82, 0.35, 1)
+        v.tabs[i] = t
+    end
+    local bar = CreateFrame("StatusBar", nil, card); bar:SetStatusBarTexture(ns.WHITE); bar:SetMinMaxValues(0, 1); bar:SetValue(0.72)
+    bar:SetPoint("BOTTOMLEFT", PX, 4); bar:SetPoint("BOTTOMRIGHT", -PX, 4); bar:SetHeight(3); bar:SetStatusBarColor(1, 0.561, 0.639)
+    local bb = bar:CreateTexture(nil, "BACKGROUND"); bb:SetAllPoints(); bb:SetColorTexture(1, 1, 1, 0.16)
+    -- 접힌 줄 둘
+    v.pills = {}
+    local PILLS = { { "Interface\\Icons\\INV_Misc_Gear_01", "네트 페이글의 다나이 FC-5", { 0.12, 1, 0 }, "내 템 아님", { 0.72, 0.65, 0.63 } },
+                    { "Interface\\Icons\\INV_Shoulder_02", "무두질한 어깨보호대", { 0.12, 1, 0 }, "차비 ★", { 1, 0.82, 0.35 } } }
+    for i, d in ipairs(PILLS) do
+        local p = CreateFrame("Frame", nil, v); Glass(p, 30); p:SetPoint("TOPLEFT", card, "BOTTOMLEFT", 0, -4 - (i - 1) * 34)
+        local pi = Icon(p, d[1], 20, false); pi:SetPoint("LEFT", PX, 0)
+        local ch = p:CreateTexture(nil, "ARTWORK"); ch:SetTexture(ns.MEDIA .. "roll_chev"); ch:SetSize(10, 10); ch:SetPoint("RIGHT", -PX, 0)
+        ch:SetVertexColor(0.72, 0.65, 0.63)
+        local hn = ns.Font(p, 10.5, d[5]); hn:SetPoint("RIGHT", ch, "LEFT", -6, 0); hn:SetText(d[4])
+        local pn = ns.Font(p, 11.5, d[3]); pn:SetPoint("LEFT", pi, "RIGHT", 8, 0); pn:SetPoint("RIGHT", hn, "LEFT", -6, 0)
+        pn:SetJustifyH("LEFT"); pn:SetWordWrap(false); pn:SetText(d[2])
+        p.hint = hn
+        v.pills[i] = p
+    end
+    -- 주사위 토끼 (유리 주사위 + 굴릴 수)
+    local bun = CreateFrame("Frame", nil, v); bun:SetSize(50, 50); bun:SetPoint("TOPLEFT", card, "TOPRIGHT", 10, 4)
+    local au = bun:CreateTexture(nil, "BACKGROUND"); au:SetTexture(ns.MEDIA .. "soft_glow"); au:SetBlendMode("ADD")
+    au:SetPoint("CENTER", 0, -2); au:SetSize(80, 80); au:SetVertexColor(1, 0.561, 0.639, 0.25)
+    local bi = Tex(bun, "roll_badge_dice", 50, 50, "ARTWORK"); bi:SetPoint("CENTER")
+    local cnt = CreateFrame("Frame", nil, bun); cnt:SetSize(20, 20); cnt:SetPoint("CENTER", bun, "TOPRIGHT", -6, -6)
+    local cr = cnt:CreateTexture(nil, "ARTWORK"); cr:SetTexture(ns.MEDIA .. "circle"); cr:SetPoint("CENTER"); cr:SetSize(24, 24); cr:SetVertexColor(0.165, 0.122, 0.114)
+    local cdt = cnt:CreateTexture(nil, "ARTWORK", nil, 1); cdt:SetTexture(ns.MEDIA .. "circle"); cdt:SetAllPoints(); cdt:SetVertexColor(1, 0.353, 0.431)
+    local cfs = cnt:CreateFontString(nil, "OVERLAY"); cfs:SetFont(ns.NUM or ns.FONT, 14, ""); cfs:SetPoint("CENTER"); cfs:SetText("3")
+    v.bun = bun
     function v:Update(m)
         local adv = Val(m, "토끼 추천") ~= false
         self.adv:SetShown(adv)
-        self.btns[1].rr:SetColor(adv and C.acc or { 0.23, 0.18, 0.17 }, 1)
-        if self.btns[1].fs then local c = adv and C.ink or C.tx; self.btns[1].fs:SetTextColor(c[1], c[2], c[3]) end
-        self:SetScale(math.max(0.7, math.min(1.15, (Val(m, "주사위 창 · 토끼 단추 크기") or 100) / 100)))
+        for i, t in ipairs(self.tabs) do
+            local rec = adv and i == 2
+            t.fs:SetText(t.lab .. (rec and " ★" or ""))
+            if rec then t.fs:SetTextColor(1, 0.82, 0.35) else local k = (i == 3) and 0.45 or 0.72; t.fs:SetTextColor(k, k, k) end
+            t.ul:SetShown(rec)
+        end
+        self.pills[2].hint:SetText(adv and "차비 ★" or "")
+        if self.ic.cd and not self.cdSet then self.cdSet = true; self.ic.cd:SetCooldown(GetTime() - 15, 60) end
+        local sc = (Val(m, "주사위 창 · 토끼 단추 크기") or 100) / 100
+        local fit = math.min((self:GetParent():GetWidth() - 20) / self:GetWidth(), (self:GetParent():GetHeight() - 10) / self:GetHeight())
+        self:SetScale(math.max(0.5, math.min(fit, 1.15, sc)))
     end
     local spot = XP.Spot(st)
     XP.HLREG.LeelUI_Roll = { function(k, text)
         if not k or not v:IsVisible() then spot.Off() return end
-        if k == "rec" then spot.Show(v.adv:IsShown() and v.adv or card, v.btns[1], text)
+        if k == "rec" then spot.Show(v.adv:IsShown() and v.adv or card, v.tabs[2], text)
         elseif k == "bun" then spot.Show(v.bun, v.bun, text)
         elseif k == "card" then spot.Show(card, card, text)
         else spot.Show(card, v.bun, text) end
@@ -5241,52 +5350,92 @@ end
 -- Leel Mark: 가로 알약 징 바 [토끼][해골 X 네모 달 세모 다이아 동그라미 별][자동][지우기]
 PV.LeelMark = function(st)
     local M = "Interface\\AddOns\\LeelMark\\media\\"
-    local v = CreateFrame("Frame", nil, st); v:SetSize(460, 80); v:SetPoint("CENTER")
+    local v = CreateFrame("Frame", nil, st); v:SetSize(470, 96); v:SetPoint("CENTER")
     local function Sl(t, m) pcall(t.SetTextureSliceMargins, t, m, m, m, m) end
-    local bar = CreateFrame("Frame", nil, v); bar:SetHeight(42); bar:SetPoint("CENTER", 0, 4)
+    local bar = CreateFrame("Frame", nil, v); bar:SetHeight(44); bar:SetPoint("TOP", 0, -6)
     local bg = bar:CreateTexture(nil, "BACKGROUND"); bg:SetTexture(M .. "pill44"); Sl(bg, 22); bg:SetAllPoints(); bg:SetVertexColor(0.125, 0.094, 0.086, 0.96)
     local rim = bar:CreateTexture(nil, "BORDER"); rim:SetTexture(M .. "pill44rim"); Sl(rim, 22); rim:SetAllPoints(); rim:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.6)
-    local bun = bar:CreateTexture(nil, "ARTWORK"); bun:SetTexture(M .. "icon"); bun:SetSize(30, 30); bun:SetPoint("LEFT", 6, 0)
-    local x = 6 + 30 + 8
+    local bun = bar:CreateTexture(nil, "ARTWORK"); bun:SetTexture(M .. "icon"); bun:SetSize(30, 30); bun:SetPoint("LEFT", 8, 0)
     local marks = {}
-    for _, idx in ipairs({ 8, 7, 6, 5, 4, 3, 2, 1 }) do
-        local b = CreateFrame("Frame", nil, bar); b:SetSize(30, 30); b:SetPoint("LEFT", x, 0)
+    for idx = 1, 8 do
+        local b = CreateFrame("Frame", nil, bar); b:SetSize(30, 30)
         local c = b:CreateTexture(nil, "BACKGROUND"); c:SetTexture(M .. "circle"); c:SetAllPoints(); c:SetVertexColor(0.18, 0.137, 0.129, 1)
         local r = b:CreateTexture(nil, "BORDER"); r:SetTexture(M .. "ring"); r:SetAllPoints(); r:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.35)
         local ic = b:CreateTexture(nil, "ARTWORK"); ic:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons"); ic:SetSize(19, 19); ic:SetPoint("CENTER")
         if SetRaidTargetIconTexture then pcall(SetRaidTargetIconTexture, ic, idx) end
-        marks[#marks + 1] = b
-        x = x + 34
+        local bd = CreateFrame("Frame", nil, b); bd:SetSize(15, 15); bd:SetPoint("CENTER", b, "TOPRIGHT", -3, -3)
+        local bo = bd:CreateTexture(nil, "ARTWORK"); bo:SetTexture(M .. "circle"); bo:SetPoint("CENTER"); bo:SetSize(18, 18); bo:SetVertexColor(0.125, 0.094, 0.086, 1)
+        bd.inT = bd:CreateTexture(nil, "ARTWORK", nil, 1); bd.inT:SetTexture(M .. "circle"); bd.inT:SetAllPoints()
+        bd.fs = ns.Num(bd, 10, C.ink); bd.fs:SetPoint("CENTER")
+        b.bd = bd
+        marks[idx] = b
     end
-    local function Pill(label, icon, filled)
-        local b = CreateFrame("Frame", nil, bar); b:SetHeight(28)
-        local t = b:CreateTexture(nil, "BACKGROUND"); t:SetTexture(M .. "pill22"); Sl(t, 11); t:SetAllPoints()
+    local function Round(icon, filled)
+        local b = CreateFrame("Frame", nil, bar); b:SetSize(32, 32)
+        local t = b:CreateTexture(nil, "BACKGROUND"); t:SetTexture(M .. "circle"); t:SetAllPoints()
         local col = filled and C.acc or { 0.18, 0.137, 0.129 }; t:SetVertexColor(col[1], col[2], col[3], 1)
-        if not filled then local rr = b:CreateTexture(nil, "BORDER"); rr:SetTexture(M .. "pill22rim"); Sl(rr, 11); rr:SetAllPoints(); rr:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.45) end
-        local ic = b:CreateTexture(nil, "ARTWORK"); ic:SetTexture(M .. icon); ic:SetSize(14, 14); ic:SetPoint("LEFT", 12, 0)
+        if not filled then local rr = b:CreateTexture(nil, "BORDER"); rr:SetTexture(M .. "ring"); rr:SetAllPoints(); rr:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.45) end
+        local ic = b:CreateTexture(nil, "ARTWORK"); ic:SetTexture(M .. icon); ic:SetSize(15, 15); ic:SetPoint("CENTER")
         local fc = filled and C.ink or C.tx; ic:SetVertexColor(fc[1], fc[2], fc[3], 1)
-        local fs = ns.Font(b, 12.5, fc); fs:SetShadowColor(0, 0, 0, filled and 0 or 0.8); fs:SetPoint("LEFT", ic, "RIGHT", 5, 0); fs:SetText(label)
-        b:SetWidth(12 + 14 + 5 + fs:GetStringWidth() + 14)
         return b
     end
-    local auto = Pill("자동", "ic_wand", true); auto:SetPoint("LEFT", x + 4, 0)
-    local clr = Pill("지우기", "ic_eraser", false); clr:SetPoint("LEFT", auto, "RIGHT", 6, 0)
-    bar:SetWidth(x + 4 + auto:GetWidth() + 6 + clr:GetWidth() + 8)
-    local note = ns.Font(v, 10.5, { 0.66, 0.58, 0.56 }); note:SetPoint("TOP", bar, "BOTTOM", 0, -8)
+    local mEnd = 8 + 30 + 12 + 8 * 30 + 7 * 6
+    local auto = Round("ic_wand", true); auto:SetPoint("LEFT", mEnd + 13, 0)
+    local tell = Round("ic_horn", false); tell:SetPoint("LEFT", auto, "RIGHT", 6, 0)
+    local clr = Round("ic_eraser", false); clr:SetPoint("LEFT", tell, "RIGHT", 6, 0)
+    bar:SetWidth(mEnd + 13 + 3 * 32 + 12 + 8)
+    -- 서랍 예시 (달 징에 마우스)
+    local dr = CreateFrame("Frame", nil, v); dr:SetHeight(30); dr:SetPoint("TOP", bar, "BOTTOM", 0, -4)
+    local dbg = dr:CreateTexture(nil, "BACKGROUND"); dbg:SetTexture(M .. "pill22"); Sl(dbg, 11); dbg:SetAllPoints(); dbg:SetVertexColor(0.125, 0.094, 0.086, 0.98)
+    local drm = dr:CreateTexture(nil, "BORDER"); drm:SetTexture(M .. "pill22rim"); Sl(drm, 11); drm:SetAllPoints(); drm:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.5)
+    local dic = dr:CreateTexture(nil, "ARTWORK"); dic:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons"); dic:SetSize(18, 18); dic:SetPoint("LEFT", 8, 0)
+    if SetRaidTargetIconTexture then pcall(SetRaidTargetIconTexture, dic, 5) end
+    local dx = 32
+    for _, t in ipairs({ { "자동" }, { "순서" }, { "변이 · 마법사", true }, { "덫" }, { "혼절" }, { "안 씀" } }) do
+        local ch = CreateFrame("Frame", nil, dr); ch:SetHeight(22); ch:SetPoint("LEFT", dx, 0)
+        local cb = ch:CreateTexture(nil, "BACKGROUND"); cb:SetTexture(M .. "pill22"); Sl(cb, 11); cb:SetAllPoints()
+        local col = t[2] and C.acc or { 0.18, 0.137, 0.129 }; cb:SetVertexColor(col[1], col[2], col[3], 1)
+        local fs = ns.Font(ch, 11.5, t[2] and C.ink or C.tx); fs:SetShadowColor(0, 0, 0, t[2] and 0 or 0.8); fs:SetPoint("CENTER"); fs:SetText(t[1])
+        ch:SetWidth(fs:GetStringWidth() + 18); dx = dx + ch:GetWidth() + 4
+    end
+    dr:SetWidth(dx + 4)
+    local note = ns.Font(v, 10.5, { 0.66, 0.58, 0.56 }); note:SetPoint("TOP", dr, "BOTTOM", 0, -6)
+    local DEF = { [8] = { kind = "kill", n = 1 }, [7] = { kind = "kill", n = 2 }, [6] = { kind = "cc", role = "덫", who = "사냥꾼", cls = "HUNTER" },
+                  [5] = { kind = "cc", role = "변이", who = "마법사", cls = "MAGE" }, [4] = { kind = "kill", n = 3 }, [3] = { kind = "kill", n = 4 },
+                  [2] = { kind = "kill", n = 5 }, [1] = { kind = "cc", role = "혼절", who = "도적", cls = "ROGUE" } }
     function v:Update()
         local d = LeelMarkDB or {}
         local hide = d.show == "never"
         bar:SetAlpha(hide and 0.35 or 1)
-        note:SetText(hide and "바는 숨김 · 단축키만 동작" or (d.show == "always" and "혼자일 때도 보여요" or "파티일 때만 보여요"))
+        note:SetText((hide and "바는 숨김 · 단축키만 동작" or (d.show == "always" and "혼자일 때도 보여요" or "파티일 때만 보여요")) .. " · 징에 마우스 = 약속 서랍")
+        local plan = DEF
+        if IsInGroup() and _G.LeelMarkAPI then local ok, p = pcall(_G.LeelMarkAPI.Plan); if ok and p and next(p) then plan = p end end
+        local list = {}
+        for idx = 1, 8 do
+            local p = plan[idx]
+            local key
+            if not p then key = 300 + idx elseif p.kind == "kill" then key = p.n else local cr = ({ [5] = 1, [6] = 2, [1] = 3 })[idx]; key = cr and (100 + cr) or (150 + idx) end
+            list[#list + 1] = { idx, key }
+        end
+        table.sort(list, function(a, b) return a[2] < b[2] end)
+        for k, e in ipairs(list) do
+            local b, p = marks[e[1]], plan[e[1]]
+            b:ClearAllPoints(); b:SetPoint("LEFT", bar, "LEFT", 8 + 30 + 12 + (k - 1) * 36, 0)
+            b:SetAlpha(p and 1 or 0.35)
+            if p and p.kind == "kill" then b.bd:Show(); b.bd.inT:SetVertexColor(C.acc[1], C.acc[2], C.acc[3]); b.bd.fs:SetText(p.n)
+            elseif p then local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[p.cls]; b.bd:Show(); b.bd.fs:SetText(""); if c then b.bd.inT:SetVertexColor(c.r, c.g, c.b) end
+            else b.bd:Hide() end
+        end
         bar:SetScale(tonumber(d.scale) or 1)
         local sw, sh = st:GetWidth() or 640, st:GetHeight() or 160
-        local need = bar:GetWidth() * (tonumber(d.scale) or 1) + 20
-        self:SetScale(math.max(0.5, math.min(1.3, (sw - 16) / need, (sh - 10) / 90)))
+        self:SetScale(math.max(0.45, math.min(1.3, (sw - 16) / (bar:GetWidth() * (tonumber(d.scale) or 1) + 20), (sh - 10) / 110)))
     end
     local spot = XP.Spot(st)
     XP.HLREG.LeelMark = { function(k, text)
         if not k or not v:IsVisible() then spot.Off() return end
-        if k == "auto" then spot.Show(auto, auto, text) else spot.Show(bar, bar, text) end
+        if k == "auto" then spot.Show(auto, tell, text)
+        elseif k == "order" then spot.Show(bar, dr, text)
+        else spot.Show(bar, bar, text) end
     end, function(a) spot.Alpha(a) end }
     return v
 end
@@ -5920,11 +6069,7 @@ local LIVE = {
         text = "화면에 가짜 파티가 떠 있어요 (진짜 파티 창)",
     },
     -- 시전바: 허브 모형이 진짜와 같은 모양이라 화면 예시는 안 띄워요 (다른 탭과 같은 미리 보기 틀)
-    LeelUI_Roll = {
-        on = function() if ns.RollTest and not InCombatLockdown() then ns.RollTest(); return true end end,
-        off = function() end,
-        text = "주사위 창 미리 보기가 30초 동안 떠요",
-    },
+    -- 주사위 창: 탭을 열어도 진짜 창은 안 띄워요 (허브 모형이 같은 모양 · [실제 자리에서 보기] 로만)
     LeelUI_Loot = {
         on = function() if LeelSpotAPI and LeelSpotAPI.Preview then LeelSpotAPI.Preview(600); return true end end,
         off = function() if LeelSpotAPI and LeelSpotAPI.Preview then LeelSpotAPI.Preview(0) end end,
