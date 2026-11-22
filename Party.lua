@@ -289,14 +289,83 @@ function ns.PartyModernSkin(f)
     f.state:ClearAllPoints(); f.state:SetPoint("LEFT", area, "LEFT", 30, 0)
     -- 해제할 디버프: 테 색으로 (세로 줄은 안 씀) · 디버프 칸은 줄 오른쪽 밖
     f.dspBar:SetAlpha(0)
-    f.dspRF:ClearAllPoints(); f.dspRF:SetPoint("CENTER", f, "TOPRIGHT", 8 + DSIZE / 2, -18 - 11)
+    local FW = (f.unit ~= "player") and 36 or 0   -- 따라가기 배지 자리
+    f.dspRF:ClearAllPoints(); f.dspRF:SetPoint("CENTER", f, "TOPRIGHT", 8 + FW + DSIZE / 2, -18 - 11)
     if f.debuffs then pcall(function()
-        f.debuffs:ClearAllPoints(); f.debuffs:SetPoint("LEFT", f, "TOPRIGHT", 8, -29)
+        f.debuffs:ClearAllPoints(); f.debuffs:SetPoint("LEFT", f, "TOPRIGHT", 8 + FW, -29)
         if f.debuffs.SetFlowLayoutAnchorPoint then f.debuffs:SetFlowLayoutAnchorPoint("LEFT") end
     end) end
     if f.buffs then pcall(function()
         f.buffs:ClearAllPoints(); f.buffs:SetPoint("TOPRIGHT", area, "BOTTOMRIGHT", 0, -14)
     end) end
+    if FW > 0 and not f.preview then ns.PartyFollowBadge(f, area) end
+end
+
+-- 따라가기 배지 (대상 초상화와 같은 두 사람 배지): 체력 줄 오른쪽 끝 · 누르면 따라가기
+--  평소 흐리게 · 따라가는 사람은 두 사람이 콩콩 + 분홍 점선 고리가 빙글 + 이름 옆 "따라가는 중"
+local followBadges = {}
+local function FirstWord(n) if type(n) ~= "string" then return nil end; return (n:gsub("%-.*$", ""):match("^(%S+)")) end
+local function PaintFollow(f)
+    local b = f.follow
+    if not b then return end
+    local fn = ns.FollowName and ns.FollowName()
+    local on = false
+    if fn and UnitExists(f.unit) then
+        local ok, r = pcall(function() local n = UnitName(f.unit); return n == fn or (FirstWord(n) ~= nil and FirstWord(n) == FirstWord(fn)) end)
+        on = ok and r or false
+    end
+    if on ~= b.liveOn then
+        b.liveOn = on
+        b.bt:SetShown(not on); b.live:SetShown(on); b.liveT = 0
+    end
+    b:SetAlpha(on and 1 or 0.6)
+    f.folTag:SetShown(on)
+end
+function ns.PartyFollowBadge(f, area)
+    local b = CreateFrame("Button", nil, f, "SecureActionButtonTemplate")
+    b:SetSize(30, 30); b:SetPoint("LEFT", area, "RIGHT", 6, 0)
+    b:SetFrameLevel(f:GetFrameLevel() + 10)
+    b:SetAttribute("type", "macro"); b:SetAttribute("macrotext", "/follow " .. f.unit)
+    local down = GetCVarBool and GetCVarBool("ActionButtonUseKeyDown")
+    b:RegisterForClicks(down and "AnyDown" or "AnyUp")
+    b.bt = b:CreateTexture(nil, "OVERLAY"); b.bt:SetTexture(ns.MEDIA .. "follow_badge"); b.bt:SetAllPoints()
+    local live = CreateFrame("Frame", nil, b); live:SetAllPoints(); live:Hide(); b.live = live
+    local lbg = live:CreateTexture(nil, "ARTWORK"); lbg:SetTexture(ns.MEDIA .. "follow_bg"); lbg:SetAllPoints()
+    local p2 = live:CreateTexture(nil, "OVERLAY", nil, 1); p2:SetTexture(ns.MEDIA .. "follow_p2"); p2:SetAllPoints()
+    local p1 = live:CreateTexture(nil, "OVERLAY", nil, 2); p1:SetTexture(ns.MEDIA .. "follow_p1"); p1:SetAllPoints()
+    local ring = live:CreateTexture(nil, "OVERLAY", nil, 3); ring:SetTexture(ns.MEDIA .. "follow_ring"); ring:SetAllPoints()
+    b.liveT = 0
+    live:SetScript("OnUpdate", function(_, el)
+        b.liveT = b.liveT + el
+        local w = (b:GetWidth() or 30) / 44
+        local y1 = 2.5 * w * math.abs(math.sin(b.liveT * math.pi / 0.32))
+        local y2 = 2.5 * w * math.abs(math.sin(b.liveT * math.pi / 0.32 + math.pi / 2))
+        p1:ClearAllPoints(); p1:SetPoint("TOPLEFT", b, "TOPLEFT", 0, y1); p1:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 0, y1)
+        p2:ClearAllPoints(); p2:SetPoint("TOPLEFT", b, "TOPLEFT", 0, y2); p2:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 0, y2)
+        ring:SetRotation(-b.liveT * 2 * math.pi / 2.4)
+    end)
+    b:HookScript("PreClick", function() local ok, n = pcall(UnitName, f.unit); if ok and ns.FollowPending then ns.FollowPending(n) end end)
+    b:SetScript("OnEnter", function(self)
+        b:SetAlpha(1)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("따라가기", 1, 0.84, 0.88)
+        GameTooltip:AddLine("Alt + 클릭도 돼요 · 움직이면 멈춰요", 0.75, 0.68, 0.66); GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide(); PaintFollow(f) end)
+    f.follow = b
+    -- 이름 옆 "따라가는 중"
+    local tg = CreateFrame("Frame", nil, f.top); tg:SetHeight(14)
+    local tb = tg:CreateTexture(nil, "ARTWORK"); tb:SetAllPoints(); tb:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 1)
+    tg.t = tg:CreateFontString(nil, "OVERLAY"); tg.t:SetFont(ns.FONT, 10, ""); tg.t:SetTextColor(0.1, 0.07, 0.08); tg.t:SetPoint("CENTER", 0, 0)
+    tg.t:SetText("따라가는 중"); tg:SetWidth((tg.t:GetStringWidth() or 50) + 10)
+    tg:SetPoint("BOTTOMRIGHT", area, "TOPRIGHT", 0, 3); tg:Hide()
+    f.folTag = tg
+    followBadges[#followBadges + 1] = f
+    PaintFollow(f)
+end
+do
+    local fe = CreateFrame("Frame")
+    for _, e in ipairs({ "AUTOFOLLOW_BEGIN", "AUTOFOLLOW_END", "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD" }) do fe:RegisterEvent(e) end
+    fe:SetScript("OnEvent", function() C_Timer.After(0, function() for _, f in ipairs(followBadges) do PaintFollow(f) end end) end)
 end
 
 local function CreateMember(parent, i, unit, preview)
@@ -305,6 +374,7 @@ local function CreateMember(parent, i, unit, preview)
     local f = preview and CreateFrame("Frame", nil, parent)
         or CreateFrame("Button", unit == "player" and "LeelUI_partyMe" or ("LeelUI_party" .. i), parent, "SecureUnitButtonTemplate")
     f.unit = unit
+    f.preview = preview
     f:SetSize(CW(), CH())
     if not preview then
     f:SetAttribute("unit", unit)

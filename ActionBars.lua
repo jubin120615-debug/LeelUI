@@ -483,6 +483,7 @@ local function WUpdateBars()
         wing.hp.t:SetText("")
     end
     WText(wing.hp, h, hm, "player", nil)
+    if ns.ABarHealUpdate then ns.ABarHealUpdate() end
     local pt = UnitPowerType("player") or 0
     local p, pm = UnitPower("player", pt), UnitPowerMax("player", pt)
     ns.SetBar(wing.mp, p, pm)
@@ -626,6 +627,7 @@ local function BuildWing()
     hf:RegisterUnitEvent("UNIT_HEALTH", "player")
     pcall(hf.RegisterUnitEvent, hf, "UNIT_HEALTH_FREQUENT", "player")
     hf:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
+    pcall(hf.RegisterUnitEvent, hf, "UNIT_HEAL_PREDICTION", "player")
     hf:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
     pcall(hf.RegisterUnitEvent, hf, "UNIT_POWER_FREQUENT", "player")
     hf:RegisterUnitEvent("UNIT_MAXPOWER", "player")
@@ -975,6 +977,238 @@ local function WTacBar(bar, on, left, BH, acc)
     bar.tacVal = t.val
 end
 
+-- 나 찍기: 생명력 줄 · 가운데 레벨 원을 누르면 나를 대상 (오른쪽 = 내 메뉴)
+local function WSelfBtn(anchor, l, t, r, b, tipText)
+    local btn = CreateFrame("Button", nil, holder, "SecureUnitButtonTemplate")
+    btn:SetAttribute("unit", "player")
+    btn:SetAttribute("*type1", "target")
+    btn:SetAttribute("*type2", "togglemenu")
+    btn:RegisterForClicks("AnyUp")
+    btn:SetPoint("TOPLEFT", anchor, "TOPLEFT", l, t); btn:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", r, b)
+    btn:SetFrameLevel(anchor:GetFrameLevel() + 8)
+    local hl = {}
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local e = btn:CreateTexture(nil, "OVERLAY"); e:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 0.9)
+        if side == "TOP" or side == "BOTTOM" then e:SetPoint(side .. "LEFT"); e:SetPoint(side .. "RIGHT"); e:SetHeight(1.5)
+        else e:SetPoint("TOP" .. side); e:SetPoint("BOTTOM" .. side); e:SetWidth(1.5) end
+        e:Hide(); hl[#hl + 1] = e
+    end
+    btn.hl = hl
+    btn:HookScript("OnEnter", function(self)
+        if not self.noEdge then for _, e in ipairs(hl) do e:Show() end end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(tipText, C.acc[1], C.acc[2], C.acc[3])
+        GameTooltip:AddLine("왼쪽 클릭 = 나를 대상 · 오른쪽 클릭 = 내 메뉴", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    btn:HookScript("OnLeave", function() for _, e in ipairs(hl) do e:Hide() end; GameTooltip:Hide() end)
+    return btn
+end
+local function WSelfTarget(on)
+    if InCombatLockdown() then pending = true return end
+    if on and not wing.selfHP then
+        wing.selfHP = WSelfBtn(wing.hp, -2, 20, 2, -2, "내 생명력")
+        wing.selfRing = WSelfBtn(wing.big, 0, 0, 0, 0, "나")
+        wing.selfRing.noEdge = true
+        -- 원은 둥근 빛으로
+        local g = wing.selfRing:CreateTexture(nil, "OVERLAY"); g:SetTexture(ns.MEDIA .. "ring"); g:SetAllPoints()
+        g:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.9); g:Hide()
+        wing.selfRing:HookScript("OnEnter", function() g:Show() end)
+        wing.selfRing:HookScript("OnLeave", function() g:Hide() end)
+    end
+    if wing.selfHP then wing.selfHP:SetShown(on); wing.selfRing:SetShown(on) end
+end
+
+-- 들어오는 치유: 내 생명력 줄 끝에 민트로 이어서 + 숫자 (+350)
+local function WHealBar(on)
+    local hp = wing.hp
+    if on and not wing.heal and hp.tac then
+        local h = CreateFrame("StatusBar", nil, hp)
+        h:SetStatusBarTexture(ns.WHITE or "Interface\\Buttons\\WHITE8x8")
+        h:SetStatusBarColor(0.45, 0.92, 0.72, 0.65)
+        h:SetFrameLevel(hp:GetFrameLevel())
+        h:SetPoint("TOPLEFT", hp:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+        h:SetPoint("BOTTOMLEFT", hp:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+        h:SetMinMaxValues(0, 1); h:SetValue(0)
+        h:GetStatusBarTexture():AddMaskTexture(hp.tac.mask)
+        wing.heal = h
+        wing.healT = ns.Font(hp, 12, { 0.55, 0.95, 0.78 }, "OVERLAY")
+        pcall(wing.healT.SetFont, wing.healT, ns.NUM or ns.FONT, 12, "OUTLINE")
+    end
+    if not wing.heal then return end
+    wing.heal:SetShown(on); wing.healT:SetShown(on)
+    if on then
+        wing.heal:SetWidth(hp:GetWidth() or 200)
+        wing.healT:ClearAllPoints()
+        if hp.tacVal then wing.healT:SetPoint("LEFT", hp.tacVal, "RIGHT", 6, 0) end
+    end
+end
+local function WUpdateHeal()
+    if not (wing and wing.heal and wing.heal:IsShown()) then return end
+    local hm = UnitHealthMax("player")
+    local okI, inc = pcall(UnitGetIncomingHeals, "player")
+    if not okI then inc = nil end
+    pcall(wing.heal.SetMinMaxValues, wing.heal, 0, hm)
+    if inc == nil or not pcall(wing.heal.SetValue, wing.heal, inc) then wing.heal:SetValue(0) end
+    local shown = pcall(function()
+        if inc and inc > 0 then wing.healT:SetFormattedText("+%s", BreakUpLargeNumbers(inc)); wing.healT:Show()
+        else wing.healT:SetText("") end
+    end)
+    if not shown then wing.healT:SetText("") end
+end
+ns.ABarHealUpdate = WUpdateHeal
+
+
+-- 펫 원 (모던): 생명력 줄 왼쪽 끝 · 동그란 펫 얼굴 + 둘레 빨간 고리 = 펫 체력 · LV
+--  왼쪽 클릭 = 펫 기술이 원 둘레 부채꼴로 펼쳐짐 (다시 누르면 접힘 · 전투 중에도) · 오른쪽 클릭 = 펫 대상
+local function WPetUpdate()
+    local P = wing and wing.pet
+    if not P or not UnitExists("pet") then return end
+    pcall(SetPortraitTexture, P.por, "pet")
+    local okL, lv = pcall(UnitLevel, "pet")
+    P.lv:SetText((okL and type(lv) == "number" and not (issecretvalue and issecretvalue(lv)) and lv > 0) and lv or "")
+    P.lvb:SetWidth(math.max(18, (P.lv:GetStringWidth() or 10) + 10))
+    local ok, f = pcall(function() local h, m = UnitHealth("pet"), UnitHealthMax("pet"); return (m and m > 0) and h / m or 0 end)
+    if ok and type(f) == "number" and not (issecretvalue and issecretvalue(f)) then P.frac = f end
+    local fr = P.frac or 1
+    P.ring:Set(fr)
+    local low = fr < 0.3
+    if low ~= P.low then
+        P.low = low
+        if low then P.glow:Show(); P.gag:Play() else P.gag:Stop(); P.glow:Hide() end
+    end
+end
+ns.ABarPetUpdate = WPetUpdate
+
+local function WPetArc()
+    local P = wing and wing.pet
+    if not P or InCombatLockdown() then return end
+    local btns = Buttons("PetActionButton", 10)
+    local sz = math.max(28, math.floor(PET * 1.0 + 0.5))
+    local R = P.size * 0.5 + sz * 0.5 + 95
+    local list = {}
+    for i = 1, 7 do
+        local b = btns[i]
+        if b then
+            local ok, name, tex = pcall(GetPetActionInfo, i)
+            if ok and (name or tex) then list[#list + 1] = b else b:SetAlpha(0); b:ClearAllPoints(); b:SetPoint("CENTER", P.btn, "CENTER") end
+        end
+    end
+    local n = #list
+    local span = math.min(95, math.max(30, (n - 1) * 16))
+    for k, b in ipairs(list) do
+        if b:GetParent() ~= P.pop then b.leelOrigParent = b.leelOrigParent or b:GetParent(); b:SetParent(P.pop) end
+        b:SetAlpha(1); b:SetSize(sz, sz); b:ClearAllPoints()
+        -- 왼쪽(180°)에서 위쪽으로 부채꼴
+        local a = math.rad(180 - ((n > 1) and (k - 1) * span / (n - 1) or 0))
+        b:SetPoint("CENTER", P.btn, "CENTER", R * math.cos(a), R * math.sin(a))
+    end
+    -- 8 · 9 · 10 = 공격적 · 방어적 · 수동 (원 안쪽 위 한 줄)
+    for k = 8, 10 do
+        local b = btns[k]
+        if b then
+            if b:GetParent() ~= P.pop then b.leelOrigParent = b.leelOrigParent or b:GetParent(); b:SetParent(P.pop) end
+            b:SetAlpha(1); b:SetSize(sz - 6, sz - 6); b:ClearAllPoints()
+            b:SetPoint("CENTER", P.btn, "CENTER", -52 + (k - 9) * (sz - 2), 58)
+        end
+    end
+    for i = 1, 7 do local b = btns[i]; if b and b:GetParent() ~= P.pop then b.leelOrigParent = b.leelOrigParent or b:GetParent(); b:SetParent(P.pop) end end
+end
+
+local function WPetRing(on)
+    if InCombatLockdown() then pending = true return end
+    if on and not wing.pet then
+        local P = {}
+        local SZ = 60
+        P.size = SZ
+        local b = CreateFrame("Button", "LeelUI_PetRing", holder, "SecureActionButtonTemplate")
+        b:SetSize(SZ, SZ)
+        b:SetAttribute("unit", "pet")
+        b:SetAttribute("*type2", "target")
+        b:SetAttribute("*type1", "click")
+        b:RegisterForClicks("AnyUp")
+        local tog = CreateFrame("Button", "LeelUI_PetPopToggle", b, "SecureHandlerClickTemplate")
+        local pop = CreateFrame("Frame", "LeelUI_PetPop", b)
+        pop:SetAllPoints(b); pop:SetFrameLevel(b:GetFrameLevel() + 6); pop:Hide()
+        tog:SetFrameRef("pop", pop)
+        tog:SetAttribute("_onclick", [[ local p = self:GetFrameRef("pop"); if p:IsShown() then p:Hide() else p:Show() end ]])
+        b:SetAttribute("*clickbutton1", tog)
+        P.btn, P.pop, P.tog = b, pop, tog
+        -- 그림
+        local sh = b:CreateTexture(nil, "BACKGROUND", nil, -2); sh:SetTexture(ns.MEDIA .. "circle"); sh:SetVertexColor(0, 0, 0, 0.75)
+        sh:SetPoint("TOPLEFT", -3, 3); sh:SetPoint("BOTTOMRIGHT", 3, -3)
+        local bg = b:CreateTexture(nil, "BACKGROUND", nil, 1); bg:SetTexture(ns.MEDIA .. "circle"); bg:SetVertexColor(0.04, 0.035, 0.05, 1); bg:SetAllPoints()
+        P.por = b:CreateTexture(nil, "ARTWORK")
+        P.por:SetPoint("TOPLEFT", 7, -7); P.por:SetPoint("BOTTOMRIGHT", -7, 7)
+        local m = b:CreateMaskTexture(); m:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); m:SetAllPoints(P.por)
+        P.por:AddMaskTexture(m)
+        local rsz = (SZ / 2 - 3) / 0.9 * 2
+        local track = b:CreateTexture(nil, "ARTWORK", nil, 1); track:SetTexture(ns.MEDIA .. "ab_tac_ring")
+        track:SetSize(rsz, rsz); track:SetPoint("CENTER"); track:SetVertexColor(1, 1, 1, 0.14)
+        -- 체력 고리: 반쪽 고리 두 장을 반쪽 창 안에서 돌려요 (가운데 원과 같은 방법)
+        local g = {}
+        g.R = CreateFrame("Frame", nil, b); g.L = CreateFrame("Frame", nil, b)
+        for _, f in ipairs({ g.R, g.L }) do f:SetClipsChildren(true); f:SetFrameLevel(b:GetFrameLevel() + 2) end
+        g.tR = g.R:CreateTexture(nil, "ARTWORK"); g.tR:SetTexture(ns.MEDIA .. "ab_tac_halfL")
+        g.tL = g.L:CreateTexture(nil, "ARTWORK"); g.tL:SetTexture(ns.MEDIA .. "ab_tac_halfR")
+        g.R:SetPoint("TOPLEFT", b, "CENTER", 0, rsz / 2); g.R:SetSize(rsz / 2 + 2, rsz)
+        g.L:SetPoint("TOPRIGHT", b, "CENTER", 0, rsz / 2); g.L:SetSize(rsz / 2 + 2, rsz)
+        for _, t in ipairs({ g.tR, g.tL }) do t:SetSize(rsz, rsz); t:SetPoint("CENTER", b, "CENTER"); t:SetVertexColor(1, 0.29, 0.24, 1) end
+        function g:Set(f)
+            f = math.max(0, math.min(1, f or 0))
+            self.tR:SetRotation(-math.min(f, 0.5) * 2 * math.pi); self.R:SetShown(f > 0)
+            self.tL:SetRotation(-math.max(0, f - 0.5) * 2 * math.pi); self.L:SetShown(f > 0.5)
+        end
+        P.ring = g
+        -- 체력 낮음 (30% 아래): 빨간 빛 깜빡
+        P.glow = b:CreateTexture(nil, "BACKGROUND", nil, -3); P.glow:SetTexture(ns.MEDIA .. "circle"); P.glow:SetBlendMode("ADD")
+        P.glow:SetVertexColor(1, 0.25, 0.2, 0.7); P.glow:SetPoint("TOPLEFT", -10, 10); P.glow:SetPoint("BOTTOMRIGHT", 10, -10); P.glow:Hide()
+        P.gag = P.glow:CreateAnimationGroup(); P.gag:SetLooping("BOUNCE")
+        local ga = P.gag:CreateAnimation("Alpha"); ga:SetFromAlpha(0.2); ga:SetToAlpha(1); ga:SetDuration(0.5); ga:SetSmoothing("IN_OUT")
+        -- LV (금 칸)
+        local over = CreateFrame("Frame", nil, b); over:SetAllPoints(); over:SetFrameLevel(b:GetFrameLevel() + 4)
+        P.lvb = CreateFrame("Frame", nil, over); P.lvb:SetHeight(15); P.lvb:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 6, -3)
+        local lb = P.lvb:CreateTexture(nil, "ARTWORK"); lb:SetAllPoints(); lb:SetColorTexture(0.91, 0.75, 0.38, 1)
+        P.lv = P.lvb:CreateFontString(nil, "OVERLAY"); P.lv:SetFont(ns.NUM or ns.FONT, 11, ""); P.lv:SetTextColor(0.1, 0.08, 0.07); P.lv:SetPoint("CENTER", 0, 0)
+        -- 마우스 올리면 분홍 고리 + 설명
+        local hl = over:CreateTexture(nil, "OVERLAY"); hl:SetTexture(ns.MEDIA .. "ring"); hl:SetAllPoints(); hl:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.9); hl:Hide()
+        b:HookScript("OnEnter", function(self)
+            hl:Show()
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            local okN, nm = pcall(UnitName, "pet")
+            GameTooltip:AddLine(okN and nm or "펫", C.acc[1], C.acc[2], C.acc[3])
+            GameTooltip:AddLine("왼쪽 클릭 = 펫 기술 펼치기 · 접기", 1, 1, 1)
+            GameTooltip:AddLine("오른쪽 클릭 = 펫 대상", 0.85, 0.8, 0.8)
+            GameTooltip:Show()
+        end)
+        b:HookScript("OnLeave", function() hl:Hide(); GameTooltip:Hide() end)
+        RegisterStateDriver(b, "visibility", "[@pet,exists] show; hide")
+        local ev = CreateFrame("Frame")
+        for _, e in ipairs({ "UNIT_PET", "PET_BAR_UPDATE", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED" }) do pcall(ev.RegisterEvent, ev, e) end
+        for _, e in ipairs({ "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_PORTRAIT_UPDATE", "UNIT_LEVEL", "UNIT_MODEL_CHANGED" }) do pcall(ev.RegisterUnitEvent, ev, e, "pet") end
+        ev:SetScript("OnEvent", function(_, e)
+            if not (wing.pet and wing.pet.on) then return end
+            if e == "UNIT_PET" or e == "PET_BAR_UPDATE" or e == "PLAYER_REGEN_ENABLED" or e == "PLAYER_ENTERING_WORLD" then
+                C_Timer.After(0.1, function() WPetArc(); WPetUpdate() end)
+            else WPetUpdate() end
+        end)
+        wing.pet = P
+    end
+    local P = wing.pet
+    if not P then return end
+    P.on = on
+    if on then
+        P.btn:ClearAllPoints(); P.btn:SetPoint("RIGHT", wing.hp, "LEFT", -8, -2)
+        RegisterStateDriver(P.btn, "visibility", "[@pet,exists] show; hide")
+        WPetArc(); WPetUpdate()
+    else
+        UnregisterStateDriver(P.btn, "visibility"); P.btn:Hide()
+        for _, b in ipairs(Buttons("PetActionButton", 10)) do
+            if b.leelOrigParent and b:GetParent() == P.pop then b:SetParent(b.leelOrigParent); b:SetAlpha(1) end
+        end
+    end
+end
+
 local function WTacCenter(on, fac, D)
     local big = wing.big
     if on and not wing.tc then
@@ -1291,6 +1525,9 @@ local function WSkin()
     WTacCenter(tac, fac, D)
     WTacSlots(tac)
     WTacAuras(tac and DB().tacAuras ~= false, g.asz or 24)
+    WSelfTarget(tac)
+    WHealBar(tac)
+    WPetRing(tac)
     if tac then wing.bun:Hide(); wing.badge:Hide() else wing.bun:Show(); wing.badge:Show() end
     local b = wing.badge
     if real then
@@ -1465,7 +1702,8 @@ local function LayoutWing()
     if (GetNumShapeshiftForms and GetNumShapeshiftForms() or 0) > 0 and PlaceSmall(stance, top) then
         top = top + PET + GAP + 8
     end
-    if PetHasActionBar and PetHasActionBar() then PlaceSmall(pet, top) end
+    if tacSkin then WPetArc()   -- 모던: 펫 기술은 펫 원 부채꼴로
+    elseif PetHasActionBar and PetHasActionBar() then PlaceSmall(pet, top) end
     holder:SetSize(W, top + PET)
     xp:SetWidth(W); xp:SetHeight(4)
     if wing.fade then
@@ -2160,7 +2398,7 @@ local function HudParts(hide)
     local fr = ns.hudFrames
     if not fr then return end
     ns:RunOutOfCombat("abar_la", function()
-        for _, k in ipairs({ "player", "target" }) do
+        for _, k in ipairs({ "player", "target", "pet" }) do
             local f = fr[k]
             if f then f:SetAlpha(hide and 0 or 1); pcall(f.EnableMouse, f, not hide) end
         end

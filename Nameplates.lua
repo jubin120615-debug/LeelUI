@@ -319,16 +319,35 @@ local function PlaceRaid(f)
     if NPO("raid") == "top" then f.raid:SetPoint("BOTTOM", f.title, "TOP", 0, 2)
     else f.raid:SetPoint("RIGHT", f.hp, "LEFT", -4, 0) end
 end
+-- 징 번호가 숨겨진 값이면(던전 · 전투 중 등) 애드온이 직접 못 그려요
+-- → 블리자드 이름표의 징 칸을 빌려 와서 우리 징 자리에 보이게 (게임이 알아서 그림)
+local function BlizzRaid(f, on)
+    local plate = f:GetParent()
+    local uf = plate and plate.UnitFrame
+    local rf = uf and (uf.RaidTargetFrame or uf.raidTargetFrame)
+    if not rf then return end
+    if on then
+        if rf.leelHidden then HideFrame(rf, false) end
+        pcall(rf.SetIgnoreParentAlpha, rf, true); pcall(rf.SetAlpha, rf, 1)
+        pcall(function() rf:ClearAllPoints(); rf:SetPoint("CENTER", f.raid, "CENTER", 0, 0) end)
+        rf.leelOn = true
+    elseif rf.leelOn then
+        rf.leelOn = nil
+        pcall(rf.SetIgnoreParentAlpha, rf, false)
+    end
+end
 local function UpdateRaid(f, unit)
     PlaceRaid(f)
     -- 숨겨진 값이어도 에러 없이: 통째로 pcall
     local ok, shown, idx = pcall(function()
         local i = GetRaidTargetIndex(unit)
-        if not i then return false end
+        if i == nil then return false end
+        if issecretvalue and issecretvalue(i) then error("secret") end
         SetRaidTargetIconTexture(f.raid, i)
         return true, (i >= 1 and i <= 8) and i or nil
     end)
     f.raid:SetShown(ok and shown or false)
+    BlizzRaid(f, not ok)
     if ns.MarkOrderPaint then ns.MarkOrderPaint(f, unit, ok and shown and idx or nil) end
 end
 
