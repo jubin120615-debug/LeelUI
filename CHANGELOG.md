@@ -1,5 +1,10 @@
 > 🎀 질문 · 제보 · 새 소식은 [채채TV](https://www.youtube.com/channel/UCgIMsz7rfmveQr2jCmH2hWg)에서
 
+# 1.3.46
+
+- 고침: 펫 원을 눌러도 기술 부채꼴이 안 펼쳐지던 것 ("키를 누를 때 실행" 설정일 때)
+- 고침: 지도 퀘스트 아이콘에 마우스를 올리면 "C stack overflow" 오류가 나던 것 (Leel Quest)
+
 # 1.3.45
 
 - 모던 펫 원: 생명력 줄 왼쪽에 동그란 펫 얼굴 · 둘레 빨간 고리 = 펫 체력 (30% 아래 깜빡) · LV

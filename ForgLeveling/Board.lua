@@ -6025,13 +6025,20 @@ end
         if inLog then tip:AddLine("|cff9a8a86Shift + 클릭 = 르엘 퀘스트에서 보기|r") end
         tip:Show()
     end
+    local busy = false   -- 우리가 붙이고 다시 Show 하는 동안 또 불리면 무한 반복 (C stack overflow) → 막기
     local hooked
     local function TryHook()
         if hooked or not QuestieLoader then return end
         local ok, M = pcall(QuestieLoader.ImportModule, QuestieLoader, "MapIconTooltip")
         if ok and M and M.ShowOnTooltip then
             hooked = true
-            hooksecurefunc(M, "ShowOnTooltip", function(icon, tip) local ok, err = pcall(AddInfo, icon, tip); if not ok then D("오류", err) end end)
+            hooksecurefunc(M, "ShowOnTooltip", function(icon, tip)
+                if busy then return end
+                busy = true
+                local ok, err = pcall(AddInfo, icon, tip)
+                busy = false
+                if not ok then D("오류", err) end
+            end)
         end
     end
     -- 다른 길로 그려도 꼭 붙게: Questie가 툴팁을 띄운 뒤(ShownAsMapIcon) 한 번
@@ -6055,7 +6062,7 @@ end
         return tonumber(id)
     end
     hooksecurefunc(GameTooltip, "Show", function(self)
-        if self.leelQAdded then return end
+        if busy or self.leelQAdded then return end
         local own = self:GetOwner()
         local id
         if self.ShownAsMapIcon and self._showData and (own == self._owner or own == self._showOwner) then
@@ -6065,7 +6072,10 @@ end
         end
         if dbg then D("툴팁", own and (own.GetName and own:GetName() or "이름없음") or "주인없음", "퀘", tostring(id), "지도", tostring(own and OnMap(own))) end
         if not id then return end
-        local ok, err = pcall(AddInfo, { data = { Id = id } }, self); if not ok then D("오류", err) end
+        busy = true
+        local ok, err = pcall(AddInfo, { data = { Id = id } }, self)
+        busy = false
+        if not ok then D("오류", err) end
     end)
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_LOGIN")
