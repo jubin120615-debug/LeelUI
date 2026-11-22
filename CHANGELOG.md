@@ -1,5 +1,11 @@
 > 🎀 질문 · 제보 · 새 소식은 [채채TV](https://www.youtube.com/channel/UCgIMsz7rfmveQr2jCmH2hWg)에서
 
+# 1.3.43
+
+- Leel Quest: "내 진행도 보내기" 고침
+  - 끄면 파티원 창에 남아 있던 내 진행 숫자가 바로 지워져요
+  - 켜면 다음 퀘 진행을 기다리지 않고 바로 보내요
+
 # 1.3.42
 
 - 이동 모드 새 단장

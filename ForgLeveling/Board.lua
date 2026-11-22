@@ -1350,8 +1350,12 @@ do
     end
     function PQ.Send()
         if not (IsInGroup and IsInGroup()) or (IsInRaid and IsInRaid()) then return end
-        if DB and DB.partyShare == false then return end   -- 허브: 내 진행 보내기 끔
         if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
+        if DB and DB.partyShare == false then   -- 허브: 내 진행 보내기 끔 → 파티원 쪽 내 숫자도 한 번 지워요
+            if not PQ.cleared then PQ.cleared = true; pcall(C_ChatInfo.SendAddonMessage, PREFIX, "N|", Chan()) end
+            return
+        end
+        PQ.cleared = nil
         local parts = {}
         for _, e in ipairs(log) do
             if e.id and not e.failed then
@@ -1379,6 +1383,8 @@ do
         pend = true
         C_Timer.After(2, function() pend = nil; PQ.Send() end)
     end
+    -- 허브에서 "내 진행도 보내기"를 바꾸면 바로 보내기 (켬 = 지금 진행도 · 끔 = 파티원 쪽에서 지우기)
+    _G.LeelQuestShareChanged = function() PQ.cleared = nil; PQ.SoonSend() end
     local function Repaint()
         PQ.at = 0
         if board and board:IsShown() and RefreshBoard then RefreshBoard() end

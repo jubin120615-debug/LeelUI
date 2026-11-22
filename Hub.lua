@@ -1233,7 +1233,8 @@ local MODULES = {
               set = function(v) if ForgLevelingDB then ForgLevelingDB.partyToast = v and true or nil end end },
             { sec = 2, child = true, t = "toggle", label = "내 진행도 보내기", hl = "party", hint = "끄면 파티원 창에 내 진행 숫자가 안 보여요 (얼굴은 게임이 보여줘요)", dep = function() return LQOn() end,
               get = function() return GuideDB().partyShare ~= false end,
-              set = function(v) if ForgLevelingDB then ForgLevelingDB.partyShare = v and true or false end end },
+              set = function(v) if ForgLevelingDB then ForgLevelingDB.partyShare = v and true or false end
+                  if _G.LeelQuestShareChanged then _G.LeelQuestShareChanged() end end },
             { sec = 2, t = "seg", label = "그 밖의 퀘", hl = "other", hint = "길에 안 넣은 받은 퀘 (창 아래쪽)", dep = function() return LQOn() end,
               options = { { "접기", "fold" }, { "펴기", "open" } },
               get = function() return GuideDB().trkOtherFold and "fold" or "open" end,
@@ -1558,6 +1559,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.43", "Leel Quest: 내 진행도 보내기 고침", "끄면 파티원 창에서 내 숫자가 바로 지워지고 · 켜면 바로 보내요" },
     { "1.3.42", "이동 모드 새 단장 · Leel Mark 잡는 순서 · 주사위 토끼 미리 보기", "위 가운데 캡슐 바 · 들어갈 때 효과 · 목록(찾기 · 크기 초기화 · 잠깐 숨기기) · HUD 조각 안내선 · 착 붙기 · 방향키 · 징 순서 번호 · 군중 제어 역할 · 계획 알리기 · 이름표에 순서 · CC 남은 시간" },
     { "1.3.41", "르엘 허브 새 단장: 탭마다 미리 보기 + 세부 설정", "위쪽 미리 보기 · 줄에 마우스 = 그 부분 반짝 · 시전바 · 이름표 · 툴팁 · 마우스 · 채팅 · 글씨 · 퀘스트 · 지도 · 미니맵 · 파티 · 줍기 · 상점 · 장비 비교 · 액션바는 잠시 쉬어요" },
     { "1.3.40", "@불러 주기 알림 · 단축바 주문 레벨 알림 · 파티원 퀘 진행도", "@내이름 = 분홍 띠 + 삐삐 · @ 치면 이름 고르기 · 낮은 레벨 칸 표시 · Leel Quest 파티원 얼굴 고리 · Shift+클릭 = Leel Quest에서 보기" },
