@@ -897,6 +897,9 @@ local MODULES = {
             { sec = 2, t = "toggle", label = "채널 칩", hl = "chips", hint = "[길드] [1. 공개] 글자를 작은 색 칩으로 (눌러서 말하기는 그대로)",
               get = function() return ns.ChatDB and ns.ChatDB().chips ~= false end,
               set = function(v) if ns.ChatDB then ns.ChatDB().chips = v and true or false end end, more = "새로 오는 글부터 바뀌어요." },
+            { sec = 2, t = "toggle", label = "음성 채팅 칩", hint = "말하는 사람을 머리줄 오른쪽 분홍 칩으로 · 블리자드 기본 알림은 숨김",
+              get = function() return ns.ChatDB and ns.ChatDB().voiceChip ~= false end,
+              set = function(v) if ns.ChatDB then ns.ChatDB().voiceChip = v and true or false end; if ns.ChatVoiceQuiet then ns.ChatVoiceQuiet() end; if ns.ChatVoicePaint then ns.ChatVoicePaint() end end },
             { sec = 2, t = "seg", label = "시간 표시", hl = "ts", hint = "글 앞에 받은 시각",
               options = { { "끔", "off" }, { "시:분", "hm" }, { "초까지", "hms" } },
               get = function() return ns.ChatDB and ns.ChatDB().ts or "off" end,
@@ -1626,6 +1629,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.49", "음성 채팅 칩 · 파티 찾기 위치 · Leel Quest 파티 같이 · 오류 고침", "채팅 머리줄에 말하는 사람 칩 · 음성 소리 · 마이크 단추 르엘 모양 · 파티 찾기 신청자 지역 + 같은 곳 · 던전 안 · 입구 · 멀리 · Leel Quest 파티원과 같은 퀘만 길 (얼굴로 고르기) · 단축바 주문 레벨 바꾸기 · 숨긴 기본 파티 창 오류" },
     { "1.3.48", "영어 지원 (English) · 모던 버프 줄 옮기기 · 퀘스티 아이콘 · 주문 레벨 고침", "게임 언어가 영어면 자동으로 영어 · 허브 맨 위 언어 고르기 · /leel lang en · ko · 모던 버프 · 디버프 줄을 이동 모드에서 따로 옮기기 · 크기 · 미니맵 모음의 퀘스티 = 왼쪽 클릭 설정 창 · 단축바 주문 레벨 알림이 와우 포에버 주문책을 읽게" },
     { "1.3.47", "모던: 가운데 원 보기 · 빠른 설정 · 오른쪽 쪽 탭 · 혜성 · 변신 구슬", "원 왼쪽 클릭 = 레벨 · 직업 자원 · 진영 문장 · 오른쪽 클릭 = 빠른 설정 (버프 · 디버프 크기 · 줄 두께) · 오른쪽 칸 I · II · III 쪽 · 전투 중 원 둘레 혜성 · 변신 · 태세는 원 위 구슬" },
     { "1.3.46", "고침: 펫 원 팝업 · 지도 퀘 툴팁 오류", "펫 원을 눌러도 기술이 안 펼쳐지던 것 · 지도 퀘스트 아이콘에 마우스를 올리면 C stack overflow 오류가 나던 것" },

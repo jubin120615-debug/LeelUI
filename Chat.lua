@@ -601,6 +601,65 @@ local function Build()
     Skin(_G.ChatFrameChannelButton, "ci_voice", 1)
     local qj = _G.QuickJoinToastButton
     Skin(qj, "ci_social", 2)
+    -- 음성 채널에 들어가면 나오는 소리 끄기 · 마이크 끄기 단추: 기둥 안 작은 네모 둘 (나란히)
+    do
+        local half = math.floor(SZ / 2) - 1
+        local function Mini(btn, icon, side, isOff)
+            if not btn then return end
+            local function Pin()
+                if btn.leelPinning then return end
+                btn.leelPinning = true
+                pcall(function()
+                    if btn:GetParent() ~= rail then btn:SetParent(rail) end
+                    btn:ClearAllPoints()
+                    btn:SetPoint("BOTTOM", rail, "BOTTOM", 1 + side * (half / 2 + 1), 8 + (SZ + 8) * 3)
+                    btn:SetScale(1); btn:SetSize(half, half)
+                end)
+                btn.leelPinning = false
+            end
+            if not btn.leelPinHooked then
+                btn.leelPinHooked = true
+                hooksecurefunc(btn, "SetPoint", function() if not btn.leelPinning then C_Timer.After(0, Pin) end end)
+                hooksecurefunc(btn, "SetParent", function(_, p) if not btn.leelPinning and p ~= rail then C_Timer.After(0, Pin) end end)
+            end
+            pcall(function()
+                Pin()
+                for _, r in ipairs({ btn:GetRegions() }) do if r:GetObjectType() == "Texture" then KillTex(r) end end
+                for _, k in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetHighlightTexture", "GetDisabledTexture" }) do
+                    local t = btn[k] and btn[k](btn); if t then KillTex(t) end
+                end
+                -- 블리자드가 상태마다 그림을 다시 넣어도 안 보이게
+                for _, k in ipairs({ "SetNormalTexture", "SetPushedTexture", "SetNormalAtlas", "SetPushedAtlas" }) do
+                    if btn[k] then hooksecurefunc(btn, k, function(self)
+                        for _, g in ipairs({ "GetNormalTexture", "GetPushedTexture" }) do local t = self[g] and self[g](self); if t then KillTex(t) end end
+                    end) end
+                end
+                local h = CreateFrame("Frame", nil, btn); h:SetAllPoints(); h:SetFrameLevel(btn:GetFrameLevel() + 1)
+                local fill = ns.RoundRect(h, 8, { 0.173, 0.133, 0.125 }, "BACKGROUND", 0, 0)
+                local ic = h:CreateTexture(nil, "ARTWORK"); ic:SetTexture(ns.MEDIA .. icon); ic:SetSize(half - 4, half - 4); ic:SetPoint("CENTER")
+                local sl = h:CreateTexture(nil, "OVERLAY"); sl:SetTexture(ns.MEDIA .. "ci_slash"); sl:SetAllPoints(ic); sl:SetVertexColor(CORAL[1], CORAL[2], CORAL[3], 1)
+                local hover = false
+                local function Paint()
+                    local off = false
+                    pcall(function() off = isOff() and true or false end)
+                    sl:SetShown(off)
+                    local c = hover and C.acc or (off and CORAL or C.tx2)
+                    ic:SetVertexColor(c[1], c[2], c[3], 1)
+                    fill:SetColor(hover and { 0.26, 0.19, 0.18 } or { 0.173, 0.133, 0.125 })
+                end
+                btn:HookScript("OnEnter", function() hover = true; Paint() end)
+                btn:HookScript("OnLeave", function() hover = false; Paint() end)
+                btn:HookScript("OnClick", function() C_Timer.After(0.1, Paint) end)
+                local ev = CreateFrame("Frame")
+                for _, e in ipairs({ "VOICE_CHAT_DEAFENED_CHANGED", "VOICE_CHAT_MUTED_CHANGED", "VOICE_CHAT_SILENCED_CHANGED", "VOICE_CHAT_CHANNEL_ACTIVATED" }) do pcall(ev.RegisterEvent, ev, e) end
+                ev:SetScript("OnEvent", Paint)
+                Paint()
+            end)
+        end
+        local VC = C_VoiceChat
+        Mini(_G.ChatFrameToggleVoiceDeafenButton, "ci_voice", -1, function() return VC and VC.IsDeafened and VC.IsDeafened() end)
+        Mini(_G.ChatFrameToggleVoiceMuteButton, "ci_mic", 1, function() return VC and VC.IsMuted and VC.IsMuted() end)
+    end
     -- 친구 접속 수: 오른쪽 위 빨간 숫자 알약
     if qj and qj.FriendCount then
         pcall(function()
@@ -1670,4 +1729,132 @@ do
         Soon()
     end)
     ns.ChatBubbleRefresh = Scan
+end
+
+----------------------------------------------------------------------
+-- 음성 채팅: 머리줄 오른쪽 소리 칩 (C안)
+--   말하는 사람: 직업 아이콘 + 이름 (+ "외 N") + 움직이는 소리 막대 · 말 멈추면 1초 뒤 사라짐
+--   블리자드 기본 "말하는 중" 알림은 투명하게 (허브 > 채팅창 "음성 채팅 칩")
+----------------------------------------------------------------------
+do
+    local speaking, order = {}, {}      -- [key] = { name, cls, at }
+    local chip
+    local function VOn() return DB().on ~= false and DB().voiceChip ~= false end
+    local function Build()
+        if chip or not head then return chip end
+        chip = CreateFrame("Frame", nil, head)
+        chip:SetHeight(20); chip:SetPoint("RIGHT", head, "RIGHT", -36, -1)
+        chip:SetFrameLevel(head:GetFrameLevel() + 3)
+        ns.RoundRect(chip, 10, C.acc, "BACKGROUND", 0, 0)
+        chip.ic = chip:CreateTexture(nil, "ARTWORK"); chip.ic:SetSize(16, 16); chip.ic:SetPoint("LEFT", 3, 0)
+        chip.ic:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
+        chip.fs = ns.Font(chip, 11.5, { 0.1, 0.08, 0.09 }); chip.fs:SetShadowColor(0, 0, 0, 0); chip.fs:SetPoint("LEFT", chip.ic, "RIGHT", 4, 0)
+        chip.more = ns.Font(chip, 10.5, { 0.42, 0.29, 0.31 }); chip.more:SetShadowColor(0, 0, 0, 0); chip.more:SetPoint("LEFT", chip.fs, "RIGHT", 3, 0)
+        chip.bars = {}
+        for i = 1, 3 do
+            local b = chip:CreateTexture(nil, "ARTWORK"); b:SetTexture(ns.WHITE); b:SetVertexColor(0.23, 0.11, 0.14, 1)
+            b:SetSize(3, 6); chip.bars[i] = b
+        end
+        chip:EnableMouse(true)
+        chip:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            ns.TSet(GameTooltip, "음성 채팅 · 말하는 중", 1, 0.84, 0.88)
+            for _, k in ipairs(order) do local s = speaking[k]; if s then GameTooltip:AddLine(s.name, 1, 1, 1) end end
+            GameTooltip:Show()
+        end)
+        chip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        local t, acc = 0, 0
+        chip:SetScript("OnUpdate", function(self, e)
+            t = t + e; acc = acc + e
+            for i, b in ipairs(self.bars) do b:SetHeight(4 + 7 * math.abs(math.sin(t * (6 + i * 1.7) + i))) end
+            if acc < 0.25 then return end
+            acc = 0
+            local now, changed = GetTime(), false
+            for k, s in pairs(speaking) do if s.off and now - s.off > 1 then speaking[k] = nil; changed = true end end
+            if changed and ns.ChatVoicePaint then ns.ChatVoicePaint() end
+        end)
+        chip:Hide()
+        return chip
+    end
+    function ns.ChatVoicePaint()
+        local c = Build()
+        if not c then return end
+        wipe(order)
+        for k, s in pairs(speaking) do order[#order + 1] = k end
+        table.sort(order, function(a, b) return (speaking[a].at or 0) > (speaking[b].at or 0) end)
+        local first = order[1] and speaking[order[1]]
+        if not (VOn() and first) then
+            c:Hide()
+            for _, hc in ipairs(chipPool) do hc.dot:SetAlpha(1); hc.text:SetAlpha(1) end
+            return
+        end
+        c.fs:SetText(first.name or "?")
+        local tc = first.cls and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[first.cls]
+        if tc then c.ic:SetTexCoord(tc[1], tc[2], tc[3], tc[4]); c.ic:Show() else c.ic:Hide() end
+        c.more:SetText(#order > 1 and ns.L("외 " .. (#order - 1)) or "")
+        -- 오른쪽부터 차례로: 소리 막대 → 외 N → 이름 → 아이콘 (막대가 늘 보이게)
+        local function W(fs, def)
+            local w = def
+            pcall(function() local x = fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth(); if type(x) == "number" and not (issecretvalue and issecretvalue(x)) then w = x end end)
+            return w
+        end
+        for i, b in ipairs(c.bars) do b:ClearAllPoints(); b:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -7 - (3 - i) * 5, 5) end
+        local mw = (#order > 1) and W(c.more, 20) or 0
+        c.more:ClearAllPoints(); c.more:SetPoint("RIGHT", c, "RIGHT", -7 - 15 - 4, 0)
+        local nw = math.min(W(c.fs, 50), 90)
+        c.fs:SetWidth(nw); c.fs:SetWordWrap(false)
+        c.fs:ClearAllPoints(); c.fs:SetPoint("RIGHT", c, "RIGHT", -7 - 15 - 4 - (mw > 0 and (mw + 3) or 0), 0)
+        c.ic:ClearAllPoints(); c.ic:SetPoint("RIGHT", c.fs, "LEFT", -4, 0)
+        c:SetWidth(3 + 16 + 4 + nw + (mw > 0 and (mw + 3) or 0) + 4 + 15 + 7)
+        c:Show()
+        -- 머리줄 채널 이름이 칩에 가리면 그 칩은 잠깐 숨겨요
+        local left = c:GetLeft()
+        for _, hc in ipairs(chipPool) do
+            local r = hc.text:IsShown() and hc.text:GetRight()
+            local dl = hc.dot:IsShown() and hc.dot:GetLeft()
+            local ok = left and not (issecretvalue and (issecretvalue(left) or (r and issecretvalue(r)) or (dl and issecretvalue(dl))))
+            -- 글자 끝이 칩에 닿거나, 점이 칩 바로 앞(글자가 들어갈 자리 없음)이면 숨김
+            local over = ok and ((r and r > left - 4) or (dl and dl > left - 30)) or false
+            hc.dot:SetAlpha(over and 0 or 1); hc.text:SetAlpha(over and 0 or 1)
+        end
+    end
+    -- 블리자드 기본 알림 숨기기 (투명하게 · 기능은 그대로)
+    local function Quiet()
+        local m = _G.VoiceActivityManager
+        if m and m.SetAlpha then pcall(m.SetAlpha, m, VOn() and 0 or 1) end
+    end
+    ns.ChatVoiceQuiet = Quiet
+    local function Who(memberID, channelID)
+        local guid
+        if C_VoiceChat and C_VoiceChat.GetMemberGUID then
+            local ok, g = pcall(C_VoiceChat.GetMemberGUID, memberID, channelID); if ok then guid = g end
+        end
+        local name, cls
+        if guid and not (issecretvalue and issecretvalue(guid)) and GetPlayerInfoByGUID then
+            local ok, _, c, _, _, _, n = pcall(GetPlayerInfoByGUID, guid)
+            if ok then name, cls = n, c end
+        end
+        if not name and C_VoiceChat and C_VoiceChat.GetMemberName then
+            local ok, n = pcall(C_VoiceChat.GetMemberName, memberID, channelID); if ok then name = n end
+        end
+        if issecretvalue and ((name and issecretvalue(name)) or (cls and issecretvalue(cls))) then return end
+        return name, cls
+    end
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    pcall(ev.RegisterEvent, ev, "VOICE_CHAT_CHANNEL_MEMBER_SPEAKING_STATE_CHANGED")
+    pcall(ev.RegisterEvent, ev, "VOICE_CHAT_CHANNEL_DEACTIVATED")
+    ev:SetScript("OnEvent", function(_, e, memberID, channelID, isSpeaking)
+        if e == "PLAYER_LOGIN" then C_Timer.After(2, Quiet) return end
+        if e == "VOICE_CHAT_CHANNEL_DEACTIVATED" then wipe(speaking); ns.ChatVoicePaint() return end
+        if not VOn() then return end
+        local key = tostring(channelID) .. ":" .. tostring(memberID)
+        if isSpeaking then
+            local name, cls = Who(memberID, channelID)
+            speaking[key] = { name = name and Ambiguate(name, "short") or "?", cls = cls, at = GetTime() }
+        elseif speaking[key] then
+            speaking[key].off = GetTime()
+        end
+        ns.ChatVoicePaint()
+    end)
 end

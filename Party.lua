@@ -974,12 +974,34 @@ local function HideBlizzardParty()
     if InCombatLockdown() then return end
     local list = { PartyFrame, CompactPartyFrame }
     for i = 1, 4 do list[#list + 1] = _G["PartyMemberFrame" .. i] end
+    -- 새 게임 판: 파티원 칸은 PartyFrame 안 틀 묶음(풀)에서 나와요 → 그 칸들도 신호를 끊어야
+    --   숨겨 둔 기본 칸이 체력 신호를 받다가 "secret number" 오류를 내지 않아요
+    local pf = _G.PartyFrame
+    if pf then
+        if pf.PartyMemberFramePool and pf.PartyMemberFramePool.EnumerateActive then
+            pcall(function() for m in pf.PartyMemberFramePool:EnumerateActive() do list[#list + 1] = m end end)
+        end
+        for i = 1, 4 do local m = pf["MemberFrame" .. i]; if m then list[#list + 1] = m end end
+        pcall(function() for _, c in ipairs({ pf:GetChildren() }) do list[#list + 1] = c end end)
+    end
     for _, fr in pairs(list) do
         if fr then
             pcall(fr.UnregisterAllEvents, fr)
             pcall(fr.Hide, fr)
-            pcall(fr.SetParent, fr, hidden)
+            if fr == pf or fr == _G.CompactPartyFrame or (fr.GetName and fr:GetName() and fr:GetName():find("^PartyMemberFrame%d$")) then
+                pcall(fr.SetParent, fr, hidden)
+            end
         end
+    end
+    -- 기본 창이 파티 칸을 새로 만들면 그 칸도 다시 끊어요 (한 번만 걸어요)
+    if pf and pf.UpdatePartyFrames and not hidden.leelHooked then
+        hidden.leelHooked = true
+        hooksecurefunc(pf, "UpdatePartyFrames", function(self)
+            if not (ns.db and ns.db.partyHideBlizzard ~= false) then return end
+            if self.PartyMemberFramePool and self.PartyMemberFramePool.EnumerateActive then
+                for m in self.PartyMemberFramePool:EnumerateActive() do pcall(m.UnregisterAllEvents, m); pcall(m.Hide, m) end
+            end
+        end)
     end
 end
 
@@ -1287,4 +1309,220 @@ SlashCmdList.LEELPARTYDBG = function(msg)
     print("|cfff2b3c2[르엘 파티]|r 들어올치유함수=" .. tostring(UnitGetIncomingHeals ~= nil) ..
         " 값=" .. (ns.IsSecret(inc) and "<숨김>" or tostring(inc)) ..
         "  체력%곡선=" .. tostring(LowCurve() ~= nil) .. "  오라상자=" .. tostring(ns.partyMembers and ns.partyMembers[1] and ns.partyMembers[1].buffs ~= nil))
+end
+
+----------------------------------------------------------------------
+-- 파티 찾기: 신청한 사람 위치 알약 (게임이 주는 지역 · 없으면 레벨대 /누구 한 번으로 채우기)
+--   같은 지역 = 초록 · 그 던전 안 = 분홍 · 그 밖 = 회색 · 못 찾음 = 표시 없음
+----------------------------------------------------------------------
+do
+    local whoLoc = {}        -- [이름] = { area, t }
+    local function Short(n) return type(n) == "string" and (n:gsub("%-.*$", "")) or nil end
+    local function Secret(v) return issecretvalue and issecretvalue(v) end
+    local function PlayerInfo(id)
+        if not (C_LFGList and C_LFGList.GetSearchResultPlayerInfo) then return end
+        local ok, info = pcall(C_LFGList.GetSearchResultPlayerInfo, id, 1)
+        if ok and type(info) == "table" then return info end
+    end
+    local function AreaOf(id)
+        local info = PlayerInfo(id)
+        if not info then return end
+        local name = info.name
+        if Secret(name) then return end
+        local area = info.areaName
+        if Secret(area) then area = nil end
+        if (not area or area == "") and name then
+            local w = whoLoc[Short(name)]
+            if w and GetTime() - w.t < 300 then area = w.area end
+        end
+        return area, Short(name), info.level
+    end
+    local function DungeonName(id)
+        local ok, r = pcall(C_LFGList.GetSearchResultInfo, id)
+        if not (ok and type(r) == "table") then return end
+        local aid = r.activityID or (r.activityIDs and r.activityIDs[1])
+        if aid and C_LFGList.GetActivityInfoTable then
+            local ok2, a = pcall(C_LFGList.GetActivityInfoTable, aid)
+            if ok2 and type(a) == "table" then return a.fullName or a.shortName, a.shortName end
+        end
+    end
+    -- 이름 글씨 찾기: 줄 안 글자 중 그 사람 이름으로 시작하는 것
+    local function NameFS(f, name, depth)
+        for _, r in ipairs({ f:GetRegions() }) do
+            if r:GetObjectType() == "FontString" then
+                local t = r:GetText()
+                if type(t) == "string" and not Secret(t) then
+                    t = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^%s+", "")
+                    if t:find(name, 1, true) == 1 then return r end
+                end
+            end
+        end
+        if (depth or 0) < 2 then
+            for _, c in ipairs({ f:GetChildren() }) do
+                local fs = NameFS(c, name, (depth or 0) + 1); if fs then return fs end
+            end
+        end
+    end
+    -- 던전 → 입구가 있는 지역 (이름 일부로 찾아요)
+    local ENTRANCE = {
+        { "붉은십자군", "티리스팔 숲" }, { "죽음의 폐광", "서부 몰락지대" }, { "통곡의 동굴", "불모의 땅" },
+        { "그림자송곳니", "은빛소나무 숲" }, { "스톰윈드 지하감옥", "스톰윈드" }, { "검은심연", "잿빛 골짜기" },
+        { "놈리건", "던 모로" }, { "가시덩굴", "불모의 땅" }, { "성난불길", "오그리마" }, { "울다만", "황야의 땅" },
+        { "줄파락", "타나리스" }, { "마라우돈", "잊혀진 땅" }, { "아탈학카르", "슬픔의 늪" }, { "가라앉은 사원", "슬픔의 늪" },
+        { "검은바위", "이글거리는 협곡" }, { "혈투의 전장", "페랄라스" }, { "스칼로맨스", "서부 역병지대" },
+        { "스트라솔름", "동부 역병지대" },
+    }
+    local function EntranceOf(dn)
+        if type(dn) ~= "string" then return end
+        for _, e in ipairs(ENTRANCE) do if dn:find(e[1], 1, true) then return e[2] end end
+    end
+    -- E안(막대 없이): 둘째 줄 던전 이름 옆 "· 지역" + 셋째 줄(배우기 · 여유로움) 옆 거리 말 (같은 곳 · 던전 안 · 입구 · 멀리)
+    local function Pill(entry)
+        if entry.leelLoc then return entry.leelLoc end
+        local p = { fs = ns.Font(entry, 11.5, { 0.72, 0.67, 0.69 }), tag = ns.Font(entry, 11.5, { 0.72, 0.67, 0.69 }) }
+        function p:Hide() self.fs:Hide(); self.tag:Hide() end
+        function p:Show() self.fs:Show(); self.tag:Show() end
+        entry.leelLoc = p
+        return p
+    end
+    -- 셋째 줄 글씨: 던전 이름 글씨 바로 아래 · 왼쪽이 비슷한 것
+    local function MemoFS(entry, dfs)
+        if not dfs then return end
+        local dl, db = dfs:GetLeft(), dfs:GetBottom()
+        if not (dl and db) or Secret(dl) or Secret(db) then return end
+        local best, bd
+        local function Look(f, d)
+            for _, r in ipairs({ f:GetRegions() }) do
+                if r:GetObjectType() == "FontString" and r ~= dfs and r:IsShown() and r ~= entry.leelLoc.fs and r ~= entry.leelLoc.tag then
+                    local l, t = r:GetLeft(), r:GetTop()
+                    if l and t and not Secret(l) and not Secret(t) and math.abs(l - dl) < 12 and t <= db + 2 then
+                        local dist = db - t
+                        if not bd or dist < bd then best, bd = r, dist end
+                    end
+                end
+            end
+            if d < 2 then for _, c in ipairs({ f:GetChildren() }) do Look(c, d + 1) end end
+        end
+        Look(entry, 0)
+        return best
+    end
+    local Paint
+    Paint = function(entry, here)
+        local id = entry.resultID
+        if type(id) ~= "number" then return end
+        local area, name = AreaOf(id)
+        local p = entry.leelLoc
+        -- 내 등록 줄은 빼요 (이름이 같거나 · 앞이 같거나 · "내 등록 사항" 글자가 있는 줄)
+        if entry.leelMineId ~= id then
+            local me = UnitName and UnitName("player")
+            me = me and not Secret(me) and Short(me) or nil
+            local mine = me and name and (name == me or name:find(me, 1, true) == 1 or me:find(name, 1, true) == 1) or false
+            if not mine then mine = (NameFS(entry, ns.L("내 등록")) or NameFS(entry, "내 등록")) and true or false end
+            entry.leelMine, entry.leelMineId = mine, id
+            entry.leelDgFS, entry.leelMemoFS = nil, nil
+        end
+        if not (area and area ~= "" and name) or entry.leelMine then if p then p:Hide() end return end
+        p = Pill(entry)
+        local dn = DungeonName(id)
+        local inDg = dn and (area == dn or dn:find(area, 1, true) or area:find(dn, 1, true))
+        local ent = EntranceOf(dn)
+        local col, tag
+        if area == here then col, tag = { 0.56, 0.91, 0.6 }, "같은 곳"
+        elseif inDg then col, tag = C.acc, "던전 안"
+        elseif ent and area == ent then col, tag = { 0.94, 0.83, 0.54 }, "입구"
+        else col, tag = { 0.66, 0.6, 0.63 }, "멀리" end
+        p.fs:SetTextColor(col[1], col[2], col[3]); p.fs:SetText("· " .. (inDg and ns.L("던전 안") or area))
+        p.tag:SetTextColor(col[1], col[2], col[3]); p.tag:SetText(ns.L(tag))
+        -- 둘째 줄 던전 이름 글씨
+        local dfs = entry.leelDgFS
+        if not dfs and dn then
+            local _, sn = DungeonName(id)
+            dfs = NameFS(entry, dn) or (sn and NameFS(entry, sn))
+            local w1 = dn:match("^(%S+)")
+            if not dfs and w1 then dfs = NameFS(entry, w1) end     -- "붉은십자군 수도원: 무기고" ↔ "붉은십자군 무기고"
+            entry.leelDgFS = dfs
+        end
+        local function After(fs, target, gap)
+            local w = 100
+            pcall(function() local x = target:GetStringWidth(); if type(x) == "number" and not Secret(x) then w = x end end)
+            fs:ClearAllPoints(); fs:SetPoint("LEFT", target, "LEFT", w + gap, 0)
+        end
+        if dfs then After(p.fs, dfs, 5) else p.fs:ClearAllPoints(); p.fs:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", -14, 6) end
+        local mfs = entry.leelMemoFS
+        if not (mfs and mfs:IsShown()) then mfs = MemoFS(entry, dfs); entry.leelMemoFS = mfs end
+        if mfs and type(mfs:GetText()) == "string" and mfs:GetText() ~= "" then After(p.tag, mfs, 10); p.tag:Show()
+        elseif dfs then p.tag:ClearAllPoints(); p.tag:SetPoint("TOPLEFT", dfs, "BOTTOMLEFT", 0, -3); p.tag:Show()
+        else p.tag:Hide() end
+        p.fs:Show()
+    end
+    local function Walk(f, here, depth)
+        for _, c in ipairs({ f:GetChildren() }) do
+            if c.resultID and c:IsVisible() then pcall(Paint, c, here)
+            elseif depth < 8 then Walk(c, here, depth + 1) end
+        end
+    end
+    local function Root() return _G.LFGBrowseFrame end
+    -- 레벨대 /누구 한 번: 지역을 안 주는 사람만 채워요 (검색을 누른 그 순간에만 · 게임 규칙)
+    local whoBusy, lastWho = false, 0
+    local function WhoFill()
+        if whoBusy or GetTime() - lastWho < 8 then return end
+        if not (C_FriendList and C_FriendList.SendWho and C_LFGList and C_LFGList.GetSearchResults) then return end
+        local ok, ids = pcall(C_LFGList.GetSearchResults)
+        if not ok or type(ids) ~= "table" then return end
+        local lo, hi, need = 999, 0, 0
+        for _, id in ipairs(ids) do
+            local info = PlayerInfo(id)
+            if info and not Secret(info.name) and not (info.areaName and not Secret(info.areaName) and info.areaName ~= "") then
+                local w = whoLoc[Short(info.name)]
+                if not (w and GetTime() - w.t < 300) and type(info.level) == "number" and not Secret(info.level) then
+                    need = need + 1; lo = math.min(lo, info.level); hi = math.max(hi, info.level)
+                end
+            end
+        end
+        if need == 0 then return end
+        if hi - lo > 10 then lo = hi - 10 end
+        whoBusy, lastWho = true, GetTime()
+        local ff = _G.FriendsFrame
+        if ff then pcall(ff.UnregisterEvent, ff, "WHO_LIST_UPDATE") end
+        pcall(C_FriendList.SetWhoToUi, true)
+        pcall(C_FriendList.SendWho, lo .. "-" .. hi)
+        C_Timer.After(6, function()      -- 답이 안 오면 원래대로
+            if whoBusy then whoBusy = false; if ff then pcall(ff.RegisterEvent, ff, "WHO_LIST_UPDATE") end; pcall(C_FriendList.SetWhoToUi, false) end
+        end)
+    end
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("WHO_LIST_UPDATE")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:SetScript("OnEvent", function(_, e)
+        if e == "PLAYER_LOGIN" then
+            if C_LFGList and C_LFGList.Search then
+                hooksecurefunc(C_LFGList, "Search", function() if ns.db and ns.db.lfgLoc ~= false then WhoFill() end end)
+            end
+            return
+        end
+        if not whoBusy then return end
+        whoBusy = false
+        local n = C_FriendList.GetNumWhoResults and C_FriendList.GetNumWhoResults() or 0
+        for i = 1, n do
+            local ok, w = pcall(C_FriendList.GetWhoInfo, i)
+            if ok and type(w) == "table" and w.fullName and not Secret(w.fullName) and w.area and not Secret(w.area) then
+                whoLoc[Short(w.fullName)] = { area = w.area, t = GetTime() }
+            end
+        end
+        local ff = _G.FriendsFrame
+        if ff then C_Timer.After(0, function() pcall(ff.RegisterEvent, ff, "WHO_LIST_UPDATE") end) end
+        pcall(C_FriendList.SetWhoToUi, false)
+    end)
+    -- 목록이 보이는 동안 0.5초마다 알약 다시 그리기
+    local tick, acc = CreateFrame("Frame"), 0
+    tick:SetScript("OnUpdate", function(_, el)
+        acc = acc + el
+        if acc < 0.5 then return end
+        acc = 0
+        if ns.db and ns.db.lfgLoc == false then return end
+        local r = Root()
+        if not (r and r:IsVisible()) then return end
+        local here = GetRealZoneText and GetRealZoneText() or ""
+        pcall(Walk, r, here, 0)
+    end)
 end

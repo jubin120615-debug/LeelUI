@@ -309,3 +309,11 @@ F["잡던 곳  "] = "Killed here  "; F["게임 표시  "] = "Game marker  "; F["
 F[" |cff8fdc9b새 퀘|r"] = " |cff8fdc9bnew|r"; F[" |cff8fdc9b새 반납|r"] = " |cff8fdc9bnew turn-in|r"
 F[" |cffffd34d(반납)|r"] = " |cffffd34d(turn in)|r"; F[" |cffff8f8f[파티]|r"] = " |cffff8f8f[Party]|r"
 F["퀘 레벨 "] = "Quest level "; F["레벨부터|r"] = "+ needed|r"; F["|cff9a8a86받을 수 있음 "] = "|cff9a8a86Available "
+
+-- 파티 같이
+E["파티 같이"] = "Party"
+E["파티원과 같은 퀘만 골라서 토끼가 길을 짜요 (상대가 르엘 UI가 없어도 돼요)"] = "The bunny plans a route from only the quests you share with your party (they don't need LeelUI)"
+E["지도 위 얼굴을 누르면 그 사람과 같은 퀘만 · 파티가 아니면 토끼 자동과 같아요"] = "Click a face above the map for only that member's shared quests · same as Bunny Auto when not in a party"
+E["같은 퀘 %d개 · 누르면 이 사람과 같은 퀘만"] = "%d shared quests · click for only quests shared with this member"
+E["고른 사람과 같은 퀘만"] = "Only quests shared with the picked members"
+E["얼굴을 누르면 그 사람과 같은 퀘만"] = "Click a face for only that member's shared quests"

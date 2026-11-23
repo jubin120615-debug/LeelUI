@@ -367,3 +367,17 @@ E["버프 · 디버프 줄 위치 초기화"] = "Reset buff · debuff row positi
 -- 새 소식 1.3.48
 E["영어 지원 (English) · 모던 버프 줄 옮기기 · 퀘스티 아이콘 · 주문 레벨 고침"] = "English support · move Modern buff rows · Questie icon · spell rank fix"
 E["게임 언어가 영어면 자동으로 영어 · 허브 맨 위 언어 고르기 · /leel lang en · ko · 모던 버프 · 디버프 줄을 이동 모드에서 따로 옮기기 · 크기 · 미니맵 모음의 퀘스티 = 왼쪽 클릭 설정 창 · 단축바 주문 레벨 알림이 와우 포에버 주문책을 읽게"] = "English automatically when your game is in English · pick the language at the top of the Hub · /leel lang en · ko · move Modern buff · debuff rows separately in Move Mode · size · Questie in the minimap collection = left-click opens its settings · action bar spell rank alerts now read the WoW Forever spellbook"
+
+-- 음성 채팅 칩
+E["음성 채팅 칩"] = "Voice chat chip"
+E["말하는 사람을 머리줄 오른쪽 분홍 칩으로 · 블리자드 기본 알림은 숨김"] = "Show who's talking as a pink chip on the right of the chat header · hides Blizzard's default alert"
+E["음성 채팅 · 말하는 중"] = "Voice chat · talking"
+P[#P + 1] = { "^외 (%d+)$", "+%1" }
+E["단축바 %d칸은 바꾸지 못했어요. 주문책에서 끌어다 놓아 주세요."] = "Couldn't swap %d action slots. Please drag the spell from your spellbook."
+E[" (같은 지역)"] = " (same zone)"; E["던전 안"] = "In the dungeon"; E[" (입구)"] = " (entrance)"
+E["같음"] = "Here"; E["입구"] = "Gate"; E["멀리"] = "Far"; E["던전"] = E["던전"] or "Dungeon"
+E["같은 곳"] = "Same zone"
+
+-- 새 소식 1.3.49
+E["음성 채팅 칩 · 파티 찾기 위치 · Leel Quest 파티 같이 · 오류 고침"] = "Voice chat chip · party finder locations · Leel Quest party mode · fixes"
+E["채팅 머리줄에 말하는 사람 칩 · 음성 소리 · 마이크 단추 르엘 모양 · 파티 찾기 신청자 지역 + 같은 곳 · 던전 안 · 입구 · 멀리 · Leel Quest 파티원과 같은 퀘만 길 (얼굴로 고르기) · 단축바 주문 레벨 바꾸기 · 숨긴 기본 파티 창 오류"] = "Pink chip for who's talking on the chat header · LeelUI-style voice mute · mic buttons · party finder applicant zones + same zone · in dungeon · entrance · far · Leel Quest routes only quests shared with your party (pick by face) · action bar spell rank swap · hidden default party frame error"

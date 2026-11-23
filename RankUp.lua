@@ -138,19 +138,37 @@ local function Replace(name)
         return
     end
     ScanBook(); ScanBars()
-    local done, names = 0, {}
+    local done, fail, names = 0, 0, {}
+    -- 주문 집기: 게임 판마다 함수가 달라요 (C_Spell · 옛 함수 · 주문책 칸)
+    local function Pick(id)
+        ClearCursor()
+        if C_Spell and C_Spell.PickupSpell then pcall(C_Spell.PickupSpell, id) end
+        if not GetCursorInfo() and PickupSpell then pcall(PickupSpell, id) end
+        if not GetCursorInfo() and C_SpellBook and C_SpellBook.FindSpellBookSlotForSpell and C_SpellBook.PickupSpellBookItem then
+            local ok, idx, bank = pcall(C_SpellBook.FindSpellBookSlotForSpell, id)
+            if ok and idx then pcall(C_SpellBook.PickupSpellBookItem, idx, bank or (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0) end
+        end
+        return GetCursorInfo() ~= nil
+    end
     for _, slot in ipairs(LowOf(name ~= true and name or nil)) do
         local l = low[slot]
-        if l and not GetCursorInfo() then
-            local ok = pcall(PickupSpell, l.bestId)
-            if ok and GetCursorInfo() then
-                PlaceAction(slot)
+        if l then
+            if Pick(l.bestId) then
+                pcall(PlaceAction, slot)
                 ClearCursor()
-                done = done + 1
-                names[l.name] = l.bestRank
+                local _, nowId = GetActionInfo(slot)
+                if nowId and RankOf(nowId) == l.bestRank then
+                    done = done + 1
+                    names[l.name] = l.bestRank
+                else
+                    fail = fail + 1
+                end
+            else
+                fail = fail + 1
             end
         end
     end
+    if fail > 0 then ns.Print(ns.L("단축바 %d칸은 바꾸지 못했어요. 주문책에서 끌어다 놓아 주세요."):format(fail)) end
     if done > 0 then
         local parts = {}
         for n, r in pairs(names) do parts[#parts + 1] = n .. " " .. r .. "레벨" end

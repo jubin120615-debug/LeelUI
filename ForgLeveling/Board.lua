@@ -2946,8 +2946,20 @@ local function FillGuide(quiet)
         return yd or (math.sqrt((ax - bx) ^ 2 + (ay - by) ^ 2) * 15)
     end
     local pool, greys, dones = {}, {}, {}
+    -- 파티 같이: 파티원과 같은 퀘만 (얼굴을 고르면 그 사람과 같은 퀘만)
+    local pmode = CDB and CDB.mode == "party" and IsInGroup and IsInGroup() and ns.PQ
+    local who = CDB and CDB.pqWho
+    local anyWho = who and next(who) ~= nil
+    local function Shared(e)
+        if not pmode then return true end
+        local l = ns.PQ.Of(e)
+        if not l or #l == 0 then return false end
+        if not anyWho then return true end
+        for _, mm in ipairs(l) do if who[mm.name] then return true end end
+        return false
+    end
     for _, e in ipairs(log) do
-        if e.id and not e.failed then
+        if e.id and not e.failed and Shared(e) then
             local x, y = QuestPos(e, m)
             if OnMap(x, y) then
                 local it = { e = e, x = x, y = y }
@@ -3196,12 +3208,14 @@ local function MakeBoard()
         local defs = {
             { key = "auto", label = "토끼 자동", icon = "bunny",
               tip = { "토끼 자동", "토끼가 이 지역 퀘로 길을 짜고, 퀘를 받거나 끝내면 알아서 다시 짜요", "낮은 레벨부터 · 근처(150m)끼리 · 근처 반납 같이 · 어려움(+3) · 파티 퀘는 빼요" } },
+            { key = "party", label = "파티 같이",
+              tip = { "파티 같이", "파티원과 같은 퀘만 골라서 토끼가 길을 짜요 (상대가 르엘 UI가 없어도 돼요)", "지도 위 얼굴을 누르면 그 사람과 같은 퀘만 · 파티가 아니면 토끼 자동과 같아요" } },
             { key = "manual", label = "직접 고르기",
               tip = { "직접 고르기", "네모로 하고 싶은 퀘만 골라요. 고를 때마다 길 순서는 저절로 다시 짜요", "처음엔 토끼가 고른 것에서 시작해요" } },
             { key = "off", label = "모두 빼기",
               tip = { "모두 빼기", "길 · 지도 번호 · 추적창 길 안내를 모두 꺼요", "다른 칸을 누르면 다시 켜져요" } },
         }
-        local function Mode() return (CDB and CDB.mode == "manual" and "manual") or (CDB and CDB.mode == "off" and "off") or "auto" end
+        local function Mode() return (CDB and CDB.mode == "manual" and "manual") or (CDB and CDB.mode == "off" and "off") or (CDB and CDB.mode == "party" and "party") or "auto" end
         local function Guide()   -- 화면 퀘스트 목록을 Leel Quest로 (길이 있을 때만)
             if CDB.route and #CDB.route > 0 and L and L.QuestTrackerMode and L.QuestTrackerMode() ~= "guide" and L.SetQuestTrackerMode then
                 L:SetQuestTrackerMode("guide")
@@ -3212,6 +3226,8 @@ local function MakeBoard()
         local function Pick(key)
             if key == "auto" then
                 CDB.mode = nil; FillGuide(true)
+            elseif key == "party" then
+                CDB.mode = "party"; FillGuide(true)
             elseif key == "manual" then
                 CDB.mode = "manual"
                 if not next(Sel()) then FillGuide(true) end     -- 빈 상태면 토끼가 고른 것에서 시작
@@ -3278,6 +3294,70 @@ local function MakeBoard()
                 if b.ic then b.ic:SetAlpha(on and 1 or 0.6) end
             end
         end
+        -- 파티원 얼굴 줄: 누르면 그 사람과 같은 퀘만 (여러 명 = 합쳐서 · 다시 누르면 풀기)
+        local pqRow = CreateFrame("Frame", nil, board)
+        pqRow:SetHeight(24); pqRow:SetPoint("BOTTOMLEFT", board.map, "TOPLEFT", 0, 6); pqRow:SetPoint("BOTTOMRIGHT", board.map, "TOPRIGHT", 0, 6)
+        pqRow.pills = {}
+        pqRow.hint = Font(pqRow, 11, DIM)
+        local function PillFor(i)
+            local b = pqRow.pills[i]
+            if b then return b end
+            b = CreateFrame("Button", nil, pqRow); b:SetHeight(22)
+            b.bg = RR(b, 11, CHIP, "BACKGROUND", 0, 0)
+            b.dot = b:CreateTexture(nil, "ARTWORK"); b.dot:SetTexture(MEDIA .. "circle"); b.dot:SetSize(14, 14); b.dot:SetPoint("LEFT", 5, 0)
+            b.fs = Font(b, 11.5, P.tx); b.fs:SetPoint("LEFT", b.dot, "RIGHT", 5, 0)
+            b:SetScript("OnClick", function(self)
+                CDB.pqWho = CDB.pqWho or {}
+                CDB.pqWho[self.name] = (not CDB.pqWho[self.name]) or nil
+                FillGuide(true); Guide(); board.Toast(true); board.PaintSeg()
+            end)
+            b:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP"); ns.T.Set(GameTooltip, self.name)
+                ns.T.Add(GameTooltip, ns.T("같은 퀘 %d개 · 누르면 이 사람과 같은 퀘만"):format(self.n or 0), 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            pqRow.pills[i] = b
+            return b
+        end
+        local function PaintPQ()
+            local show = Mode() == "party" and IsInGroup and IsInGroup() and ns.PQ
+            pqRow:SetShown(show and true or false)
+            if not show then return end
+            ns.PQ.Build(true)
+            local who = CDB.pqWho or {}
+            local x = 0
+            for i, m in ipairs(ns.PQ.members) do
+                local b = PillFor(i)
+                b.name, b.n = m.name, (m.todo or 0) + (m.done or 0)
+                b.fs:SetText(m.name .. "  |cff9d8a80" .. b.n .. "|r")
+                local c = ns.PQ.ClassCol and ns.PQ.ClassCol(m.cls) or P.tx
+                b.dot:SetVertexColor(c[1], c[2], c[3], 1)
+                local on = who[m.name]
+                b.bg:SetColor(on and P.acc or CHIP)
+                b.fs:SetTextColor(on and P.ink[1] or P.tx[1], on and P.ink[2] or P.tx[2], on and P.ink[3] or P.tx[3], 1)
+                local w = (b.fs:GetStringWidth() or 40) + 30
+                b:SetWidth(w); b:ClearAllPoints(); b:SetPoint("LEFT", pqRow, "LEFT", x, 0); b:Show()
+                x = x + w + 6
+            end
+            for i = #ns.PQ.members + 1, #pqRow.pills do pqRow.pills[i]:Hide() end
+            pqRow.hint:ClearAllPoints(); pqRow.hint:SetPoint("LEFT", pqRow, "LEFT", x + 4, 0)
+            pqRow.hint:SetText(next(who) and "고른 사람과 같은 퀘만" or "얼굴을 누르면 그 사람과 같은 퀘만")
+        end
+        local paintSeg = board.PaintSeg
+        board.PaintSeg = function() paintSeg(); PaintPQ() end
+        local pev = CreateFrame("Frame", nil, board)
+        pev:RegisterEvent("GROUP_ROSTER_UPDATE")
+        pev:SetScript("OnEvent", function()
+            if CDB and CDB.pqWho and ns.PQ then   -- 나간 사람은 고른 목록에서 빼요
+                ns.PQ.Build(true)
+                local here = {}
+                for _, m in ipairs(ns.PQ.members) do here[m.name] = true end
+                for n in pairs(CDB.pqWho) do if not here[n] then CDB.pqWho[n] = nil end end
+            end
+            if board:IsShown() then PaintPQ() end
+            if CDB and CDB.mode == "party" then FillGuide(true) end
+        end)
         board.PaintSeg()
         board.seg = seg
         board.fFirst, board.fRec = seg, seg
