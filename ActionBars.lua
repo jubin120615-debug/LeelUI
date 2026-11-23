@@ -56,6 +56,16 @@ local function Collect()
         { key = "bl",    btns = Buttons("MultiBarBottomLeftButton", 12),  bar = G("MultiBarBottomLeft") },
         { key = "br",    btns = Buttons("MultiBarBottomRightButton", 12), bar = G("MultiBarBottomRight") },
     }
+    -- 모던: 오른쪽 7×3 칸에 쪽(I · II · III) · 2쪽 = 오른쪽 바 1 + 오른쪽 바 2 앞 9칸 · 3쪽 = 바 5 + 바 6 앞 9칸 (있으면)
+    local d = DB()
+    if d.style == "wing" and d.wskin == "tac" then
+        for pg, pair in ipairs({ { "MultiBarRightButton", "MultiBarLeftButton" }, { "MultiBar5Button", "MultiBar6Button" } }) do
+            local list = {}
+            for _, b in ipairs(Buttons(pair[1], 12)) do list[#list + 1] = b end
+            for i, b in ipairs(Buttons(pair[2], 12)) do if i <= 9 then list[#list + 1] = b end end
+            if #list > 0 then ROWS[#ROWS + 1] = { key = "pg" .. (pg + 1), btns = list, page = pg + 1 } end
+        end
+    end
 end
 
 local managed = {}   -- 버튼 → true (우리가 자리 잡는 버튼)
@@ -646,7 +656,7 @@ local function BuildWing()
     for _, e in ipairs({ "ACTIONBAR_PAGE_CHANGED", "UPDATE_BONUS_ACTIONBAR", "UPDATE_SHAPESHIFT_FORM", "PLAYER_ENTERING_WORLD" }) do
         pcall(pf.RegisterEvent, pf, e)
     end
-    pf:SetScript("OnEvent", function() C_Timer.After(0, WUpdatePage) end)
+    pf:SetScript("OnEvent", function() C_Timer.After(0, function() WUpdatePage(); if ns.ABarStancePaint then ns.ABarStancePaint() end end) end)
     -- 날개 2: 쿨은 칸 가운데 큰 숫자 (공통 재사용 1.5초 이하는 빼고)
     local cdt = CreateFrame("Frame")
     local acc = 0
@@ -794,6 +804,7 @@ local function WUpdateXP()
             T2.tip:ClearAllPoints(); T2.tip:SetPoint("CENTER", wing.big, "CENTER", math.cos(a) * (T2.ringR or 50), math.sin(a) * (T2.ringR or 50))
             T2.tip:Show(); T2.tipG:Show()
         else T2.tip:Hide(); T2.tipG:Hide() end
+        if ns.ABarRingApply then ns.ABarRingApply() end
     end
     local n = #dots
     for i, t in ipairs(dots) do
@@ -1008,15 +1019,8 @@ local function WSelfTarget(on)
     if InCombatLockdown() then pending = true return end
     if on and not wing.selfHP then
         wing.selfHP = WSelfBtn(wing.hp, -2, 20, 2, -2, "내 생명력")
-        wing.selfRing = WSelfBtn(wing.big, 0, 0, 0, 0, "나")
-        wing.selfRing.noEdge = true
-        -- 원은 둥근 빛으로
-        local g = wing.selfRing:CreateTexture(nil, "OVERLAY"); g:SetTexture(ns.MEDIA .. "ring"); g:SetAllPoints()
-        g:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.9); g:Hide()
-        wing.selfRing:HookScript("OnEnter", function() g:Show() end)
-        wing.selfRing:HookScript("OnLeave", function() g:Hide() end)
     end
-    if wing.selfHP then wing.selfHP:SetShown(on); wing.selfRing:SetShown(on) end
+    if wing.selfHP then wing.selfHP:SetShown(on) end
 end
 
 -- 들어오는 치유: 내 생명력 줄 끝에 민트로 이어서 + 숫자 (+350)
@@ -1210,6 +1214,453 @@ local function WPetRing(on)
     end
 end
 
+
+-- 변신 · 태세 (모던): 가운데 레벨 원 윗둘레에 작은 구슬 · 켜진 것은 분홍 빛 고리 · 나머지는 조금 어둡게
+local function WStancePaint()
+    if not wing then return end
+    local btns = Buttons("StanceButton", 10)
+    if #btns == 0 then btns = Buttons("ShapeshiftButton", 10) end
+    for i, b in ipairs(btns) do
+        if b.leelGlow then
+            local ok, _, active = pcall(GetShapeshiftFormInfo, i)
+            local on = wing.tac and ok and active and true or false
+            b.leelGlow:SetShown(on)
+            local ic = b.icon or b.Icon or _G[(b:GetName() or "") .. "Icon"]
+            if ic then
+                if wing.tac and not on then ic:SetVertexColor(0.55, 0.55, 0.6); pcall(ic.SetDesaturated, ic, true)
+                else ic:SetVertexColor(1, 1, 1); pcall(ic.SetDesaturated, ic, false) end
+            end
+        end
+    end
+end
+ns.ABarStancePaint = WStancePaint
+local function WStanceArc(btns)
+    local big = wing.big
+    local T2 = wing.tc
+    local shown = {}
+    for _, b in ipairs(btns) do
+        if Shown(b) then shown[#shown + 1] = b
+        else b:ClearAllPoints(); b:SetPoint("CENTER", big, "CENTER") end
+    end
+    -- 원 크기에 맞춰 작게 · 눈금 바깥으로 띄워서
+    local D = (wing.geo and wing.geo.D) or big:GetWidth() or 120
+    local sz = math.max(22, math.floor(D * 0.2 + 0.5))
+    local R = ((T2 and T2.tickR) or (D / 2 + 12)) + sz / 2 + 7
+    local step = (sz + 9) / R
+    local N = #shown
+    for k, b in ipairs(shown) do
+        b:SetSize(sz, sz); b:ClearAllPoints()
+        local a = math.pi / 2 + ((N + 1) / 2 - k) * step   -- 왼쪽부터 오른쪽으로
+        b:SetPoint("CENTER", big, "CENTER", R * math.cos(a), R * math.sin(a))
+        if not b.leelGlow then
+            -- 평소: 얇은 흰 테 · 켜짐: 분홍 테 + 옅은 빛
+            local e = b:CreateTexture(nil, "OVERLAY", nil, 6)
+            e:SetTexture(ns.MEDIA .. "ring"); e:SetVertexColor(1, 1, 1, 0.28)
+            e:SetPoint("TOPLEFT", -2, 2); e:SetPoint("BOTTOMRIGHT", 2, -2)
+            local g = b:CreateTexture(nil, "OVERLAY", nil, 7)
+            g:SetTexture(ns.MEDIA .. "ring"); g:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+            g:SetPoint("TOPLEFT", -3, 3); g:SetPoint("BOTTOMRIGHT", 3, -3); g:Hide()
+            local s2 = b:CreateTexture(nil, "BACKGROUND", nil, -8)
+            s2:SetTexture(ns.MEDIA .. "circle"); s2:SetBlendMode("ADD"); s2:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0.28)
+            s2:SetPoint("TOPLEFT", -5, 5); s2:SetPoint("BOTTOMRIGHT", 5, -5)
+            g:HookScript("OnShow", function() s2:Show(); e:Hide() end); g:HookScript("OnHide", function() s2:Hide(); e:Show() end); s2:Hide()
+            b.leelGlow = g
+        end
+    end
+    WStancePaint()
+end
+
+
+-- 전투 혜성 꼬리 (모던): 전투 중 가운데 원 둘레를 빛 두 개가 꼬리를 끌며 빙글빙글 (그림 파일 없이 점으로)
+local COMET_N = 26
+local function WCometSet(P, alpha)
+    for _, d in ipairs(P.dots) do d.t:SetAlpha(d.a * alpha) end
+end
+local function WPulsePlay(on)
+    local P = wing and wing.pulse
+    if not P then return end
+    P.want = (on and DB().cfx ~= false) and true or false
+    if on and not P.frame:IsShown() then P.fade = 0; P.frame:Show() end
+end
+local function WCombatPulse(on)
+    local big = wing.big
+    if on and not wing.pulse then
+        local P = {}
+        local f = CreateFrame("Frame", nil, big)
+        f:SetPoint("CENTER", big, "CENTER"); f:SetSize(10, 10)
+        f:SetFrameLevel(big:GetFrameLevel() + 3); f:Hide()
+        P.frame = f
+        P.dots = {}
+        for c = 1, 2 do
+            for k = 0, COMET_N do
+                local t = f:CreateTexture(nil, "OVERLAY", nil, k == 0 and 2 or 1)
+                t:SetTexture(ns.MEDIA .. "circle"); t:SetBlendMode("ADD")
+                local u = k / COMET_N
+                local sz = (k == 0) and 7 or math.max(1.5, 5.5 * (1 - u))
+                t:SetSize(sz, sz)
+                t:SetVertexColor(1, 0.86 - 0.35 * u, 0.8 - 0.45 * u, 1)
+                P.dots[#P.dots + 1] = { t = t, c = c, k = k, a = (k == 0) and 1 or (1 - u) * (1 - u) * 0.9 }
+            end
+            -- 머리 둘레 옅은 빛
+            local h = f:CreateTexture(nil, "OVERLAY", nil, 0)
+            h:SetTexture(ns.MEDIA .. "circle"); h:SetBlendMode("ADD"); h:SetSize(18, 18); h:SetVertexColor(1, 0.55, 0.5, 1)
+            P.dots[#P.dots + 1] = { t = h, c = c, k = 0, a = 0.35 }
+        end
+        P.ang, P.fade = 0, 0
+        f:SetScript("OnUpdate", function(_, el)
+            -- 켜질 때 · 꺼질 때 0.3초 동안 스르륵
+            P.fade = math.max(0, math.min(1, P.fade + (P.want and el or -el) / 0.3))
+            if P.fade <= 0 and not P.want then f:Hide(); return end
+            P.ang = (P.ang - el * 4.2) % (2 * math.pi)   -- 시계 방향 (약 1.5초에 한 바퀴)
+            local R = P.R or 60
+            for _, d in ipairs(P.dots) do
+                local a = P.ang + (d.c - 1) * math.pi + d.k * 0.035   -- 꼬리는 지나온 쪽
+                d.t:ClearAllPoints(); d.t:SetPoint("CENTER", big, "CENTER", R * math.cos(a), R * math.sin(a))
+            end
+            WCometSet(P, P.fade)
+        end)
+        local ev = CreateFrame("Frame")
+        ev:RegisterEvent("PLAYER_REGEN_DISABLED"); ev:RegisterEvent("PLAYER_REGEN_ENABLED"); ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+        ev:SetScript("OnEvent", function(_, e)
+            local fight = (e == "PLAYER_REGEN_DISABLED") or (e ~= "PLAYER_REGEN_ENABLED" and UnitAffectingCombat("player"))
+            WPulsePlay(P.on and fight and true or false)
+        end)
+        wing.pulse = P
+    end
+    local P = wing.pulse
+    if not P then return end
+    P.on = on
+    if on then
+        local T2 = wing.tc
+        P.R = (T2 and T2.ringR) or (big:GetWidth() / 2)   -- 경험치 고리 위를 달림
+        WPulsePlay(UnitAffectingCombat("player") and true or false)
+    else
+        WPulsePlay(false)
+    end
+end
+
+----------------------------------------------------------------------
+-- 가운데 원 (모던): 왼쪽 클릭 = 보기 바꾸기 (1 레벨 · 2 직업 자원 · 3 진영 문장) · 오른쪽 클릭 = 빠른 설정 카드
+----------------------------------------------------------------------
+do
+local MODE_NAME = { "레벨 · 경험치", "직업 자원", "진영 문장" }
+local SEGK = 7   -- 자원 칸 하나를 이루는 작은 조각 수
+local function RingMode() return DB().ringMode or 1 end
+
+local function ResBuild()
+    local big = wing.big
+    if wing.res then return wing.res end
+    local P = {}
+    -- 안쪽 고리 (기력 · 분노 · 마나): 반쪽 고리 두 장을 반쪽 창 안에서 돌림
+    local g = {}
+    g.R = CreateFrame("Frame", nil, big); g.L = CreateFrame("Frame", nil, big)
+    for _, f in ipairs({ g.R, g.L }) do f:SetClipsChildren(true); f:SetFrameLevel(big:GetFrameLevel() + 2) end
+    g.tR = g.R:CreateTexture(nil, "ARTWORK"); g.tR:SetTexture(ns.MEDIA .. "ab_tac_halfL")
+    g.tL = g.L:CreateTexture(nil, "ARTWORK"); g.tL:SetTexture(ns.MEDIA .. "ab_tac_halfR")
+    g.track = big:CreateTexture(nil, "ARTWORK", nil, 1); g.track:SetTexture(ns.MEDIA .. "ab_tac_ring"); g.track:SetVertexColor(1, 1, 1, 0.08)
+    function g:Place(sz)
+        self.R:ClearAllPoints(); self.R:SetPoint("TOPLEFT", big, "CENTER", 0, sz / 2); self.R:SetSize(sz / 2 + 2, sz)
+        self.L:ClearAllPoints(); self.L:SetPoint("TOPRIGHT", big, "CENTER", 0, sz / 2); self.L:SetSize(sz / 2 + 2, sz)
+        for _, t in ipairs({ self.tR, self.tL, self.track }) do t:ClearAllPoints(); t:SetSize(sz, sz); t:SetPoint("CENTER", big, "CENTER") end
+    end
+    function g:Color(r, gg, b) self.tR:SetVertexColor(r, gg, b, 1); self.tL:SetVertexColor(r, gg, b, 1) end
+    function g:Set(f)
+        f = math.max(0, math.min(1, f or 0))
+        self.tR:SetRotation(-math.min(f, 0.5) * 2 * math.pi); self.R:SetShown(f > 0)
+        self.tL:SetRotation(-math.max(0, f - 0.5) * 2 * math.pi); self.L:SetShown(f > 0.5)
+    end
+    function g:SetShown(v) self.R:SetShown(v); self.L:SetShown(v); self.track:SetShown(v) end
+    P.inner = g
+    -- 바깥 칸 (연계 점수): 칸 5개 × 작은 조각
+    P.seg = {}
+    for i = 1, 5 * SEGK do
+        local t = big:CreateTexture(nil, "OVERLAY", nil, 1); t:SetTexture(ns.WHITE or "Interface\\Buttons\\WHITE8x8"); P.seg[i] = t
+    end
+    local over = CreateFrame("Frame", nil, big); over:SetAllPoints(); over:SetFrameLevel(big:GetFrameLevel() + 5)
+    P.cap = ns.Font(over, 10, { 1, 0.85, 0.55 }, "OVERLAY")
+    P.num = ns.Font(over, 30, { 1, 1, 1 }, "OVERLAY")
+    P.sub = ns.Font(over, 10, { 1, 0.92, 0.7 }, "OVERLAY")
+    -- 진영 문장
+    P.facFill = big:CreateTexture(nil, "ARTWORK", nil, 3); P.facFill:SetTexture(ns.MEDIA .. "circle")
+    P.facLogo = big:CreateTexture(nil, "ARTWORK", nil, 4)
+    P.badge = CreateFrame("Frame", nil, over)
+    P.badgeBg = P.badge:CreateTexture(nil, "ARTWORK"); P.badgeBg:SetTexture(ns.MEDIA .. "circle"); P.badgeBg:SetAllPoints(); P.badgeBg:SetVertexColor(0.08, 0.06, 0.05, 1)
+    P.badgeRim = P.badge:CreateTexture(nil, "BORDER"); P.badgeRim:SetTexture(ns.MEDIA .. "circle"); P.badgeRim:SetPoint("TOPLEFT", -2, 2); P.badgeRim:SetPoint("BOTTOMRIGHT", 2, -2); P.badgeRim:SetVertexColor(0.93, 0.75, 0.3, 1)
+    P.badgeT = P.badge:CreateFontString(nil, "OVERLAY"); P.badgeT:SetFont(ns.NUM or ns.FONT, 11, ""); P.badgeT:SetPoint("CENTER", 0, 0); P.badgeT:SetTextColor(1, 0.85, 0.4)
+    wing.res = P
+    return P
+end
+
+local function SegPlace(P, n, R, th)
+    local big = wing.big
+    local gap = 0.09
+    local per = (2 * math.pi) / math.max(1, n)
+    for i = 1, 5 do
+        for k = 1, SEGK do
+            local t = P.seg[(i - 1) * SEGK + k]
+            if i <= n then
+                local a = math.pi / 2 - ((i - 1) * per + gap / 2 + (k - 0.5) / SEGK * (per - gap))
+                local w = 2 * math.pi * R / n / SEGK + 1
+                t:ClearAllPoints(); t:SetSize(w, th)
+                t:SetPoint("CENTER", big, "CENTER", R * math.cos(a), R * math.sin(a))
+                t:SetRotation(a - math.pi / 2)
+                t:Show()
+            else t:Hide() end
+        end
+    end
+end
+
+local PCOLS = { [0] = { 0.42, 0.6, 1 }, [1] = { 1, 0.32, 0.27 }, [2] = { 1, 0.6, 0.3 }, [3] = { 1, 0.86, 0.35 } }
+local PNAME = { [0] = "마나", [1] = "분노", [2] = "집중", [3] = "기력" }
+local function ResUpdate()
+    local P = wing and wing.res
+    if not P or RingMode() ~= 2 or not wing.tac then return end
+    local pt = UnitPowerType("player") or 0
+    if issecretvalue and issecretvalue(pt) then pt = 0 end
+    local col = PCOLS[pt] or PCOLS[0]
+    local okP, p, pm = pcall(function() return UnitPower("player", pt), UnitPowerMax("player", pt) end)
+    local f = 0
+    if okP then local ok2, v = pcall(function() return (pm and pm > 0) and p / pm or 0 end); if ok2 and type(v) == "number" and not (issecretvalue and issecretvalue(v)) then f = v end end
+    P.inner:Color(col[1], col[2], col[3]); P.inner:Set(f)
+    -- 연계 점수 (도적 · 표범 드루이드)
+    local cp, cmax = nil, 0
+    local okC = pcall(function()
+        cmax = UnitPowerMax("player", 4) or 0
+        cp = UnitPower("player", 4)
+    end)
+    if not okC or not cmax or cmax == 0 then
+        local ok3, v = pcall(GetComboPoints, "player", "target"); if ok3 and v then cp = v; cmax = 5 end
+    end
+    local cls = select(2, UnitClass("player"))
+    local useSeg = (cls == "ROGUE" or (cls == "DRUID" and pt == 3)) and cmax and cmax > 0
+    local th = math.max(4, (wing.tc and wing.tc.ds or 5) + 2)
+    if useSeg then
+        SegPlace(P, math.min(5, cmax), wing.tc and wing.tc.ringR or 60, th)
+        local n = 0
+        pcall(function() n = cp or 0 end)
+        for i = 1, 5 * SEGK do
+            local seg = math.ceil(i / SEGK)
+            local on = false
+            pcall(function() on = seg <= n end)
+            P.seg[i]:SetVertexColor(on and 1 or 1, on and 0.81 or 1, on and 0.29 or 1, on and 1 or 0.14)
+        end
+        P.cap:SetText("연계 점수")
+        if not pcall(P.num.SetFormattedText, P.num, "%d", cp or 0) then P.num:SetText("") end
+        if not pcall(P.sub.SetFormattedText, P.sub, "%s %d", PNAME[pt] or "", p or 0) then P.sub:SetText(PNAME[pt] or "") end
+    else
+        for _, t in ipairs(P.seg) do t:Hide() end
+        P.cap:SetText(PNAME[pt] or "자원")
+        if not pcall(P.num.SetFormattedText, P.num, "%d", p or 0) then P.num:SetText("") end
+        if not pcall(P.sub.SetFormattedText, P.sub, "%d%%", math.floor(f * 100 + 0.5)) then P.sub:SetText("") end
+    end
+    P.cap:SetTextColor(math.min(1, col[1] + 0.2), math.min(1, col[2] + 0.2), math.min(1, col[3] + 0.2))
+end
+
+local function FacUpdate()
+    local P = wing and wing.res
+    if not P then return end
+    local ok, hk = pcall(GetPVPSessionStats)
+    if not ok or type(hk) ~= "number" then ok, hk = pcall(GetPVPLifetimeStats) end
+    P.badgeT:SetText((ok and type(hk) == "number") and hk or 0)
+end
+
+function ns.ABarRingApply()
+    if not (wing and wing.tac and wing.tc) then return end
+    local T2, P = wing.tc, wing.res
+    local m = RingMode()
+    local one, two, three = m == 1, m == 2, m == 3
+    for _, k in ipairs({ "cap", "lv", "pc", "tip", "tipG" }) do if not one then T2[k]:Hide() end end
+    if not one then T2.cd:Hide(); T2.restCD:Hide() end
+    if one then T2.cd:Show(); T2.restCD:Show(); T2.cap:Show(); T2.lv:Show(); T2.pc:Show() end
+    T2.emb:SetShown(one or two)
+    if wing.xpt then wing.xpt:SetShown(one) end
+    if P then
+        P.inner:SetShown(two)
+        if not two then for _, t in ipairs(P.seg) do t:Hide() end end
+        P.cap:SetShown(two); P.num:SetShown(two); P.sub:SetShown(two)
+        P.facFill:SetShown(three); P.facLogo:SetShown(three); P.badge:SetShown(three)
+        if two then ResUpdate() end
+        if three then FacUpdate() end
+    end
+end
+
+local function RingLayout()
+    local P = ResBuild()
+    local big, T2 = wing.big, wing.tc
+    local D = (wing.geo and wing.geo.D) or big:GetWidth() or 120
+    local rx = T2 and T2.ringR or D / 2
+    -- 안쪽 고리: 경험치 고리보다 조금 안
+    P.inner:Place(((rx - (T2 and T2.ds or 5) * 2 - 3) / 0.9) * 2)
+    pcall(P.num.SetFont, P.num, ns.NUM or ns.FONT, math.max(18, math.floor(D * 0.33)), "")
+    pcall(P.cap.SetFont, P.cap, ns.FONT, math.max(8, math.floor(D * 0.085)), "")
+    pcall(P.sub.SetFont, P.sub, ns.FONT, math.max(8, math.floor(D * 0.085)), "")
+    P.cap:ClearAllPoints(); P.cap:SetPoint("CENTER", big, "CENTER", 0, D * 0.2)
+    P.num:ClearAllPoints(); P.num:SetPoint("CENTER", big, "CENTER", 0, -D * 0.02)
+    P.sub:ClearAllPoints(); P.sub:SetPoint("CENTER", big, "CENTER", 0, -D * 0.25)
+    local fac = wing.fac
+    local horde = fac and fac.logo and fac.logo:find("Horde")
+    P.facFill:ClearAllPoints(); P.facFill:SetPoint("CENTER", big, "CENTER"); P.facFill:SetSize(D * 0.9, D * 0.9)
+    if horde then P.facFill:SetVertexColor(0.5, 0.05, 0.05, 0.95) else P.facFill:SetVertexColor(0.06, 0.18, 0.46, 0.95) end
+    P.facLogo:SetTexture(fac and fac.logo or (ns.MEDIA .. "icon")); P.facLogo:SetVertexColor(1, 1, 1, 1)
+    P.facLogo:ClearAllPoints(); P.facLogo:SetPoint("CENTER", big, "CENTER", 0, D * 0.03); P.facLogo:SetSize(D * 0.66, D * 0.66)
+    local bsz = math.max(16, math.floor(D * 0.2))
+    P.badge:ClearAllPoints(); P.badge:SetSize(bsz, bsz); P.badge:SetPoint("CENTER", big, "BOTTOM", 0, D * 0.06)
+    pcall(P.badgeT.SetFont, P.badgeT, ns.NUM or ns.FONT, math.max(9, math.floor(bsz * 0.55)), "")
+end
+
+-- 빠른 설정 카드
+local card
+local function Slider(parent, y, label, mn, mx, step, get, set, live)
+    local lab = ns.Font(parent, 11.5, { 0.86, 0.84, 0.86 }); lab:SetPoint("TOPLEFT", 12, y)
+    lab:SetText(label)
+    local val = ns.Font(parent, 10.5, { 1, 0.6, 0.55 }); val:SetPoint("TOPRIGHT", -126, y - 1)
+    local tr = CreateFrame("Frame", nil, parent); tr:SetSize(104, 14); tr:SetPoint("TOPRIGHT", -12, y + 1)
+    local bg = tr:CreateTexture(nil, "BACKGROUND"); bg:SetColorTexture(0.2, 0.2, 0.22, 1); bg:SetHeight(4); bg:SetPoint("LEFT"); bg:SetPoint("RIGHT")
+    local fill = tr:CreateTexture(nil, "ARTWORK"); fill:SetColorTexture(1, 0.35, 0.29, 1); fill:SetHeight(4); fill:SetPoint("LEFT")
+    local th = tr:CreateTexture(nil, "OVERLAY"); th:SetColorTexture(1, 1, 1, 1); th:SetSize(10, 12)
+    local function Paint(v)
+        local f = (v - mn) / (mx - mn)
+        fill:SetWidth(math.max(1, 104 * f)); th:ClearAllPoints(); th:SetPoint("CENTER", tr, "LEFT", 104 * f, 0)
+        val:SetText(v)
+    end
+    local function FromCursor()
+        local x = GetCursorPosition() / tr:GetEffectiveScale()
+        local f = math.max(0, math.min(1, (x - tr:GetLeft()) / 104))
+        local v = math.floor((mn + f * (mx - mn)) / step + 0.5) * step
+        return v
+    end
+    tr:EnableMouse(true)
+    tr:SetScript("OnMouseDown", function(self)
+        self.drag = true
+        self:SetScript("OnUpdate", function() local v = FromCursor(); Paint(v); if live then set(v, false) end end)
+    end)
+    tr:SetScript("OnMouseUp", function(self)
+        self.drag = false; self:SetScript("OnUpdate", nil)
+        local v = FromCursor(); Paint(v); set(v, true)
+    end)
+    tr:EnableMouseWheel(true)
+    tr:SetScript("OnMouseWheel", function(_, d) local v = math.max(mn, math.min(mx, get() + d * step)); Paint(v); set(v, true) end)
+    return { Paint = function() Paint(get()) end }
+end
+local function Toggle(parent, y, label, get, set)
+    local lab = ns.Font(parent, 11.5, { 0.86, 0.84, 0.86 }); lab:SetPoint("TOPLEFT", 12, y); lab:SetText(label)
+    local b = CreateFrame("Button", nil, parent); b:SetSize(30, 15); b:SetPoint("TOPRIGHT", -12, y + 1)
+    local bg = b:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints()
+    local kn = b:CreateTexture(nil, "ARTWORK"); kn:SetSize(11, 11); kn:SetColorTexture(1, 1, 1, 1)
+    local function Paint()
+        local on = get()
+        bg:SetColorTexture(on and 1 or 0.27, on and 0.35 or 0.26, on and 0.29 or 0.28, 1)
+        kn:ClearAllPoints(); kn:SetPoint(on and "RIGHT" or "LEFT", on and -2 or 2, 0)
+    end
+    b:SetScript("OnClick", function() set(not get()); Paint() end)
+    return { Paint = Paint }
+end
+local function Relayout()
+    if InCombatLockdown() then P("전투가 끝나면 바뀌어요."); pending = true return end
+    if ns.ABarRelayout then ns.ABarRelayout() end
+end
+local function BuildCard()
+    card = CreateFrame("Frame", "LeelUI_RingCard", UIParent)
+    card:SetSize(262, 232); card:SetFrameStrata("DIALOG"); card:EnableMouse(true); card:Hide()
+    local edge = card:CreateTexture(nil, "BACKGROUND"); edge:SetAllPoints(); edge:SetColorTexture(1, 0.35, 0.29, 0.75)
+    local bg = card:CreateTexture(nil, "BORDER"); bg:SetPoint("TOPLEFT", 1, -1); bg:SetPoint("BOTTOMRIGHT", -1, 1); bg:SetColorTexture(0.047, 0.043, 0.06, 0.96)
+    local t = ns.Font(card, 13.5, { 1, 1, 1 }); t:SetPoint("TOPLEFT", 12, -10); t:SetText("빠른 설정")
+    card.items = {}
+    local y = -34
+    local function add(it) card.items[#card.items + 1] = it end
+    add(Slider(card, y, "버프 크기", 50, 200, 5, function() return DB().buffPct or 100 end, function(v, done) DB().buffPct = v; if done then Relayout() end end)); y = y - 24
+    add(Slider(card, y, "디버프 크기", 50, 200, 5, function() return DB().debuffPct or 100 end, function(v, done) DB().debuffPct = v; if done then Relayout() end end)); y = y - 24
+    add(Slider(card, y, "HP · MP 줄 두께", 6, 28, 1, function() return DB().tacBH or 14 end, function(v, done) DB().tacBH = v; if done then Relayout() end end)); y = y - 26
+    add(Toggle(card, y, "전투 효과 (혜성)", function() return DB().cfx ~= false end, function(v)
+        DB().cfx = v and true or false
+        local Pp = wing and wing.pulse
+        if Pp then Pp.want = (v and Pp.on and UnitAffectingCombat("player")) and true or false; if Pp.want then Pp.frame:Show() end end
+    end)); y = y - 24
+    add(Toggle(card, y, "오른쪽 쪽 탭", function() return DB().rtabs ~= false end, function(v) DB().rtabs = v and true or false; Relayout() end)); y = y - 26
+    -- 원 보기
+    local ml = ns.Font(card, 11.5, { 0.86, 0.84, 0.86 }); ml:SetPoint("TOPLEFT", 12, y); ml:SetText("원 보기")
+    local segs = {}
+    for i, n in ipairs({ "레벨", "자원", "진영" }) do
+        local b = CreateFrame("Button", nil, card); b:SetSize(40, 17)
+        b:SetPoint("TOPRIGHT", -12 - (3 - i) * 43, y + 2)
+        b.bg = b:CreateTexture(nil, "BACKGROUND"); b.bg:SetAllPoints()
+        b.t = ns.Font(b, 10.5); b.t:SetPoint("CENTER"); b.t:SetText(n)
+        b:SetScript("OnClick", function() DB().ringMode = i; ns.ABarRingApply(); card.Paint() end)
+        segs[i] = b
+    end
+    y = y - 28
+    local hub = CreateFrame("Button", nil, card); hub:SetSize(238, 18); hub:SetPoint("TOPLEFT", 12, y)
+    local ht = ns.Font(hub, 10.5, { 0.6, 0.58, 0.62 }); ht:SetPoint("LEFT"); ht:SetText("더 많은 설정 → 르엘 허브")
+    hub:SetScript("OnClick", function() card:Hide(); if ns.ToggleHub then ns:ToggleHub("LeelUI_Mode") end end)
+    hub:SetScript("OnEnter", function() ht:SetTextColor(1, 0.6, 0.55) end); hub:SetScript("OnLeave", function() ht:SetTextColor(0.6, 0.58, 0.62) end)
+    function card.Paint()
+        for _, it in ipairs(card.items) do it.Paint() end
+        for i, b in ipairs(segs) do
+            local on = RingMode() == i
+            b.bg:SetColorTexture(on and 1 or 0.15, on and 0.35 or 0.14, on and 0.29 or 0.17, 1)
+            b.t:SetTextColor(on and 1 or 0.75, on and 1 or 0.73, on and 1 or 0.75)
+        end
+    end
+    tinsert(UISpecialFrames, "LeelUI_RingCard")
+    card:SetScript("OnShow", function(self) self.Paint(); pcall(self.RegisterEvent, self, "GLOBAL_MOUSE_DOWN") end)
+    card:SetScript("OnHide", function(self) pcall(self.UnregisterEvent, self, "GLOBAL_MOUSE_DOWN") end)
+    card:SetScript("OnEvent", function(self)
+        if not self:IsMouseOver() and not (wing.ringBtn and wing.ringBtn:IsMouseOver()) then self:Hide() end
+    end)
+end
+
+function ns.ABarRingSetup(on)
+    if not wing then return end
+    if on then
+        RingLayout()
+        if not wing.ringBtn then
+            local b = CreateFrame("Button", nil, wing.big)
+            b:SetAllPoints(wing.big); b:SetFrameLevel(wing.big:GetFrameLevel() + 7)
+            b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            local hl = b:CreateTexture(nil, "OVERLAY"); hl:SetTexture(ns.MEDIA .. "ring"); hl:SetAllPoints(); hl:SetVertexColor(1, 0.45, 0.38, 0.85); hl:Hide()
+            b:SetScript("OnClick", function(_, btn)
+                if btn == "RightButton" then
+                    if not card then BuildCard() end
+                    if card:IsShown() then card:Hide() else
+                        card:ClearAllPoints(); card:SetPoint("BOTTOMLEFT", wing.big, "TOPRIGHT", 6, -24); card:Show()
+                    end
+                else
+                    DB().ringMode = RingMode() % 3 + 1
+                    ns.ABarRingApply()
+                    if card and card:IsShown() then card.Paint() end
+                    GameTooltip:Hide()
+                end
+            end)
+            b:SetScript("OnEnter", function(self)
+                hl:Show()
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine("가운데 원 · " .. MODE_NAME[RingMode()], 1, 0.6, 0.55)
+                GameTooltip:AddLine("왼쪽 클릭 = 보기 바꾸기 (레벨 → 자원 → 진영)", 1, 1, 1)
+                GameTooltip:AddLine("오른쪽 클릭 = 빠른 설정", 0.85, 0.8, 0.8)
+                if RingMode() == 3 then GameTooltip:AddLine("아래 숫자 = 오늘 명예 처치", 0.93, 0.75, 0.3) end
+                GameTooltip:Show()
+            end)
+            b:SetScript("OnLeave", function() hl:Hide(); GameTooltip:Hide() end)
+            wing.ringBtn = b
+            local ev = CreateFrame("Frame")
+            for _, e in ipairs({ "UNIT_POWER_UPDATE", "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" }) do pcall(ev.RegisterUnitEvent, ev, e, "player") end
+            for _, e in ipairs({ "PLAYER_TARGET_CHANGED", "UPDATE_SHAPESHIFT_FORM", "PLAYER_PVP_KILLS_CHANGED", "PLAYER_ENTERING_WORLD" }) do pcall(ev.RegisterEvent, ev, e) end
+            ev:SetScript("OnEvent", function(_, e)
+                if not (wing and wing.tac) then return end
+                if RingMode() == 2 then ResUpdate() elseif RingMode() == 3 then FacUpdate() end
+            end)
+        end
+        wing.ringBtn:Show()
+        ns.ABarRingApply()
+    else
+        if wing.ringBtn then wing.ringBtn:Hide() end
+        if card then card:Hide() end
+        local Pr = wing.res
+        if Pr then Pr.inner:SetShown(false); for _, t in ipairs(Pr.seg) do t:Hide() end; Pr.cap:Hide(); Pr.num:Hide(); Pr.sub:Hide(); Pr.facFill:Hide(); Pr.facLogo:Hide(); Pr.badge:Hide() end
+    end
+end
+end
+
 local function WTacCenter(on, fac, D)
     local big = wing.big
     if on and not wing.tc then
@@ -1277,6 +1728,7 @@ local function WTacCenter(on, fac, D)
     local tsz = rt / 0.86 * 2
     T2.ticks:ClearAllPoints(); T2.ticks:SetSize(tsz, tsz); T2.ticks:SetPoint("CENTER", big, "CENTER"); T2.ticks:SetVertexColor(1, 1, 1, 0.55)
     rt = tsz / 2
+    T2.tickR = rt
     T2.tipG:SetSize(ds * 3, ds * 3); T2.tipG:SetVertexColor(acc[1], acc[2], acc[3], 0.35); T2.tipG:ClearAllPoints(); T2.tipG:SetPoint("CENTER", T2.tip, "CENTER")
     T2.tip:SetSize(ds, ds)
     pcall(T2.lv.SetFont, T2.lv, ns.NUM or ns.FONT, math.max(16, math.floor(D * 0.32)), "")
@@ -1397,8 +1849,11 @@ local function WTacAuras(on, sz)
         -- 처음 만들 때 바 자리가 덜 잡혀 있으면 엉뚱한 데 붙을 수 있어서 매번 다시 붙임
         pcall(function()
             local au = wing.au
-            if au.d then au.d:ClearAllPoints(); au.d:SetPoint("BOTTOMRIGHT", wing.mp, "TOPRIGHT", 0, 20) end
-            if au.b then au.b:ClearAllPoints(); au.b:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", (wing.wenN or 0) * (sz + 5), 20) end
+            local bs, dsc = (DB().buffPct or 100) / 100, (DB().debuffPct or 100) / 100
+            wing.bsc = bs
+            if au.d then au.d:SetScale(dsc); au.d:ClearAllPoints(); au.d:SetPoint("BOTTOMRIGHT", wing.mp, "TOPRIGHT", 0, 20 / dsc) end
+            if au.b then au.b:SetScale(bs); au.b:ClearAllPoints(); au.b:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", (wing.wenN or 0) * (sz + 5), 20 / bs) end
+            if wing.wen then for _, f in ipairs(wing.wen) do f:SetScale(bs) end end
         end)
         for _, c in pairs(wing.au) do c:SetShown(on) end
     end
@@ -1445,7 +1900,7 @@ local function WTacAuras(on, sz)
                     local left = (type(d[2]) == "number" and not (issecretvalue and issecretvalue(d[2]))) and d[2] / 1000 or nil
                     f.t:SetText(left and (left >= 60 and (math.ceil(left / 60) .. "m") or math.ceil(left)) or "")
                     f.n:SetText((type(d[3]) == "number" and d[3] > 1) and d[3] or "")
-                    f:ClearAllPoints(); f:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", (i - 1) * (wing.wenSz + 5), 20)
+                    f:ClearAllPoints(); f:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", (i - 1) * (wing.wenSz + 5), 20 / (wing.bsc or 1))
                     f:Show()
                 else f:Hide() end
             end
@@ -1453,7 +1908,7 @@ local function WTacAuras(on, sz)
             local n = #list
             if wing.au and wing.au.b and wing.wenN ~= n then
                 wing.wenN = n
-                pcall(function() wing.au.b:ClearAllPoints(); wing.au.b:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", n * (wing.wenSz + 5), 20) end)
+                pcall(function() wing.au.b:ClearAllPoints(); wing.au.b:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", n * (wing.wenSz + 5), 20 / (wing.bsc or 1)) end)
             end
         end)
     end
@@ -1485,6 +1940,7 @@ local function WSkin()
     wing.real = real; wing.la = la; wing.tac = tac
     local g = wing.geo
     local fac = FAC[(UnitFactionGroup and UnitFactionGroup("player")) or ""]
+    wing.fac = fac
     WSkinBar(wing.hp, real, true, g.BH, metal)
     WSkinBar(wing.mp, real, false, g.BH, metal)
     WLABar(wing.hp, la, true, g.u or 1, g.BH)
@@ -1524,11 +1980,13 @@ local function WSkin()
     WLA(la, fac, g.u or 1)
     WLASlots(la)
     WTacCenter(tac, fac, D)
+    if ns.ABarRingSetup then ns.ABarRingSetup(tac) end
     WTacSlots(tac)
     WTacAuras(tac and DB().tacAuras ~= false, g.asz or 24)
     WSelfTarget(tac)
     WHealBar(tac)
     WPetRing(tac)
+    WCombatPulse(tac)
     if tac then wing.bun:Hide(); wing.badge:Hide() else wing.bun:Show(); wing.badge:Show() end
     local b = wing.badge
     if real then
@@ -1593,6 +2051,102 @@ local function WSkin()
 end
 ns.ABarSkin = function() if wing and wing.geo and not InCombatLockdown() then ns.ABarRelayout() end end
 
+-- 오른쪽 쪽 넘기기 (모던): 칸 묶음 왼쪽에 로마 숫자 탭 I · II · III · 전투 중에도 (보안 처리)
+local ROMAN = { "I", "II", "III" }
+local function WRightPaint()
+    local RP = wing and wing.rp
+    if not RP then return end
+    local cur = DB().rpage or 1
+    local acc = TacAcc and TacAcc() or C.acc
+    for p, t in pairs(RP.tabs) do
+        local on = p == cur
+        -- 켜짐: 어두운 바탕에 진영 색 테 + 옅은 색 물 + 밝은 글자 + 칸 쪽 굵은 막대 · 꺼짐: 흐린 테 · 회색 글자
+        t.bg:SetColorTexture(0.045, 0.04, 0.05, on and 0.95 or 0.8)
+        t.tint:SetColorTexture(acc[1], acc[2], acc[3], on and 0.22 or 0)
+        t.edge:SetColorTexture(on and acc[1] or 1, on and acc[2] or 1, on and acc[3] or 1, on and 0.95 or 0.12)
+        t.fs:SetTextColor(on and math.min(1, acc[1] + 0.25) or 0.5, on and math.min(1, acc[2] + 0.35) or 0.48, on and math.min(1, acc[3] + 0.35) or 0.5)
+        t.bar:SetShown(on)
+    end
+end
+local function WRightPages(p1, rx, ry, RS, RG, RC, RR)
+    local pages = { p1 }
+    for _, row in ipairs(ROWS) do if row.page then pages[row.page] = row.btns end end
+    wing.rp = wing.rp or { fr = {}, tabs = {} }
+    local RP = wing.rp
+    if DB().rtabs == false then pages = { p1 } end   -- 빠른 설정: 쪽 탭 끔 = I쪽만
+    local cur = DB().rpage or 1
+    if not pages[cur] then cur = 1 end
+    local count = 0
+    for p = 1, 3 do
+        local btns = pages[p]
+        if btns then
+            count = count + 1
+            local fr = RP.fr[p]
+            if not fr then fr = CreateFrame("Frame", nil, holder); fr:SetAllPoints(holder); RP.fr[p] = fr end
+            for i, b in ipairs(btns) do
+                if b:GetParent() ~= fr then b.leelOrigParent = b.leelOrigParent or b:GetParent(); b:SetParent(fr) end
+                if p > 1 then
+                    if i <= RC * RR then
+                        local c, r = (i - 1) % RC, math.floor((i - 1) / RC)
+                        b:ClearAllPoints(); b:SetSize(RS, RS)
+                        b:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", rx + c * (RS + RG), ry + (RR - 1 - r) * (RS + RG))
+                        b:SetAlpha(1); pcall(b.EnableMouse, b, true)
+                    else WGhost(b) end
+                end
+            end
+            fr:SetShown(p == cur)
+        elseif RP.fr[p] then RP.fr[p]:Hide()
+        end
+    end
+    -- 탭 (쪽이 2개 이상일 때만)
+    local TW = math.max(16, math.floor(RS * 0.5 + 0.5))
+    for p = 1, 3 do
+        local t = RP.tabs[p]
+        if pages[p] and count > 1 then
+            if not t then
+                t = CreateFrame("Button", nil, holder, "SecureHandlerClickTemplate")
+                t:RegisterForClicks("AnyUp")
+                t:SetAttribute("pg", p)
+                for q = 1, 3 do if RP.fr[q] then t:SetFrameRef("p" .. q, RP.fr[q]) end end
+                t:SetAttribute("_onclick", [[
+                    local me = self:GetAttribute("pg")
+                    for i = 1, 3 do
+                        local f = self:GetFrameRef("p" .. i)
+                        if f then if i == me then f:Show() else f:Hide() end end
+                    end
+                ]])
+                t.edge = t:CreateTexture(nil, "BACKGROUND"); t.edge:SetAllPoints()
+                t.bg = t:CreateTexture(nil, "BORDER"); t.bg:SetPoint("TOPLEFT", 1, -1); t.bg:SetPoint("BOTTOMRIGHT", -1, 1)
+                t.fs = t:CreateFontString(nil, "OVERLAY"); t.fs:SetFont(ns.FONT, 12, ""); t.fs:SetPoint("CENTER", 0, 0); t.fs:SetText(ROMAN[p])
+                t.tint = t:CreateTexture(nil, "ARTWORK"); t.tint:SetPoint("TOPLEFT", 1, -1); t.tint:SetPoint("BOTTOMRIGHT", -1, 1)
+                t.bar = t:CreateTexture(nil, "OVERLAY"); t.bar:SetWidth(3)
+                t.bar:SetPoint("TOPRIGHT", t, "TOPRIGHT", 0, 0); t.bar:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", 0, 0)
+                t:HookScript("OnClick", function() DB().rpage = p; WRightPaint() end)
+                t:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:AddLine(ROMAN[p] .. " 쪽", 1, 1, 1)
+                    GameTooltip:AddLine(p == 1 and "왼쪽 아래 바 + 오른쪽 아래 바" or (p == 2 and "오른쪽 바 1 + 오른쪽 바 2" or "바 5 + 바 6"), 0.8, 0.8, 0.8)
+                    GameTooltip:Show()
+                end)
+                t:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                RP.tabs[p] = t
+            end
+            local acc = TacAcc and TacAcc() or C.acc
+            t.bar:SetColorTexture(acc[1], acc[2], acc[3], 1)
+            pcall(t.fs.SetFont, t.fs, ns.FONT, math.max(10, math.floor(TW * 0.62)), "")
+            -- 탭 p = 칸 p번째 줄과 위아래를 딱 맞춰요 (그 줄 첫 칸에 붙임)
+            local row1 = p1[(p - 1) * RC + 1]
+            t:ClearAllPoints(); t:SetWidth(TW)
+            if row1 then
+                t:SetPoint("TOPRIGHT", row1, "TOPLEFT", -4, 0); t:SetPoint("BOTTOMRIGHT", row1, "BOTTOMLEFT", -4, 0)
+            else
+                t:SetHeight(RS); t:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", rx - TW - 4, ry + (RR - p) * (RS + RG))
+            end
+            t:Show()
+        elseif t then t:Hide() end
+    end
+    WRightPaint()
+end
+
 local function LayoutWing()
     if not wing then BuildWing() end
     local S = math.floor(SIZE * 1.2 + 0.5)   -- 날개: 왼쪽 전투 칸은 조금 크게
@@ -1631,6 +2185,7 @@ local function LayoutWing()
     local rw = RC * RS + (RC - 1) * RG
     local rh = RR * RS + (RR - 1) * RG
     local rx = PWL + CW + math.floor((PWR - rw) / 2)
+    if DB().wskin == "tac" then rx = PWL + CW + PWR - WPAD - rw end   -- 모던: 마나 줄 오른쪽 끝에 맞춤 (왼쪽은 쪽 탭 자리)
     local ry = base + WPAD + math.floor(((2 * S + WG) - rh) / 2)
     for i, b in ipairs(right) do
         local c, r = (i - 1) % RC, math.floor((i - 1) / RC)
@@ -1638,6 +2193,7 @@ local function LayoutWing()
         b:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", rx + c * (RS + RG), ry + (RR - 1 - r) * (RS + RG))
         b:SetAlpha(1); pcall(b.EnableMouse, b, true)
     end
+    if DB().wskin == "tac" then WRightPages(right, rx, ry, RS, RG, RC, RR) end
     -- 체력 · 마나 줄
     local by = base + PH + 6
     local goldSkin = DB().wskin ~= "pink"
@@ -1700,9 +2256,12 @@ local function LayoutWing()
     local pet = Buttons("PetActionButton", 10)
     local top = by + BH + 3 + 10
     if tacSkin then top = by + BH + 20 + math.floor(S * 0.44 + 0.5) + 10 end
-    if (GetNumShapeshiftForms and GetNumShapeshiftForms() or 0) > 0 and PlaceSmall(stance, top) then
+    if tacSkin then
+        if (GetNumShapeshiftForms and GetNumShapeshiftForms() or 0) > 0 then WStanceArc(stance) end
+    elseif (GetNumShapeshiftForms and GetNumShapeshiftForms() or 0) > 0 and PlaceSmall(stance, top) then
         top = top + PET + GAP + 8
     end
+    if not tacSkin then WStancePaint() end
     if tacSkin then WPetArc()   -- 모던: 펫 기술은 펫 원 부채꼴로
     elseif PetHasActionBar and PetHasActionBar() then PlaceSmall(pet, top) end
     holder:SetSize(W, top + PET)
@@ -1728,7 +2287,7 @@ local function Layout()
     if DB().style == "wing" then LayoutWing(); placing = false; return end
     local y = 14  -- 경험치 바 자리
     for _, row in ipairs(ROWS) do
-        if #row.btns > 0 and (not row.bar or row.bar:IsShown()) then
+        if #row.btns > 0 and not row.page and (not row.bar or row.bar:IsShown()) then
             PlaceRow(row.btns, y, SIZE)
             y = y + SIZE + GAP + 4
         end
@@ -2257,6 +2816,7 @@ local function Hooks()
         C_Timer.After(0, Layout)
     end
     for _, n in ipairs({ "MainMenuBar", "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight",
+                         "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6",
                          "StanceBar", "PetActionBar" }) do
         local f = G(n)
         if f then
@@ -3013,6 +3573,8 @@ local CMD_PREFIX = {
     { "^MultiBarBottomRightButton(%d+)$", "MULTIACTIONBAR2BUTTON" },
     { "^MultiBarRightButton(%d+)$", "MULTIACTIONBAR3BUTTON" },
     { "^MultiBarLeftButton(%d+)$", "MULTIACTIONBAR4BUTTON" },
+    { "^MultiBar5Button(%d+)$", "MULTIACTIONBAR5BUTTON" },
+    { "^MultiBar6Button(%d+)$", "MULTIACTIONBAR6BUTTON" },
     { "^StanceButton(%d+)$", "SHAPESHIFTBUTTON" },
     { "^ShapeshiftButton(%d+)$", "SHAPESHIFTBUTTON" },
     { "^PetActionButton(%d+)$", "BONUSACTIONBUTTON" },
