@@ -330,8 +330,8 @@ do
             end)
             r:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(pt[2], 1, 0.84, 0.88)
-                GameTooltip:AddLine(type(_G[pt[1]]) == "table" and pt[4] or "이 컴퓨터엔 설치 안 돼 있어요", 0.84, 0.63, 0.61)
+                ns.TSet(GameTooltip, pt[2], 1, 0.84, 0.88)
+                ns.TAdd(GameTooltip, type(_G[pt[1]]) == "table" and pt[4] or "이 컴퓨터엔 설치 안 돼 있어요", 0.84, 0.63, 0.61)
                 GameTooltip:Show()
             end)
             r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -433,7 +433,7 @@ do
             local n, all = PickN()
             -- 1. 담을 것 고르기
             c1.title:SetText("담을 것 고르기")
-            c1.body:SetText(("%d개 중 |cfff2b3c2%d개|r"):format(all, n))
+            c1.body:SetText(ns.L("%d개 중 |cfff2b3c2%d개|r"):format(all, n))
             for i, r in ipairs(c1.ck) do
                 local key = PARTS[i][1]
                 local has = type(_G[key]) == "table"

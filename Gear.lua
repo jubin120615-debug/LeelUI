@@ -150,6 +150,13 @@ local STAT_NAME = {
     DPS = "무기 공격력", RDPS = "원거리 무기 공격력",
     EXP = "숙련", HASTE = "가속", BLOCKVAL = "방패 막기 수치",
 }
+local STAT_EN = {
+    STR = "Strength", AGI = "Agility", STA = "Stamina", INT = "Intellect", SPI = "Spirit", ARMOR = "Armor",
+    AP = "Attack Power", RAP = "Ranged AP", SP = "Spell Power", HEAL = "Healing", MP5 = "MP5",
+    CRIT = "Crit", HIT = "Hit", DEF = "Defense", DODGE = "Dodge", PARRY = "Parry", BLOCK = "Block",
+    DPS = "Weapon DPS", RDPS = "Ranged DPS", EXP = "Expertise", HASTE = "Haste", BLOCKVAL = "Block Value",
+}
+ns.GearStatNameEn = STAT_EN
 -- 토끼가 쓰는 쉬운 말
 local STAT_EASY = {
     STR = "힘", AGI = "민첩", STA = "체력", INT = "마나", SPI = "마나 회복", ARMOR = "방어도",
@@ -186,6 +193,35 @@ local function Num(s) local t = (s or ""):gsub(",", ""); return tonumber(t) end
 local function ParseEquipLine(t)
     local n
     -- 등급 글줄 (와우 포에버): "치명타 적중도가 14만큼", "적중도가 10만큼", "가속도가", "숙련도가"
+    -- 영어 게임 글줄
+    n = t:match("critical strike rating by ([%d,]+)")
+    if n then return "CRIT", Num(n) end
+    n = t:match("haste rating by ([%d,]+)")
+    if n then return "HASTE", Num(n) end
+    n = t:match("expertise rating by ([%d,]+)")
+    if n then return "EXP", Num(n) end
+    n = t:match("hit rating by ([%d,]+)")
+    if n then return "HIT", Num(n) end
+    n = t:match("defense rating by ([%d,]+)")
+    if n then return "DEF", Num(n) end
+    n = t:match("damage and healing done by magical spells and effects by up to ([%d,]+)") or t:match("spell power by ([%d,]+)")
+    if n then return "SP", Num(n) end
+    n = t:match("healing done by up to ([%d,]+)") or t:match("healing done by spells and effects by up to ([%d,]+)")
+    if n then return "HEAL", Num(n) end
+    n = t:match("([%d,]+) mana per 5 sec")
+    if n then return "MP5", Num(n) end
+    n = t:match("ranged attack power by ([%d,]+)")
+    if n then return "RAP", Num(n) end
+    n = t:match("attack power by ([%d,]+)")
+    if n then return "AP", Num(n) end
+    n = t:match("chance to get a critical strike by ([%d%.]+)%%") or t:match("critical strike with spells by ([%d%.]+)%%")
+    if n then return "CRIT", Num(n) * 14 end
+    n = t:match("chance to hit by ([%d%.]+)%%") or t:match("hit with spells by ([%d%.]+)%%")
+    if n then return "HIT", Num(n) * 10 end
+    n = t:match("chance to dodge an attack by ([%d%.]+)%%")
+    if n then return "DODGE", Num(n) * 12 end
+    n = t:match("chance to parry an attack by ([%d%.]+)%%")
+    if n then return "PARRY", Num(n) * 12 end
     n = t:match("치명타 적중도가 ([%d,]+)") or t:match("치명타 등급이 ([%d,]+)")
     if n then return "CRIT", Num(n) end
     n = t:match("가속도가 ([%d,]+)") or t:match("가속 등급이 ([%d,]+)")
@@ -431,7 +467,7 @@ local function MakeBubble()
     local bun = f:CreateTexture(nil, "ARTWORK")
     bun:SetTexture((ns.MEDIA or "Interface\\AddOns\\LeelUI\\media\\") .. "bunny")
     bun:SetSize(24, 24); bun:SetPoint("LEFT", f, "LEFT", 5, 0)
-    f.fs = f:CreateFontString(nil, "OVERLAY")
+    f.fs = ns.LWrap(f:CreateFontString(nil, "OVERLAY"))
     if ns.Font then
         f.fs:Hide(); f.fs = ns.Font(f, 12, { 0.227, 0.133, 0.157 })
     else
@@ -465,7 +501,51 @@ local function Names(list, n)
     return table.concat(out, " · ")
 end
 
+-- 영어 말 (영어 모드)
+local function EnNames(list, n)
+    local out = {}
+    for i = 1, math.min(n or 2, #list) do out[#out + 1] = STAT_EN[list[i].k] or list[i].k end
+    return table.concat(out, " · ")
+end
+local function TalkEn(res, role, slotName, oneLine)
+    local RED, GRN, GRY = "|cffc0392b", "|cff2e8b3a", "|cff9a7f84"
+    local G = res.gains and #res.gains > 0 and EnNames(res.gains, 2) or nil
+    local L = res.losses and #res.losses > 0 and EnNames(res.losses, 2) or nil
+    slotName = ns.L(slotName); role = ns.L(role or "")
+    local lines = {}
+    local function add(t) lines[#lines + 1] = t end
+    if res.kind == "twohand" then
+        add("You're holding a two-hand weapon,"); add(GRY .. "so an off-hand alone is hard to compare.|r")
+        return lines
+    elseif res.kind == "cant" then
+        local r = res.reason or ""
+        local lv = r:match("(%d+)")
+        if lv and (r:find("레벨") or r:lower():find("level")) then add("Can't wear it yet. Equip it at level " .. lv .. "!")
+        else add("Can't wear it: " .. RED .. r .. "|r"); add("Sell it to a vendor!") end
+        return lines
+    elseif res.kind == "empty" then
+        add("Your " .. slotName:lower() .. " slot is empty. Equip it now!")
+    elseif res.kind == "up" then
+        add(G and ("Oh! More " .. GRN .. G .. "|r, it's better.") or ("Oh! Better than your current " .. slotName:lower() .. "."))
+        add(L and ("A little less " .. RED .. L .. "|r, but equip it!") or "Equip it now!")
+    elseif res.kind == "down" then
+        add(L and ("Less " .. RED .. L .. "|r, not worth it.") or "Your current one is better.")
+        add(G and ("More " .. GRN .. G .. "|r, but keep your current one.") or "Keep your current one.")
+    else
+        if G and L then add("More " .. GRN .. G .. "|r, less " .. RED .. L .. "|r.") end
+        add("About the same. Pick what you like.")
+    end
+    if res.unusedList and #res.unusedList > 0 then
+        add(GRY .. EnNames(res.unusedList, 2) .. " barely matter for " .. role .. ".|r")
+    end
+    if res.effect then add(GRY .. "Check special effects yourself.|r") end
+    return lines
+end
+
 local function Say(res)
+    if ns.EnOn and ns.EnOn() then
+        return table.concat(TalkEn(res, ROLE_NAME[Role()] or "", res.slot and SLOT_NAME[res.slot] or "gear"), "\n")
+    end
     local slotName = res.slot and SLOT_NAME[res.slot] or "지금 장비"
     local fx = res.effect and "\n특수 효과는 직접 봐 줘" or ""
     local roleName = ROLE_NAME[Role()] or ""
@@ -476,10 +556,10 @@ local function Say(res)
     if res.kind == "cant" then
         local r = res.reason or ""
         local lv = r:match("(%d+)")
-        if lv and r:find("레벨") then return ("아직 못 껴. %s레벨이 되면 끼자!"):format(lv) end
-        return ("이건 |cffc0392b%s|r 때문에 못 껴.\n상점에 팔자!"):format(r)
+        if lv and r:find("레벨") then return ns.L("아직 못 껴. %s레벨이 되면 끼자!"):format(lv) end
+        return ns.L("이건 |cffc0392b%s|r 때문에 못 껴.\n상점에 팔자!"):format(r)
     elseif res.kind == "empty" then
-        return ("%s 칸이 비어 있어. 바로 끼자!"):format(slotName) .. fx
+        return ns.L("%s 칸이 비어 있어. 바로 끼자!"):format(slotName) .. fx
     elseif res.kind == "twohand" then
         return "지금 양손 무기를 들고 있어서\n보조 손만으로는 비교가 어려워"
     end
@@ -580,6 +660,7 @@ end
 
 -- 상황별 토끼 말 (첫 줄은 굵은 결론)
 local function Talk(res)
+    if ns.EnOn and ns.EnOn() then return TalkEn(res, ROLE_NAME[Role()] or "", res.slot and SLOT_NAME[res.slot] or "gear") end
     local role = ROLE_NAME[Role()] or ""
     local slotName = res.slot and SLOT_NAME[res.slot] or "장비"
     local G = res.gains and #res.gains > 0 and Names(res.gains, 2) or nil
@@ -620,7 +701,7 @@ end
 -- 툴팁 바로 위에 토끼 + 말풍선 (툴팁 안에는 아무것도 안 넣어요)
 local function AddLines(tt, res)
     local lines
-    if res.kind == "twohand" then
+    if res.kind == "twohand" and not (ns.EnOn and ns.EnOn()) then
         lines = { "지금 양손 무기를 들고 있어서", GRY .. "보조 손만으로는 비교가 어려워.|r" }
     else
         lines = Talk(res)
@@ -670,7 +751,7 @@ ev:SetScript("OnEvent", function() wipe(cache); wCache = nil end)
 local ROLE_IN = { ["탱커"] = "tank", ["탱"] = "tank", ["근접"] = "melee", ["원거리"] = "ranged", ["주문"] = "caster",
     ["딜러"] = "caster", ["힐러"] = "healer", ["힐"] = "healer", tank = "tank", melee = "melee", ranged = "ranged",
     caster = "caster", healer = "healer" }
-local function P(m) print("|cfff2b3c2[르엘 장비]|r " .. m) end
+local function P(m) print(ns.L("|cfff2b3c2[르엘 장비]|r ") .. ns.L(m)) end
 function ns.GearSetRole(r)
     DB().role = r; wipe(cache); wCache = nil
     P("이제 " .. (r and ROLE_NAME[r] or ("자동 (" .. (ROLE_NAME[GuessRole()] or "") .. ")")) .. " 기준으로 비교해요.")
@@ -680,16 +761,16 @@ SLASH_LEELGEAR2 = "/lgear"
 SlashCmdList.LEELGEAR = function(msg)
     msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
     local cmd, arg = msg:match("^(%S*)%s*(.-)$")
-    if cmd == "역할" then
-        if arg == "자동" or arg == "" then ns.GearSetRole(nil)
+    if cmd == "역할" or cmd == "role" then
+        if arg == "자동" or arg == "auto" or arg == "" then ns.GearSetRole(nil)
         elseif ROLE_IN[arg] then ns.GearSetRole(ROLE_IN[arg])
         else P("예: /장비 역할 힐러  (탱커 · 근접 · 원거리 · 주문 · 힐러 · 자동)") end
-    elseif cmd == "끄기" then DB().on = false; P("장비 비교를 껐어요.")
-    elseif cmd == "켜기" then DB().on = true; P("장비 비교를 켰어요.")
+    elseif cmd == "끄기" or cmd == "off" then DB().on = false; P("장비 비교를 껐어요.")
+    elseif cmd == "켜기" or cmd == "on" then DB().on = true; P("장비 비교를 켰어요.")
     else
         P("지금: " .. (DB().on and "켜짐" or "꺼짐") .. " · " .. (ROLE_NAME[Role()] or "") .. " 기준" .. (DB().role and "" or " (자동)"))
-        print("  /장비 역할 힐러  — 탱커 · 근접 · 원거리 · 주문 · 힐러 · 자동")
-        print("  /장비 끄기 · 켜기")
+        print(ns.L("  /장비 역할 힐러  — 탱커 · 근접 · 원거리 · 주문 · 힐러 · 자동"))
+        print(ns.L("  /장비 끄기 · 켜기"))
     end
 end
 
@@ -737,8 +818,8 @@ do
         end)
         b:SetScript("OnEnter", function(s)
             GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(HelmShown() == false and "모자 보이기" or "모자 숨기기", 1, 0.84, 0.88)
-            GameTooltip:AddLine("누르면 머리 장비를 캐릭터에서 보이게 / 안 보이게", 0.75, 0.68, 0.66)
+            ns.TAdd(GameTooltip, HelmShown() == false and "모자 보이기" or "모자 숨기기", 1, 0.84, 0.88)
+            ns.TAdd(GameTooltip, "누르면 머리 장비를 캐릭터에서 보이게 / 안 보이게", 0.75, 0.68, 0.66)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -757,9 +838,9 @@ do
     end)
     SLASH_LEELHELM1 = "/모자"
     SlashCmdList.LEELHELM = function()
-        if not ShowHelm then print("|cfff2b3c2[르엘]|r 이 게임 판에는 모자 숨기기 기능이 없어요") return end
+        if not ShowHelm then print(ns.L("|cfff2b3c2[르엘]|r 이 게임 판에는 모자 숨기기 기능이 없어요")) return end
         local on = HelmShown(); if on == nil then on = true end
         pcall(ShowHelm, not on)
-        print("|cfff2b3c2[르엘]|r 모자 " .. (on and "숨겼어요" or "보이게 했어요"))
+        print(ns.L("|cfff2b3c2[르엘]|r 모자 " .. (on and "숨겼어요" or "보이게 했어요")))
     end
 end

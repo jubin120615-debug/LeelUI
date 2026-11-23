@@ -30,7 +30,13 @@ local function DB()
 end
 ns.ABarDB = DB
 
-local function P(msg) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[르엘 액션바]|r " .. msg) end
+local function P(msg)
+    local en = ns.EnOn and ns.EnOn()
+    DEFAULT_CHAT_FRAME:AddMessage((en and "|cfff2b3c2[Leel Bars]|r " or "|cfff2b3c2[르엘 액션바]|r ") .. (ns.L and ns.L(msg) or msg))
+end
+-- 툴팁 글: 영어면 번역
+local function TT(t, ...) GameTooltip:AddLine(ns.L and ns.L(t) or t, ...) end
+local function TTS(t, ...) GameTooltip:SetText(ns.L and ns.L(t) or t, ...) end
 
 local hider = CreateFrame("Frame")
 hider:Hide()
@@ -624,10 +630,10 @@ local function BuildWing()
         hl:SetVertexColor(1, 1, 1, 0.15); hl:SetBlendMode("ADD")
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine(pair[2], C.acc[1], C.acc[2], C.acc[3])
-            GameTooltip:AddLine("왼쪽 10칸만 바뀌어요 · 오른쪽은 그대로", 1, 1, 1)
-            if DB().pgKeys == "zx" then GameTooltip:AddLine("키: " .. pair[3], 0.85, 0.78, 0.76)
-            else GameTooltip:AddLine("허브에서 Z · X 키로 넘기게 할 수 있어요", 0.85, 0.78, 0.76) end
+            TT(pair[2], C.acc[1], C.acc[2], C.acc[3])
+            TT("왼쪽 10칸만 바뀌어요 · 오른쪽은 그대로", 1, 1, 1)
+            if DB().pgKeys == "zx" then TT("키: " .. pair[3], 0.85, 0.78, 0.76)
+            else TT("허브에서 Z · X 키로 넘기게 할 수 있어요", 0.85, 0.78, 0.76) end
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1008,8 +1014,8 @@ local function WSelfBtn(anchor, l, t, r, b, tipText)
     btn:HookScript("OnEnter", function(self)
         if not self.noEdge then for _, e in ipairs(hl) do e:Show() end end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(tipText, C.acc[1], C.acc[2], C.acc[3])
-        GameTooltip:AddLine("왼쪽 클릭 = 나를 대상 · 오른쪽 클릭 = 내 메뉴", 1, 1, 1)
+        TT(tipText, C.acc[1], C.acc[2], C.acc[3])
+        TT("왼쪽 클릭 = 나를 대상 · 오른쪽 클릭 = 내 메뉴", 1, 1, 1)
         GameTooltip:Show()
     end)
     btn:HookScript("OnLeave", function() for _, e in ipairs(hl) do e:Hide() end; GameTooltip:Hide() end)
@@ -1181,9 +1187,9 @@ local function WPetRing(on)
             hl:Show()
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             local okN, nm = pcall(UnitName, "pet")
-            GameTooltip:AddLine(okN and nm or "펫", C.acc[1], C.acc[2], C.acc[3])
-            GameTooltip:AddLine("왼쪽 클릭 = 펫 기술 펼치기 · 접기", 1, 1, 1)
-            GameTooltip:AddLine("오른쪽 클릭 = 펫 대상", 0.85, 0.8, 0.8)
+            TT(okN and nm or "펫", C.acc[1], C.acc[2], C.acc[3])
+            TT("왼쪽 클릭 = 펫 기술 펼치기 · 접기", 1, 1, 1)
+            TT("오른쪽 클릭 = 펫 대상", 0.85, 0.8, 0.8)
             GameTooltip:Show()
         end)
         b:HookScript("OnLeave", function() hl:Hide(); GameTooltip:Hide() end)
@@ -1634,10 +1640,10 @@ function ns.ABarRingSetup(on)
             b:SetScript("OnEnter", function(self)
                 hl:Show()
                 GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                GameTooltip:AddLine("가운데 원 · " .. MODE_NAME[RingMode()], 1, 0.6, 0.55)
-                GameTooltip:AddLine("왼쪽 클릭 = 보기 바꾸기 (레벨 → 자원 → 진영)", 1, 1, 1)
-                GameTooltip:AddLine("오른쪽 클릭 = 빠른 설정", 0.85, 0.8, 0.8)
-                if RingMode() == 3 then GameTooltip:AddLine("아래 숫자 = 오늘 명예 처치", 0.93, 0.75, 0.3) end
+                TT("가운데 원 · " .. MODE_NAME[RingMode()], 1, 0.6, 0.55)
+                TT("왼쪽 클릭 = 보기 바꾸기 (레벨 → 자원 → 진영)", 1, 1, 1)
+                TT("오른쪽 클릭 = 빠른 설정", 0.85, 0.8, 0.8)
+                if RingMode() == 3 then TT("아래 숫자 = 오늘 명예 처치", 0.93, 0.75, 0.3) end
                 GameTooltip:Show()
             end)
             b:SetScript("OnLeave", function() hl:Hide(); GameTooltip:Hide() end)
@@ -1806,6 +1812,35 @@ local function TacAuraInit(debuff, sz)
     end
 end
 
+-- 버프 · 디버프 줄 자리 잡이: 이동 모드에서 따로 끌어 옮겨요 (저장 = bufPos / debPos · 없으면 생명력 · 마나 줄 위)
+ns.ABarAncPlace = function()
+    local A = ns.ABarAnc
+    if not (A and wing and wing.hp and wing.mp) then return end
+    local sz = wing.wenSz or 24
+    local f = (wing.hp:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
+    for k, a in pairs(A) do
+        local sc = k == "b" and (wing.bsc or 1) or (wing.dsc or 1)
+        local n = math.max(3, math.floor(((k == "b" and wing.hp or wing.mp):GetWidth() or 200) / (sz + 5)))
+        a:SetSize(math.max(40, n * (sz + 5) * sc * f), math.max(12, sz * sc * f))
+        local pos = DB()[k == "b" and "bufPos" or "debPos"]
+        a:ClearAllPoints()
+        if pos then a:SetPoint("CENTER", UIParent, "BOTTOMLEFT", pos[3], pos[4])
+        elseif k == "b" then a:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", 0, 20)
+        else a:SetPoint("BOTTOMRIGHT", wing.mp, "TOPRIGHT", 0, 20) end
+    end
+end
+ns.ABarAncGet = function()
+    if ns.ABarAnc then return ns.ABarAnc end
+    local A = {}
+    for _, k in ipairs({ "b", "d" }) do
+        local a = CreateFrame("Frame", nil, UIParent)
+        a:SetMovable(true); a:SetClampedToScreen(true); a:SetSize(120, 24)
+        A[k] = a
+    end
+    ns.ABarAnc = A
+    return A
+end
+
 local function WTacAuras(on, sz)
     if on and not wing.au then
         local au = {}
@@ -1850,9 +1885,11 @@ local function WTacAuras(on, sz)
         pcall(function()
             local au = wing.au
             local bs, dsc = (DB().buffPct or 100) / 100, (DB().debuffPct or 100) / 100
-            wing.bsc = bs
-            if au.d then au.d:SetScale(dsc); au.d:ClearAllPoints(); au.d:SetPoint("BOTTOMRIGHT", wing.mp, "TOPRIGHT", 0, 20 / dsc) end
-            if au.b then au.b:SetScale(bs); au.b:ClearAllPoints(); au.b:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", (wing.wenN or 0) * (sz + 5), 20 / bs) end
+            wing.bsc, wing.dsc, wing.wenSz = bs, dsc, sz
+            local A = ns.ABarAncGet(); ns.ABarAncPlace()
+            for _, a in pairs(A) do a:SetShown(on and true or false) end
+            if au.d then au.d:SetScale(dsc); au.d:ClearAllPoints(); au.d:SetPoint("BOTTOMRIGHT", A.d, "BOTTOMRIGHT", 0, 0) end
+            if au.b then au.b:SetScale(bs); au.b:ClearAllPoints(); au.b:SetPoint("BOTTOMLEFT", A.b, "BOTTOMLEFT", (wing.wenN or 0) * (sz + 5), 0) end
             if wing.wen then for _, f in ipairs(wing.wen) do f:SetScale(bs) end end
         end)
         for _, c in pairs(wing.au) do c:SetShown(on) end
@@ -1900,7 +1937,7 @@ local function WTacAuras(on, sz)
                     local left = (type(d[2]) == "number" and not (issecretvalue and issecretvalue(d[2]))) and d[2] / 1000 or nil
                     f.t:SetText(left and (left >= 60 and (math.ceil(left / 60) .. "m") or math.ceil(left)) or "")
                     f.n:SetText((type(d[3]) == "number" and d[3] > 1) and d[3] or "")
-                    f:ClearAllPoints(); f:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", (i - 1) * (wing.wenSz + 5), 20 / (wing.bsc or 1))
+                    f:ClearAllPoints(); f:SetPoint("BOTTOMLEFT", ns.ABarAncGet().b, "BOTTOMLEFT", (i - 1) * (wing.wenSz + 5), 0)
                     f:Show()
                 else f:Hide() end
             end
@@ -1908,7 +1945,7 @@ local function WTacAuras(on, sz)
             local n = #list
             if wing.au and wing.au.b and wing.wenN ~= n then
                 wing.wenN = n
-                pcall(function() wing.au.b:ClearAllPoints(); wing.au.b:SetPoint("BOTTOMLEFT", wing.hp, "TOPLEFT", n * (wing.wenSz + 5), 20 / (wing.bsc or 1)) end)
+                pcall(function() wing.au.b:ClearAllPoints(); wing.au.b:SetPoint("BOTTOMLEFT", ns.ABarAncGet().b, "BOTTOMLEFT", n * (wing.wenSz + 5), 0) end)
             end
         end)
     end
@@ -2123,8 +2160,8 @@ local function WRightPages(p1, rx, ry, RS, RG, RC, RR)
                 t.bar:SetPoint("TOPRIGHT", t, "TOPRIGHT", 0, 0); t.bar:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", 0, 0)
                 t:HookScript("OnClick", function() DB().rpage = p; WRightPaint() end)
                 t:SetScript("OnEnter", function(self)
-                    GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:AddLine(ROMAN[p] .. " 쪽", 1, 1, 1)
-                    GameTooltip:AddLine(p == 1 and "왼쪽 아래 바 + 오른쪽 아래 바" or (p == 2 and "오른쪽 바 1 + 오른쪽 바 2" or "바 5 + 바 6"), 0.8, 0.8, 0.8)
+                    GameTooltip:SetOwner(self, "ANCHOR_LEFT"); TT(ROMAN[p] .. " 쪽", 1, 1, 1)
+                    TT(p == 1 and "왼쪽 아래 바 + 오른쪽 아래 바" or (p == 2 and "오른쪽 바 1 + 오른쪽 바 2" or "바 5 + 바 6"), 0.8, 0.8, 0.8)
                     GameTooltip:Show()
                 end)
                 t:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2350,10 +2387,10 @@ local function BuildXP()
     xp:SetScript("OnEnter", function(self)
         local cur, max = UnitXP("player"), UnitXPMax("player")
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("경험치", C.acc[1], C.acc[2], C.acc[3])
-        GameTooltip:AddLine(string.format("%s / %s  (%.1f%%)", BreakUpLargeNumbers(cur), BreakUpLargeNumbers(max), max > 0 and cur / max * 100 or 0), 1, 1, 1)
+        TT("경험치", C.acc[1], C.acc[2], C.acc[3])
+        TT(string.format("%s / %s  (%.1f%%)", BreakUpLargeNumbers(cur), BreakUpLargeNumbers(max), max > 0 and cur / max * 100 or 0), 1, 1, 1)
         local ex = GetXPExhaustion and GetXPExhaustion()
-        if ex and ex > 0 then GameTooltip:AddLine("휴식 +" .. BreakUpLargeNumbers(ex), 0.73, 0.55, 1) end
+        if ex and ex > 0 then TT("휴식 +" .. BreakUpLargeNumbers(ex), 0.73, 0.55, 1) end
         GameTooltip:Show()
     end)
     xp:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2448,9 +2485,9 @@ local function BuildLauncher()
     ]])
     launcher:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("르엘 메뉴", C.acc[1], C.acc[2], C.acc[3])
-        GameTooltip:AddLine("누르면 메뉴가 펼쳐져요", 1, 1, 1)
-        GameTooltip:AddLine("자리 · 크기는 이동 모드에서", 0.85, 0.78, 0.76)
+        TT("르엘 메뉴", C.acc[1], C.acc[2], C.acc[3])
+        TT("누르면 메뉴가 펼쳐져요", 1, 1, 1)
+        TT("자리 · 크기는 이동 모드에서", 0.85, 0.78, 0.76)
         GameTooltip:Show()
     end)
     launcher:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2732,9 +2769,9 @@ local function BuildMenuRow()
         end
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            GameTooltip:AddLine(it.label, 1, 1, 1)
-            if it.key ~= "" then GameTooltip:AddLine("단축키: " .. it.key, 0.85, 0.78, 0.76) end
-            GameTooltip:AddLine(inPop and "오른쪽 클릭: 위 줄에 늘 보이게" or "오른쪽 클릭: 더보기 판으로 넣기", 0.7, 0.66, 0.64)
+            TT(it.label, 1, 1, 1)
+            if it.key ~= "" then TT("단축키: " .. it.key, 0.85, 0.78, 0.76) end
+            TT(inPop and "오른쪽 클릭: 위 줄에 늘 보이게" or "오른쪽 클릭: 더보기 판으로 넣기", 0.7, 0.66, 0.64)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2770,7 +2807,7 @@ local function BuildMenuRow()
     local mh = more:CreateTexture(nil, "HIGHLIGHT"); mh:SetAllPoints(); mh:SetColorTexture(1, 1, 1, 0.12)
     more:SetFrameRef("pop", pop)
     more:SetAttribute("_onclick", [[ local f = self:GetFrameRef("pop"); if f:IsShown() then f:Hide() else f:Show() end ]])
-    more:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:AddLine("더보기", 1, 1, 1); GameTooltip:AddLine("덜 쓰는 메뉴", 0.85, 0.78, 0.76); GameTooltip:Show() end)
+    more:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); TT("더보기", 1, 1, 1); TT("덜 쓰는 메뉴", 0.85, 0.78, 0.76); GameTooltip:Show() end)
     more:SetScript("OnLeave", function() GameTooltip:Hide() end)
     function menuRow.Lay()
         if InCombatLockdown() then return end
@@ -2862,6 +2899,11 @@ local function Start()
     ApplyLauncher()
     Mover(holder, "액션바", "point", function() Apply(); FanPlace() end)
     Mover(launchHolder, "토끼 메뉴", "lpoint", ApplyLauncher)
+    do
+        local A = ns.ABarAncGet()
+        Mover(A.b, "버프 줄", "bufPos", function() ns.ABarAncPlace() end)
+        Mover(A.d, "디버프 줄", "debPos", function() ns.ABarAncPlace() end)
+    end
     ns.ABarMenuStyle()
     Hooks()
     Layout()
@@ -3066,6 +3108,7 @@ local function ExBuild()
     ex.thr:SetPoint("RIGHT", top.kind, "LEFT", -10, 0)
     ex.thr.bg = ex.thr:CreateTexture(nil, "BACKGROUND"); ex.thr.bg:SetAllPoints()
     ex.thr.fs = ex.thr:CreateFontString(nil, "OVERLAY"); ex.thr.fs:SetFont(ns.FONT, 10, "OUTLINE"); ex.thr.fs:SetPoint("CENTER")
+    if ns.LWrap then ns.LWrap(ex.thr.fs) end
     -- 직업 아이콘 (레벨 원 왼쪽 아래)
     ex.cls = top:CreateTexture(nil, "OVERLAY"); ex.cls:SetSize(16, 16); ex.cls:SetPoint("BOTTOMLEFT", top, "TOPLEFT", 0, -46)
     ex.cls:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
@@ -3398,11 +3441,11 @@ if ns.ApplyHudParts then hooksecurefunc(ns, "ApplyHudParts", function() if LAOn(
 local SKIN_CATS = {
     ab = { "style", "wskin", "scale", "mscale", "point", "lpoint", "tacBH", "menuStyle", "mrpoint", "mrPins", "mrScale" },
     tg = { "laScale", "laPos" },
-    bf = { "tacAuras" },
+    bf = { "tacAuras", "bufPos", "debPos" },
     la = { "laTop" },
     pg = { "pgKeys" },
 }
-local SKIN_ALL = { "on", "tacBH", "menuStyle", "mrpoint", "mrPins", "mrScale", "style", "wskin", "scale", "mscale", "point", "lpoint", "laScale", "laPos", "tacAuras", "laTop", "pgKeys" }
+local SKIN_ALL = { "on", "tacBH", "menuStyle", "mrpoint", "mrPins", "mrScale", "style", "wskin", "scale", "mscale", "point", "lpoint", "laScale", "laPos", "tacAuras", "bufPos", "debPos", "laTop", "pgKeys" }
 local SKIN_BUILTIN = {
     { key = "tac", label = "각진 전술형" }, { key = "la", label = "로아풍 강철" },
     { key = "gold", label = "실사 금테" }, { key = "iron", label = "실사 쇠테" }, { key = "pink", label = "분홍 (예전)" },
@@ -3615,8 +3658,8 @@ local function Paint()
     binder.t:SetText(cmd and KeysText(cmd) or "")
     if GameTooltip:IsOwned(binder) or true then
         GameTooltip:SetOwner(binder, "ANCHOR_TOP")
-        GameTooltip:SetText("단축키: " .. (cmd and KeysText(cmd) or "-"), 1, 1, 1)
-        GameTooltip:AddLine("키를 누르면 바뀌어요 · Delete = 지우기 · Esc = 끝", 0.8, 0.8, 0.8)
+        TTS("단축키: " .. (cmd and KeysText(cmd) or "-"), 1, 1, 1)
+        TT("키를 누르면 바뀌어요 · Delete = 지우기 · Esc = 끝", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end
 end
@@ -3791,6 +3834,7 @@ function UIMode.ResetPos()
     d.point = { "CENTER", "BOTTOM", 0, 168 }   -- 액션바: 아래 가운데 (크기 130%)
     d.scale = 130
     d.laPos = { R(W / 2 - 5), R(H - 74) }
+    d.bufPos, d.debPos = nil, nil
     d.mrScale = 145
     d.mrpoint = { "CENTER", "BOTTOMLEFT", R((W - 203) / 1.45), R((H - 59) / 1.45) }
     ns.db.mmPos = { 138, R(H - 141) }
@@ -3928,6 +3972,10 @@ if ns.HUB_MODULES then
         title = "UI 모드", sub = "기본 · 모던", icon = "hb_c_view",
         desc = "화면 전체 모습을 한 번에 바꿔요. 부분마다 따로 골라 섞을 수도 있어요 (섞으면 '사용자 지정').\n액션바 · 미니맵을 바꾸면 다시 불러오기가 필요해요.",
         items = {
+            { t = "seg", label = "Language / 언어", hint = "게임 언어를 따라가요 · 바꾸면 다시 불러오기",
+              options = { { "자동 / Auto", "auto" }, { "한국어", "ko" }, { "English", "en" } },
+              get = function() return ns.db.lang or "auto" end,
+              set = function(v) if (ns.db.lang or "auto") ~= v then ns.db.lang = v; Reload() end end },
             { t = "seg", label = "UI 모드", hint = "고르면 아래가 한꺼번에 바뀌어요",
               options = { { "기본", "base" }, { "모던", "tac" }, { "사용자 지정", "custom" } },
               get = function() return UIMode.Get() end,
@@ -3973,4 +4021,14 @@ wev:SetScript("OnEvent", function()
     end)
 end)
 
+end
+
+-- 버프 · 디버프 줄 크기 · 자리 (허브 · 이동 모드 크기 줄 · 빠른 설정이 같이 써요)
+function ns.ABarAuraSize(k, v)
+    DB()[k == "b" and "buffPct" or "debuffPct"] = v
+    if ns.ABarSkin then ns.ABarSkin() end
+end
+function ns.ABarAuraReset()
+    DB().bufPos, DB().debPos = nil, nil
+    if ns.ABarAncPlace then ns.ABarAncPlace() end
 end

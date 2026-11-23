@@ -1449,14 +1449,14 @@ end
 SLASH_LEELNPDEB1 = "/르엘디버프"
 SlashCmdList.LEELNPDEB = function()
     local plate = C_NamePlate.GetNamePlateForUnit("target")
-    if not plate then print("|cffff8fab르엘|r 대상 이름표가 없어요 (적을 고르고 다시)") return end
+    if not plate then print(ns.L("|cffff8fab르엘|r 대상 이름표가 없어요 (적을 고르고 다시)")) return end
     local uf = plate.UnitFrame
     local af = uf and uf.AurasFrame
-    if not af then print("|cffff8fab르엘|r 디버프 칸(AurasFrame)이 없어요") return end
+    if not af then print(ns.L("|cffff8fab르엘|r 디버프 칸(AurasFrame)이 없어요")) return end
     local list = af.DebuffListFrame or af
     local n, shown = 0, 0
     for _, it in ipairs({ list:GetChildren() }) do n = n + 1; if it:IsShown() then shown = shown + 1 end end
-    print(("|cffff8fab르엘|r 디버프 칸: 보임=%s 투명도=%.2f 숨김표시=%s · 목록 보임=%s 투명도=%.2f · 아이콘 %d개(보임 %d) · CVar=%s"):format(
+    print(ns.L("|cffff8fab르엘|r 디버프 칸: 보임=%s 투명도=%.2f 숨김표시=%s · 목록 보임=%s 투명도=%.2f · 아이콘 %d개(보임 %d) · CVar=%s"):format(
         tostring(af:IsShown()), af:GetAlpha() or -1, tostring(af.leelHidden), tostring(list:IsShown()), list:GetAlpha() or -1, n, shown,
         tostring(GetCVar("nameplateShowDebuffs"))))
 end

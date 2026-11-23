@@ -658,12 +658,12 @@ do
                     pcall(function()
                         if UnitExists(unit .. "target") then
                             local nm = UnitName(unit .. "target")
-                            if UnitIsUnit(unit .. "target", "player") then tt:AddLine("대상: |cfff2b3c2나|r", 0.85, 0.78, 0.76)
-                            else tt:AddLine("대상: " .. nm, 0.85, 0.78, 0.76) end
+                            if UnitIsUnit(unit .. "target", "player") then ns.TAdd(tt, "대상: |cfff2b3c2나|r", 0.85, 0.78, 0.76)
+                            else ns.TAdd(tt, "대상: " .. nm, 0.85, 0.78, 0.76) end
                         end
                     end)
                 end
-                if TO("mine") and ns.Try(UnitIsUnit, unit, "target") then tt:AddLine("|cfff2b3c2● 내 대상|r") end
+                if TO("mine") and ns.Try(UnitIsUnit, unit, "target") then ns.TAdd(tt, "|cfff2b3c2● 내 대상|r") end
                 -- 관계 칩 (플레이어는 직업 색 이름이라 생략)
                 local kind
                 pcall(function()
@@ -675,7 +675,7 @@ do
                 local line1 = _G.GameTooltipTextLeft1
                 if kind and line1 then
                     local k = KIND[kind]
-                    chip.fs:SetText(k[1]); chip.fs:SetTextColor(k[3][1], k[3][2], k[3][3])
+                    chip.fs:SetText(ns.L(k[1])); chip.fs:SetTextColor(k[3][1], k[3][2], k[3][3])
                     chip.bg:SetColor(k[2])
                     chip:SetWidth(36)      -- 글자 폭은 비밀 값일 수 있어 고정 (두 글자)
                     -- 이름 뒤에 칩 들어갈 자리를 띄워 둠
@@ -708,10 +708,10 @@ do
                             local r, g, b = GetItemQualityColor(q)
                             tt.leelEdge:SetColor({ r, g, b }, 0.95)
                         end
-                        if TO("ilvl") and ilvl and ilvl > 1 then tt:AddLine("아이템 레벨 " .. ilvl, 1, 0.84, 0.54) end
+                        if TO("ilvl") and ilvl and ilvl > 1 then ns.TAdd(tt, "아이템 레벨 " .. ilvl, 1, 0.84, 0.54) end
                         if TO("ids") then
                             local id = tonumber(link:match("item:(%d+)"))
-                            if id then tt:AddLine("아이템 번호 " .. id, 0.55, 0.48, 0.47) end
+                            if id then ns.TAdd(tt, "아이템 번호 " .. id, 0.55, 0.48, 0.47) end
                         end
                     end)
                 end)
@@ -722,7 +722,7 @@ do
                     pcall(function()
                         local id = data and data.id
                         if not id and tt.GetSpell then id = select(2, tt:GetSpell()) end
-                        if id then tt:AddLine("주문 번호 " .. id, 0.55, 0.48, 0.47) end
+                        if id then ns.TAdd(tt, "주문 번호 " .. id, 0.55, 0.48, 0.47) end
                     end)
                 end)
             end

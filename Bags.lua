@@ -65,7 +65,7 @@ end
 
 local function Money(c)
     if GetCoinTextureString then return GetCoinTextureString(c) end
-    return string.format("%d골 %d은", c / 10000, (c / 100) % 100)
+    return string.format(ns.L("%d골 %d은"), c / 10000, (c / 100) % 100)
 end
 
 -- 르엘 토끼 동전 (가방 아래 돈 표시)
@@ -130,10 +130,10 @@ local function BuildChip()
     chip:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
         local free, total = Count()
-        GameTooltip:AddLine("|cfff2b3c2가방|r  남은 칸 " .. free .. " / " .. total)
+        ns.TAdd(GameTooltip, "|cfff2b3c2가방|r  남은 칸 " .. free .. " / " .. total)
         local g = GrayValue()
-        if g > 0 then GameTooltip:AddLine("회색템 " .. Money(g), 0.84, 0.63, 0.61) end
-        GameTooltip:AddLine("클릭: 가방 열기   Shift+끌기: 옮기기", 0.62, 0.54, 0.52)
+        if g > 0 then ns.TAdd(GameTooltip, "회색템 " .. Money(g), 0.84, 0.63, 0.61) end
+        ns.TAdd(GameTooltip, "클릭: 가방 열기   Shift+끌기: 옮기기", 0.62, 0.54, 0.52)
         GameTooltip:Show()
     end)
     chip:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -460,7 +460,7 @@ local function DumpSlot()
     local f = GetMouseFocus and GetMouseFocus()
     if not f and GetMouseFoci then f = (GetMouseFoci() or {})[1] end
     while f and not (f.GetName and f:GetName() and f:GetName():find("^LeelUI_Bag")) do f = f.GetParent and f:GetParent() end
-    if not f then print("|cffff8fa3르엘|r 가방 칸에 마우스를 올리고 다시 입력해 주세요."); return end
+    if not f then print(ns.L("|cffff8fa3르엘|r 가방 칸에 마우스를 올리고 다시 입력해 주세요.")); return end
     local L = {}
     local function C4(r) local ok, a, b2, c, d = pcall(r.GetVertexColor, r); if ok and a then return string.format("%.2f,%.2f,%.2f,%.2f", a, b2, c, d or 1) end return "-" end
     local function Regions(fr, pre)
@@ -687,7 +687,7 @@ local function BuildWindow()
     local mag = box:CreateTexture(nil, "ARTWORK")
     mag:SetTexture(ns.MEDIA .. "hb_search"); mag:SetSize(13, 13); mag:SetPoint("LEFT", 10, 0)
     mag:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
-    box.ph = box:CreateFontString(nil, "ARTWORK"); box.ph:SetFont(ns.FONT, 12, "")
+    box.ph = ns.LWrap(box:CreateFontString(nil, "ARTWORK")); box.ph:SetFont(ns.FONT, 12, "")
     box.ph:SetTextColor(0.62, 0.54, 0.52); box.ph:SetPoint("LEFT", 28, 0); box.ph:SetText("찾기")
     box:SetScript("OnTextChanged", function(self)
         local t = self:GetText() or ""
@@ -878,7 +878,7 @@ end)
 SLASH_LEELQDUMP1 = "/르엘퀘"
 SLASH_LEELQDUMP2 = "/leelq"
 SlashCmdList.LEELQDUMP = function()
-    print("|cfff2b3c2[르엘 가방]|r 퀘스트 템 점검")
+    print(ns.L("|cfff2b3c2[르엘 가방]|r 퀘스트 템 점검"))
     local n = 0
     for bag = 0, SHOW_LAST do
         for slot = 1, (NumSlots(bag) or 0) do
@@ -897,9 +897,9 @@ SlashCmdList.LEELQDUMP = function()
                 local tip = TipStartsQuest(bag, slot, nil)
                 if a or qid or tip then
                     n = n + 1
-                    print(string.format("%s  퀘템=%s 퀘번호=%s 받음=%s 툴팁시작=%s",
+                    print(string.format(ns.L("%s  퀘템=%s 퀘번호=%s 받음=%s 툴팁시작=%s"),
                         info.hyperlink or "?", tostring(a), tostring(qid), tostring(act), tostring(tip)))
-                    if qid then print(string.format("   └ 퀘스트로그에있음=%s 완료한적=%s", tostring(onq), tostring(done))) end
+                    if qid then print(string.format(ns.L("   └ 퀘스트로그에있음=%s 완료한적=%s"), tostring(onq), tostring(done))) end
                 end
             end
         end
@@ -1031,9 +1031,9 @@ local function BuildFull()
         lk:SetScript("OnEnter", function(self)
             self:Paint("hover")
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("잠그기", 1, 0.84, 0.88)
-            GameTooltip:AddLine("버리기 후보 · 상점 토끼 자동 판매에서 빠져요", 0.8, 0.8, 0.8, true)
-            GameTooltip:AddLine("풀기: 가방에서 Alt+클릭", 0.6, 0.6, 0.6, true)
+            ns.TAdd(GameTooltip, "잠그기", 1, 0.84, 0.88)
+            ns.TAdd(GameTooltip, "버리기 후보 · 상점 토끼 자동 판매에서 빠져요", 0.8, 0.8, 0.8, true)
+            ns.TAdd(GameTooltip, "풀기: 가방에서 Alt+클릭", 0.6, 0.6, 0.6, true)
             GameTooltip:Show()
         end)
         lk:SetScript("OnLeave", function(self) self:Paint(); GameTooltip:Hide() end)
@@ -1321,7 +1321,7 @@ end)
 -- 미리 보기: /르엘버리기  (가방이 안 차 있어도 후보 3개 창 띄우기)
 SLASH_LEELBAGFULL1 = "/르엘버리기"
 SlashCmdList.LEELBAGFULL = function()
-    if not ns.ShowBagFull(true) then print("|cfff2b3c2[르엘 가방]|r 버릴 후보가 없어요.") end
+    if not ns.ShowBagFull(true) then print(ns.L("|cfff2b3c2[르엘 가방]|r 버릴 후보가 없어요.")) end
 end
 
 ----------------------------------------------------------------------
@@ -1413,15 +1413,15 @@ function AQ.Tip(b)
     local o = AQ.btn[b]
     local d = o and o.d
     if not d or not GameTooltip:IsOwned(b) then return end
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddLine((d.ammo and "탄약 주머니" or "화살통") .. " · " .. d.slots .. "칸", 0.95, 0.70, 0.76)
-    for k, c in pairs(d.kinds) do GameTooltip:AddDoubleLine(k, c, 1, 1, 1, 1, 1, 1) end
-    GameTooltip:AddLine(("찬 칸 %d / %d · 빈 칸 %d"):format(d.used, d.slots, d.slots - d.used), 0.73, 0.65, 0.63)
+    ns.TAdd(GameTooltip, " ")
+    ns.TAdd(GameTooltip, (d.ammo and "탄약 주머니" or "화살통") .. " · " .. d.slots .. "칸", 0.95, 0.70, 0.76)
+    for k, c in pairs(d.kinds) do ns.TDbl(GameTooltip, k, c, 1, 1, 1, 1, 1, 1) end
+    ns.TAdd(GameTooltip, ns.L("찬 칸 %d / %d · 빈 칸 %d"):format(d.used, d.slots, d.slots - d.used), 0.73, 0.65, 0.63)
     local ok, spd = pcall(UnitRangedDamage, "player")
     if ok and spd and spd > 0 and d.total > 0 then
-        GameTooltip:AddLine(("자동 사격으로 약 %d분"):format(math.floor(d.total * spd / 60 + 0.5)), 0.73, 0.65, 0.63)
+        ns.TAdd(GameTooltip, ns.L("자동 사격으로 약 %d분"):format(math.floor(d.total * spd / 60 + 0.5)), 0.73, 0.65, 0.63)
     end
-    GameTooltip:AddLine("200발 아래 노랑 · 50발 아래 빨강", 0.95, 0.77, 0.35)
+    ns.TAdd(GameTooltip, "200발 아래 노랑 · 50발 아래 빨강", 0.95, 0.77, 0.35)
     GameTooltip:Show()
 end
 

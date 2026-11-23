@@ -95,8 +95,8 @@ local function OnEnter(btn)
     if not id or not GameTooltip:IsOwned(btn) then return end
     local can = FindRecipe(id)
     if not can then return end
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddLine("클릭하면 만드는 법으로 가요", 0.95, 0.70, 0.76)
+    ns.TAdd(GameTooltip, " ")
+    ns.TAdd(GameTooltip, "클릭하면 만드는 법으로 가요", 0.95, 0.70, 0.76)
     GameTooltip:Show()
 end
 

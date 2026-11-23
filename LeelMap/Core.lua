@@ -28,12 +28,18 @@ local C = {
 local defaults = { exits = true, mini = true, fade = true, fadeAlpha = 0.4, coords = true, levels = true, skin = true }
 local db
 
+-- 영어 (르엘 UI 언어 설정을 따라가요)
+local function T(s) local L = _G.LeelUI; if L and L.L then return L.L(s) end return s end
+local function TipAdd(s, ...) return GameTooltip:AddLine(T(s), ...) end
+local function TipSet(s, ...) return GameTooltip:SetText(T(s), ...) end
 local function Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Map]|r " .. msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Map]|r " .. T(msg))
 end
 
 local function Font(parent, size, color, file)
+    local L0 = _G.LeelUI
     local fs = parent:CreateFontString(nil, "OVERLAY")
+    if L0 and L0.LWrap then L0.LWrap(fs) end
     if not (file and fs:SetFont(file, size, "")) then LeelFont(fs, size, "") end
     fs:SetShadowColor(0, 0, 0, 0.85)
     fs:SetShadowOffset(1, -1)
@@ -856,9 +862,9 @@ local function CreateCoords()
     hp.cur = Font(hp, 14, C.tx, NUM); hp.cur:SetPoint("LEFT", hp.curL, "RIGHT", 5, 0)
     hp:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine(coords.meL:GetText() or "나", 1, 1, 1)
-        GameTooltip:AddLine(coords.curL:GetText() or "마우스", C.tx2[1], C.tx2[2], C.tx2[3])
-        GameTooltip:AddLine("누르면 마지막 마우스 좌표를 찍기 칸에", C.tx2[1], C.tx2[2], C.tx2[3])
+        TipAdd(coords.meL:GetText() or "나", 1, 1, 1)
+        TipAdd(coords.curL:GetText() or "마우스", C.tx2[1], C.tx2[2], C.tx2[3])
+        TipAdd("누르면 마지막 마우스 좌표를 찍기 칸에", C.tx2[1], C.tx2[2], C.tx2[3])
         GameTooltip:Show()
     end)
     hp:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -898,7 +904,7 @@ local function CreateCoords()
             box:SetText(coords.lastCur); box.fromMap = coords.lastMap; box:SetFocus()
         end
     end)
-    cb:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("누르면 마지막 마우스 좌표를 찍기 칸에", 1, 1, 1); GameTooltip:Show() end)
+    cb:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); TipAdd("누르면 마지막 마우스 좌표를 찍기 칸에", 1, 1, 1); GameTooltip:Show() end)
     cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
@@ -924,7 +930,7 @@ local function PinAt(mapID, x, y, quiet)
     end)
     if ok and not quiet then
         local info = C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
-        Print(("%s %.1f, %.1f 에 핀을 찍었어요 · 지우기 = [찍기] 오른쪽 클릭"):format(info and info.name or "", x * 100, y * 100))
+        Print(T("%s %.1f, %.1f 에 핀을 찍었어요 · 지우기 = [찍기] 오른쪽 클릭"):format(info and info.name or "", x * 100, y * 100))
     end
     return ok
 end
@@ -977,8 +983,8 @@ local function CreateWayBox()
         else Go() end
     end)
     go:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:AddLine("지금 보는 지도에 핀 + 길 안내", 1, 1, 1)
-        GameTooltip:AddLine("오른쪽 클릭: 핀 지우기", C.tx2[1], C.tx2[2], C.tx2[3]); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP"); TipAdd("지금 보는 지도에 핀 + 길 안내", 1, 1, 1)
+        TipAdd("오른쪽 클릭: 핀 지우기", C.tx2[1], C.tx2[2], C.tx2[3]); GameTooltip:Show()
     end)
     go:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.box = eb
@@ -1097,8 +1103,8 @@ local function SetupMover()
     m:SetScript("OnEnter", function(self)
         if IsMax() then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("끌어서 지도 옮기기", 1, 1, 1)
-        GameTooltip:AddLine("/lmap 위치 : 처음 자리로", C.tx2[1], C.tx2[2], C.tx2[3])
+        TipAdd("끌어서 지도 옮기기", 1, 1, 1)
+        TipAdd("/lmap 위치 : 처음 자리로", C.tx2[1], C.tx2[2], C.tx2[3])
         GameTooltip:Show()
     end)
     m:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1255,8 +1261,13 @@ ev:SetScript("OnEvent", function(_, event, arg1)
     elseif event == "PLAYER_LOGIN" then
         ApplyCVars()
         Setup()
-        if LeatrixPending() then C_Timer.After(3, function() StaticPopup_Show("LEELMAP_LEATRIX") end)
-        elseif TuneOpenMap() then C_Timer.After(3, function() StaticPopup_Show("LEELMAP_OPENMAP") end) end
+        local function Pop(k)
+            local d = StaticPopupDialogs[k]
+            if d then d.text = T(d.textKo or d.text); d.textKo = d.textKo or d.text; d.button1 = T("다시 불러오기"); d.button2 = T("나중에") end
+            StaticPopup_Show(k)
+        end
+        if LeatrixPending() then C_Timer.After(3, function() Pop("LEELMAP_LEATRIX") end)
+        elseif TuneOpenMap() then C_Timer.After(3, function() Pop("LEELMAP_OPENMAP") end) end
         for _, t in ipairs({ 1, 4, 10 }) do C_Timer.After(t, HideOpenMapEntry) end
     elseif event == "PLAYER_LOGOUT" then
         WriteLeatrix()
@@ -1314,7 +1325,7 @@ SlashCmdList.LEELMAP = function(msg)
         -- 지도 창 구조 확인 (포에버 지도 테두리가 어떤 부품으로 되어 있는지)
         local wm = WorldMapFrame
         local bf = wm and wm.BorderFrame
-        Print(("꾸미기=%s 적용=%s 오류=%s"):format(tostring(db.skin), tostring(wm and wm.leelSkinned), tostring(ns_skinErr)))
+        Print(T("꾸미기=%s 적용=%s 오류=%s"):format(tostring(db.skin), tostring(wm and wm.leelSkinned), tostring(ns_skinErr)))
         local function dump(label, fr)
             if not fr then Print(label .. ": 없음") return end
             local keys = {}

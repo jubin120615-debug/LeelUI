@@ -8,10 +8,17 @@
 local ADDON, ns = ...
 local D = ns.data or { brackets = {}, maps = {} }
 local L = _G.LeelUI
+-- 영어 (르엘 UI 언어 설정을 따라가요)
+--  ns.T("글") = 화면에 쓸 글 · ns.T.Add / ns.T.Set / ns.T.Dbl = 툴팁 · ns.T.EN() = 영어인지
+ns.T = setmetatable({}, { __call = function(_, s) if L and L.L then return L.L(s) end return s end })
+function ns.T.EN() return L and L.EnOn and L.EnOn() or false end
+function ns.T.Add(t, s, ...) return t:AddLine(ns.T(s), ...) end
+function ns.T.Set(t, s, ...) return t:SetText(ns.T(s), ...) end
+function ns.T.Dbl(t, a, b, ...) return t:AddDoubleLine(ns.T(a), ns.T(b), ...) end
 
 local DB, CDB
 local function Print(msg)
-    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Quest]|r " .. msg) end
+    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Quest]|r " .. ns.T(msg)) end
 end
 
 ----------------------------------------------------------------------
@@ -262,29 +269,29 @@ local function Comma(n) return BreakUpLargeNumbers and BreakUpLargeNumbers(n) or
 local TAGTXT = { elite = "|cffffb15c정예|r", dungeon = "|cffc8b0ff던전|r", raid = "|cffff7a7a공격대|r" }
 PinTooltip = function(gg)
     local multi = #gg.ns > 1
-    GameTooltip:SetText(multi and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
+    ns.T.Set(GameTooltip, multi and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
     local sumXP, sumMoney = 0, 0
     for i, num in ipairs(gg.ns) do
         local e = gg.es[i]
         if e then
             local right = LvText(e.level) .. (e.tag and TAGTXT[e.tag] and ("  " .. TAGTXT[e.tag]) or "")
-            GameTooltip:AddDoubleLine(("|cfff2b3c2%d|r  %s"):format(num, e.title or "?"), right, 1, 1, 1, 1, 1, 1)
+            ns.T.Dbl(GameTooltip, ("|cfff2b3c2%d|r  %s"):format(num, e.title or "?"), right, 1, 1, 1, 1, 1, 1)
             -- 진행: 반납 / 목표 (두 줄까지)
             if e.done then
-                GameTooltip:AddLine("   |cffffd34d반납하러 가요|r")
+                ns.T.Add(GameTooltip, "   |cffffd34d반납하러 가요|r")
             else
                 for k, o in ipairs(e.objs or {}) do
                     if k > 2 then break end
                     local prog = (o.have and o.need) and (" " .. o.have .. "/" .. o.need) or ""
                     local col = o.done and "|cff7fd67a" or "|cffcbbab5"
-                    GameTooltip:AddLine("   " .. col .. (o.text or "") .. prog .. "|r")
+                    ns.T.Add(GameTooltip, "   " .. col .. (o.text or "") .. prog .. "|r")
                 end
             end
             local rw = QuestRewards(e)
             local money = rw and rw.money or 0
             local xpTxt = e.xp and ("경험치 |cffffd6e0+" .. Comma(e.xp) .. "|r") or "경험치 |cff9a8a86?|r"
             local moneyTxt = (money > 0 and GetCoinTextureString) and GetCoinTextureString(money) or ""
-            GameTooltip:AddDoubleLine("   " .. xpTxt, moneyTxt, 0.95, 0.88, 0.86, 1, 1, 1)
+            ns.T.Dbl(GameTooltip, "   " .. xpTxt, moneyTxt, 0.95, 0.88, 0.86, 1, 1, 1)
             if rw and (#rw.items > 0 or #rw.choices > 0) then
                 local s = "   "
                 for _, it in ipairs(rw.items) do s = s .. "|T" .. it.tex .. ":20:20:0:0|t " end
@@ -293,14 +300,14 @@ PinTooltip = function(gg)
                     for _, it in ipairs(rw.choices) do s = s .. "|T" .. it.tex .. ":20:20:0:0|t " end
                     s = s .. " |cff9a8a86중 1개 고르기|r"
                 end
-                GameTooltip:AddLine(s)
+                ns.T.Add(GameTooltip, s)
             end
             sumXP = sumXP + (e.xp or 0); sumMoney = sumMoney + money
-            if multi and i < #gg.ns then GameTooltip:AddLine(" ") end
+            if multi and i < #gg.ns then ns.T.Add(GameTooltip, " ") end
         end
     end
     if multi and sumXP > 0 then
-        GameTooltip:AddDoubleLine("모두 하면 |cffffd6e0+" .. Comma(sumXP) .. "|r", (sumMoney > 0 and GetCoinTextureString) and GetCoinTextureString(sumMoney) or "", 1, 0.84, 0.88, 1, 1, 1)
+        ns.T.Dbl(GameTooltip, "모두 하면 |cffffd6e0+" .. Comma(sumXP) .. "|r", (sumMoney > 0 and GetCoinTextureString) and GetCoinTextureString(sumMoney) or "", 1, 0.84, 0.88, 1, 1, 1)
     end
 end
 end
@@ -560,6 +567,7 @@ end
 -- Questie 자료에 한글 이름이 없는 NPC(영어로 나옴)는, 그 NPC에게 반납 창을 한 번 열면 한글 이름을 배워 둬요
 local function NpcKo(name)
     if type(name) ~= "string" then return name end
+    if ns.T.EN() then return name end
     local ko = DB and DB.npcKo and DB.npcKo[name]
     return ko or name
 end
@@ -1205,7 +1213,7 @@ local function BuildItems()
             for _, e in ipairs(list) do items[#items + 1] = { e = e } end
         end
         if board.empty then
-            board.empty:SetText(total == 0 and ("\"%s\" 퀘는 퀘스트 목록에 없어요\n받은 퀘만 찾아요 · 오른쪽 X를 누르면 전체 목록"):format(board.queryRaw or q)
+            board.empty:SetText(total == 0 and ns.T("\"%s\" 퀘는 퀘스트 목록에 없어요\n받은 퀘만 찾아요 · 오른쪽 X를 누르면 전체 목록"):format(board.queryRaw or q)
                 or "여기엔 퀘가 없어요.\n왼쪽에서 다른 지역을 골라 보세요.")
         end
         return items
@@ -1412,7 +1420,7 @@ do
                     r.q[id] = { done = d == "1", prog = (rest:gsub("^:", ""):gsub(",", " · ")) }
                     -- 허브: 파티원이 같은 퀘를 다 하면 알림 (처음 받은 목록은 알리지 않아요)
                     if DB and DB.partyToast and d == "1" and was and not was.done and byId and byId[id] then
-                        Print(("|cff8fe899%s|r 님이 [%s] 다 했어요"):format(who, byId[id].title or "?"))
+                        Print(ns.T("|cff8fe899%s|r 님이 [%s] 다 했어요"):format(who, byId[id].title or "?"))
                         if PlaySound and not DB.sndOff then pcall(PlaySound, (SOUNDKIT and SOUNDKIT.IG_QUEST_LIST_COMPLETE) or 878, "Master") end
                     end
                 end
@@ -1455,8 +1463,8 @@ end
 local function LeelAbandon(e)
     if not (e and e.title) then return end
     StaticPopupDialogs["LEELQ_ABANDON"] = {
-        text = "|cfff2b3c2%s|r\n\n이 퀘스트를 포기할까요?\n진행한 목표와 받은 퀘스트 아이템이 사라져요.",
-        button1 = "포기", button2 = "취소",
+        text = ns.T("|cfff2b3c2%s|r\n\n이 퀘스트를 포기할까요?\n진행한 목표와 받은 퀘스트 아이템이 사라져요."),
+        button1 = ns.T.EN() and "Abandon" or "포기", button2 = ns.T("취소"),
         OnAccept = function(_, data)
             local q = data
             local ok = false
@@ -1511,7 +1519,7 @@ local function Row(i)
     r.abi:SetVertexColor(0.6, 0.5, 0.48, 1)
     r.ab:SetScript("OnEnter", function(self)
         r.abi:SetVertexColor(1, 0.55, 0.55, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("퀘스트 포기", 1, 0.6, 0.6); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); ns.T.Set(GameTooltip, "퀘스트 포기", 1, 0.6, 0.6); GameTooltip:Show()
     end)
     r.ab:SetScript("OnLeave", function() r.abi:SetVertexColor(0.6, 0.5, 0.48, 1); GameTooltip:Hide() end)
     r.ab:SetScript("OnClick", function() local e = r.item and r.item.e; if e then LeelAbandon(e) end end)
@@ -1548,28 +1556,28 @@ local function Row(i)
         local e = self.item and self.item.e
         if not e then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(e.title, 1, 0.84, 0.88)
-        GameTooltip:AddLine(("레벨 %d · %s"):format(e.level or 0, ZoneKey(e)), 0.84, 0.63, 0.61)
+        ns.T.Set(GameTooltip, e.title, 1, 0.84, 0.88)
+        ns.T.Add(GameTooltip, ns.T("레벨 %d · %s"):format(e.level or 0, ZoneKey(e)), 0.84, 0.63, 0.61)
         for _, o in ipairs(e.objs) do
             local t = (o.have and o.need) and ("%s %d/%d"):format(o.text, o.have, o.need) or o.text
-            if o.done then GameTooltip:AddLine("(완료) " .. t, 0.6, 0.85, 0.6) else GameTooltip:AddLine("· " .. t, 1, 1, 1) end
+            if o.done then ns.T.Add(GameTooltip, "(완료) " .. t, 0.6, 0.85, 0.6) else ns.T.Add(GameTooltip, "· " .. t, 1, 1, 1) end
         end
-        if e.done then GameTooltip:AddLine("완료했어요 · 반납하러 가요", 0.95, 0.7, 0.76) end
-        if e.xp then GameTooltip:AddLine("경험치 +" .. (BreakUpLargeNumbers and BreakUpLargeNumbers(e.xp) or e.xp), 1, 0.84, 0.88) end
+        if e.done then ns.T.Add(GameTooltip, "완료했어요 · 반납하러 가요", 0.95, 0.7, 0.76) end
+        if e.xp then ns.T.Add(GameTooltip, "경험치 +" .. (BreakUpLargeNumbers and BreakUpLargeNumbers(e.xp) or e.xp), 1, 0.84, 0.88) end
         local pm = ns.PQ and ns.PQ.Of(e)
         if pm and #pm > 0 then
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine(("파티 %d명도 하는 중"):format(#pm), 0.95, 0.7, 0.76)
+            ns.T.Add(GameTooltip, " ")
+            ns.T.Add(GameTooltip, ns.T("파티 %d명도 하는 중"):format(#pm), 0.95, 0.7, 0.76)
             for _, m in ipairs(pm) do
                 local c = ns.PQ.ClassCol(m.cls)
-                GameTooltip:AddDoubleLine(m.name, ns.PQ.Prog(m, e.id) or "하는 중", c[1], c[2], c[3], 0.85, 0.8, 0.78)
+                ns.T.Dbl(GameTooltip, m.name, ns.PQ.Prog(m, e.id) or "하는 중", c[1], c[2], c[3], 0.85, 0.8, 0.78)
             end
         end
         local g = guide[e.key]
-        if g and g.npc then GameTooltip:AddLine(("준 사람: %s (%s %.0f, %.0f)"):format(g.npc, g.zone or "", g.x or 0, g.y or 0), 0.7, 0.7, 0.7) end
-        GameTooltip:AddLine("위치: " .. SRC[e._src or "none"], 0.7, 0.7, 0.7)
-        if e._partyAdd and not e.done then GameTooltip:AddLine("파티 중이라 토끼 자동이 길에 넣었어요", 1, 0.85, 0.35) end
-        GameTooltip:AddLine("이름 누르면 자세히 · 네모 누르면 고르기 / 빼기", 0.6, 0.6, 0.6)
+        if g and g.npc then ns.T.Add(GameTooltip, ns.T("준 사람: %s (%s %.0f, %.0f)"):format(g.npc, g.zone or "", g.x or 0, g.y or 0), 0.7, 0.7, 0.7) end
+        ns.T.Add(GameTooltip, "위치: " .. SRC[e._src or "none"], 0.7, 0.7, 0.7)
+        if e._partyAdd and not e.done then ns.T.Add(GameTooltip, "파티 중이라 토끼 자동이 길에 넣었어요", 1, 0.85, 0.35) end
+        ns.T.Add(GameTooltip, "이름 누르면 자세히 · 네모 누르면 고르기 / 빼기", 0.6, 0.6, 0.6)
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1854,8 +1862,8 @@ MakeDetail = function()
         end
         b:SetScript("OnClick", function() if d.e then fn(d.e, b) end end)
         b:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText(self.tipT or label)
-            GameTooltip:AddLine(self.tip, 0.85, 0.85, 0.85, true); GameTooltip:Show()
+            GameTooltip:SetOwner(self, "ANCHOR_TOP"); ns.T.Set(GameTooltip, self.tipT or label)
+            ns.T.Add(GameTooltip, self.tip, 0.85, 0.85, 0.85, true); GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
         return b
@@ -2273,7 +2281,7 @@ local DIRS = { "동", "남동", "남", "남서", "서", "북서", "북", "북동
 local function DirText(dx, dy)   -- 지도 위 (오른쪽 +x, 아래 +y)
     local a = math.atan2(dy, dx)
     local i = math.floor((a / (math.pi / 4)) + 0.5) % 8
-    return DIRS[i + 1]
+    return ns.T(DIRS[i + 1])
 end
 
 local function Banner(p)
@@ -2410,10 +2418,10 @@ local function PaintWide(p, m, order, target, zid, from)
     local ok2, _, b = pcall(C_Map.GetWorldPosFromMapPos, cont, CreateVector2D(tx, ty))
     if ok1 and ok2 and a and b then
         local d = math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2)
-        dist = d >= 1000 and ("약 %.1fkm"):format(d / 1000) or ("약 %dm"):format(d)
+        dist = d >= 1000 and ns.T("약 %.1fkm"):format(d / 1000) or ns.T("약 %dm"):format(d)
     end
-    ShowBanner(p, "next", "다음 지역", ("%s · %s번"):format(MapName(zid) or ZoneKey(target), last > from and (from .. "~" .. last) or tostring(from)),
-        (dist and (dist .. " · ") or "") .. DirText(gx - mx, gy - my) .. "쪽")
+    ShowBanner(p, "next", "다음 지역", ns.T("%s · %s번"):format(MapName(zid) or ZoneKey(target), last > from and (from .. "~" .. last) or tostring(from)),
+        (dist and (dist .. " · ") or "") .. DirText(gx - mx, gy - my) .. (ns.T.EN() and "" or "쪽"))
     w:Show()
     return true
 end
@@ -2468,7 +2476,7 @@ local function PaintMap()
         if p.wideTarget == m then
             local left = 0
             for _, e in ipairs(order) do if HereEntry(e, m) then left = left + 1 end end
-            ShowBanner(p, "arrive", "도착!", ("%s · 남은 %d"):format(MapName(m) or "", left), "")
+            ShowBanner(p, "arrive", "도착!", ns.T("%s · 남은 %d"):format(MapName(m) or "", left), "")
             p.arriveUntil = GetTime() + 3
         end
         p.wideTarget = nil
@@ -2481,7 +2489,7 @@ local function PaintMap()
             p.dunArt = p.noArt:IsShown() and PaintDungeonArt(p) or false
         end
         if p.dunArt and (p.dunFloors or 1) > 1 then
-            p.floorBtn.fs:SetText(("%d / %d층 ▸"):format(((p.dunFloor or 1) - 1) % p.dunFloors + 1, p.dunFloors))
+            p.floorBtn.fs:SetText(ns.T("%d / %d층 ▸"):format(((p.dunFloor or 1) - 1) % p.dunFloors + 1, p.dunFloors))
             p.floorBtn:SetWidth(p.floorBtn.fs:GetStringWidth() + 20)
             p.floorBtn:Show()
         else
@@ -2661,7 +2669,7 @@ local function PaintSummary(order)
                 elseif not done and e.group and e.group > 1 then sub = "|cffff8f8f파티|r"
                 elseif done then local npc = TurnNpc(e); if npc then sub = npc end
                 else local z = ZoneKey(e); if z and z ~= (MapName(PlayerMap()) or ZoneText()) then sub = z end end
-                if i == MAXR and #order > MAXR then sub = (sub ~= "" and (sub .. " · ") or "") .. ("… 외 %d개"):format(#order - MAXR) end
+                if i == MAXR and #order > MAXR then sub = (sub ~= "" and (sub .. " · ") or "") .. ns.T("… 외 %d개"):format(#order - MAXR) end
                 r.s:SetText(sub)
                 r:Show()
             else
@@ -2679,7 +2687,7 @@ local function PaintHead()
     local nlog = #log
     local max = (C_QuestLog and C_QuestLog.GetMaxNumQuestsCanAccept and C_QuestLog.GetMaxNumQuestsCanAccept()) or MAX_QUESTLOG_QUESTS or 20
     board.cLv:Set("내 레벨 " .. (UnitLevel("player") or 1), "grey")
-    board.cLog:Set(("내 퀘스트 %d / %d"):format(nlog, max), "grey")
+    board.cLog:Set(ns.T("내 퀘스트 %d / %d"):format(nlog, max), "grey")
     for _, f in ipairs(board.filters) do f:Paint() end
 end
 
@@ -3027,7 +3035,7 @@ local function FillGuide(quiet)
     CDB.rec = { order = order, done = doneNow, map = m }
     CDB.route = BuildOrder()
     CDB.total = #CDB.route
-    if not quiet then Print(("토끼 추천: 낮은 레벨부터 묶음 %d개 · 퀘 %d개를 골랐어요."):format(bundles, #order)) end
+    if not quiet then Print(ns.T("토끼 추천: 낮은 레벨부터 묶음 %d개 · 퀘 %d개를 골랐어요."):format(bundles, #order)) end
     RefreshBoard(); RefreshTracker()
     if board and board.Toast then board.Toast() end
 end
@@ -3137,15 +3145,15 @@ local function MakeBoard()
         local list = board.warnList
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         if not list or #list == 0 then
-            GameTooltip:SetText("조심할 퀘 없음", 0.62, 0.88, 0.56)
-            GameTooltip:AddLine("정예 · 던전 퀘나 내 레벨보다 3 이상 높은 퀘가 없어요.", 0.8, 0.8, 0.8, true)
+            ns.T.Set(GameTooltip, "조심할 퀘 없음", 0.62, 0.88, 0.56)
+            ns.T.Add(GameTooltip, "정예 · 던전 퀘나 내 레벨보다 3 이상 높은 퀘가 없어요.", 0.8, 0.8, 0.8, true)
         else
-            GameTooltip:SetText(("조심할 퀘 %d개"):format(#list), 1, 0.56, 0.56)
+            ns.T.Set(GameTooltip, ns.T("조심할 퀘 %d개"):format(#list), 1, 0.56, 0.56)
             for _, w in ipairs(list) do
-                GameTooltip:AddDoubleLine(w.e.title, "|cffff8f8f" .. w.why .. "|r  Lv " .. (w.e.level or "?"), 1, 1, 1, 1, 1, 1)
+                ns.T.Dbl(GameTooltip, w.e.title, "|cffff8f8f" .. w.why .. "|r  Lv " .. (w.e.level or "?"), 1, 1, 1, 1, 1, 1)
             end
-            if board.warnParty then GameTooltip:AddLine((IsInGroup and IsInGroup()) and "파티 중이라 정예 · 파티 퀘도 길에 넣었어요 (던전 퀘는 던전 안에서만)." or "정예 · 던전 퀘는 길 맨 뒤로 보냈어요. 파티를 구해서 가요.", 0.8, 0.8, 0.8, true)
-            else GameTooltip:AddLine("혼자 하면 위험할 수 있어요. 레벨을 조금 올리고 가요.", 0.8, 0.8, 0.8, true) end
+            if board.warnParty then ns.T.Add(GameTooltip, (IsInGroup and IsInGroup()) and "파티 중이라 정예 · 파티 퀘도 길에 넣었어요 (던전 퀘는 던전 안에서만)." or "정예 · 던전 퀘는 길 맨 뒤로 보냈어요. 파티를 구해서 가요.", 0.8, 0.8, 0.8, true)
+            else ns.T.Add(GameTooltip, "혼자 하면 위험할 수 있어요. 레벨을 조금 올리고 가요.", 0.8, 0.8, 0.8, true) end
         end
         GameTooltip:Show()
     end)
@@ -3169,7 +3177,7 @@ local function MakeBoard()
     help.fs = Font(badge, 11, P.ink); help.fs:SetPoint("CENTER", 0, 0); help.fs:SetText("?"); help.fs:SetShadowColor(0, 0, 0, 0)
     local hh = help:CreateTexture(nil, "HIGHLIGHT"); hh:SetTexture(MEDIA .. "circle"); hh:SetAllPoints(); hh:SetVertexColor(1, 1, 1, 0.25); hh:SetBlendMode("ADD")
     help:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetText("사용법"); GameTooltip:AddLine("토끼가 하나씩 알려줘요", 0.85, 0.85, 0.85); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); ns.T.Set(GameTooltip, "사용법"); ns.T.Add(GameTooltip, "토끼가 하나씩 알려줘요", 0.85, 0.85, 0.85); GameTooltip:Show()
     end)
     help:SetScript("OnLeave", function() GameTooltip:Hide() end)
     board.StartTour = function() if StartTour then StartTour() end end
@@ -3222,7 +3230,7 @@ local function MakeBoard()
             b:SetHeight(24)
             b:SetFrameLevel(seg:GetFrameLevel() + 2)
             b.bg = RR(b, 12, P.acc, "BACKGROUND", 3, 0)
-            b.fs = b:CreateFontString(nil, "OVERLAY")
+            b.fs = (L and L.LWrap) and L.LWrap(b:CreateFontString(nil, "OVERLAY")) or b:CreateFontString(nil, "OVERLAY")
             local ff = board.title:GetFont()
             b.fs:SetFont(ff or STANDARD_TEXT_FONT, 12, "")
             b.fs:SetShadowOffset(1, -1)
@@ -3234,8 +3242,8 @@ local function MakeBoard()
             b:SetScript("OnClick", function() Pick(d.key) end)
             b:SetScript("OnEnter", function(self)
                 if Mode() ~= d.key then self.bg:SetColor({ 0.24, 0.18, 0.17 }); for _, t in ipairs(self.bg.tex or {}) do t:Show() end end
-                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetText(d.tip[1])
-                GameTooltip:AddLine(d.tip[2], 1, 1, 1, true); GameTooltip:AddLine(d.tip[3], 0.8, 0.8, 0.8, true)
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); ns.T.Set(GameTooltip, d.tip[1])
+                ns.T.Add(GameTooltip, d.tip[2], 1, 1, 1, true); ns.T.Add(GameTooltip, d.tip[3], 0.8, 0.8, 0.8, true)
                 GameTooltip:Show()
             end)
             b:SetScript("OnLeave", function() GameTooltip:Hide(); board.PaintSeg() end)
@@ -3354,8 +3362,8 @@ local function MakeBoard()
             end)
             sbn:SetScript("OnClick", function() if menu:IsShown() then menu:Hide() else PaintMenu(); menu.away = 0; menu:Show() end end)
             sbn:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetText("목록 정렬", 1, 0.84, 0.88)
-                GameTooltip:AddLine("같은 레벨이면 가까운 순 · 고른 정렬은 기억해요", 0.8, 0.8, 0.8); GameTooltip:Show()
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); ns.T.Set(GameTooltip, "목록 정렬", 1, 0.84, 0.88)
+                ns.T.Add(GameTooltip, "같은 레벨이면 가까운 순 · 고른 정렬은 기억해요", 0.8, 0.8, 0.8); GameTooltip:Show()
             end)
             sbn:SetScript("OnLeave", function() GameTooltip:Hide() end)
             board:HookScript("OnHide", function() menu:Hide() end)
@@ -3397,7 +3405,7 @@ local function MakeBoard()
                 if on then
                     local n = Count()
                     bar.fs:SetText(n > 0 and ("|cffffd6e0" .. n .. "개|r 골랐어요") or "포기할 퀘를 네모로 골라요")
-                    bar.go:Set(n > 0 and (n .. "개 포기") or "포기"); bar.go:SetAlpha(n > 0 and 1 or 0.45)
+                    bar.go:Set(n > 0 and (n .. "개 포기") or (ns.T.EN() and "Abandon" or "포기")); bar.go:SetAlpha(n > 0 and 1 or 0.45)
                 end
             end
             cb:SetScript("OnClick", function()
@@ -3410,9 +3418,9 @@ local function MakeBoard()
             end)
             cb:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-                GameTooltip:SetText(board.cleanMode and "정리 끝내기" or "퀘 정리하기", 1, 0.84, 0.88)
-                GameTooltip:AddLine("여러 퀘를 골라서 한 번에 포기해요", 0.8, 0.8, 0.8)
-                GameTooltip:AddLine("\"버려도 돼요\" 퀘는 미리 골라 둬요", 0.8, 0.8, 0.8)
+                ns.T.Set(GameTooltip, board.cleanMode and "정리 끝내기" or "퀘 정리하기", 1, 0.84, 0.88)
+                ns.T.Add(GameTooltip, "여러 퀘를 골라서 한 번에 포기해요", 0.8, 0.8, 0.8)
+                ns.T.Add(GameTooltip, "\"버려도 돼요\" 퀘는 미리 골라 둬요", 0.8, 0.8, 0.8)
                 GameTooltip:Show()
             end)
             cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3423,17 +3431,17 @@ local function MakeBoard()
                 if #list == 0 then return end
                 local names = {}
                 for i, q in ipairs(list) do if i <= 6 then names[#names + 1] = "· " .. q.title end end
-                if #list > 6 then names[#names + 1] = ("· 외 %d개"):format(#list - 6) end
+                if #list > 6 then names[#names + 1] = ns.T("· 외 %d개"):format(#list - 6) end
                 StaticPopupDialogs["LEELQ_ABANDON_MANY"] = {
-                    text = "|cfff2b3c2%d개|r 퀘스트를 포기할까요?\n\n%s\n\n진행한 목표와 받은 퀘스트 아이템이 사라져요.",
-                    button1 = "포기", button2 = "취소",
+                    text = ns.T("|cfff2b3c2%d개|r 퀘스트를 포기할까요?\n\n%s\n\n진행한 목표와 받은 퀘스트 아이템이 사라져요."),
+                    button1 = ns.T.EN() and "Abandon" or "포기", button2 = ns.T("취소"),
                     OnAccept = function(_, data)
                         local okN, i = 0, 0
                         local function Next()
                             i = i + 1
                             local q = data[i]
                             if not q then
-                                Print(("퀘스트 %d개를 포기했어요."):format(okN))
+                                Print(ns.T("퀘스트 %d개를 포기했어요."):format(okN))
                                 board.cleanMode = false; board.cleanSel = {}
                                 C_Timer.After(0.5, function() ReadLog(); RefreshBoard(); RefreshTracker() end)
                                 return
@@ -3921,13 +3929,13 @@ local function FaceRing(parent)
         local c = ns.PQ.ClassCol(m.cls)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         local cname = m.unit and UnitClass(m.unit)
-        GameTooltip:SetText(m.name .. (cname and ("  |cff9a8a86" .. cname .. "|r") or ""), c[1], c[2], c[3])
+        ns.T.Set(GameTooltip, m.name .. (cname and ("  |cff9a8a86" .. cname .. "|r") or ""), c[1], c[2], c[3])
         local p, list = ns.PQ.Ratio(m, e.id)
         if p == nil then
-            GameTooltip:AddLine("같은 퀘를 하고 있어요", 0.85, 0.85, 0.85)
-            GameTooltip:AddLine("진행 숫자는 상대도 르엘 UI일 때만 보여요", 0.6, 0.6, 0.6, true)
+            ns.T.Add(GameTooltip, "같은 퀘를 하고 있어요", 0.85, 0.85, 0.85)
+            ns.T.Add(GameTooltip, "진행 숫자는 상대도 르엘 UI일 때만 보여요", 0.6, 0.6, 0.6, true)
         elseif p >= 1 and #list == 0 then
-            GameTooltip:AddLine("다 했어요 · 반납만 남았어요", GREEN[1], GREEN[2], GREEN[3])
+            ns.T.Add(GameTooltip, "다 했어요 · 반납만 남았어요", GREEN[1], GREEN[2], GREEN[3])
         else
             local k = 0
             for _, o in ipairs(e.objs or {}) do
@@ -3936,12 +3944,12 @@ local function FaceRing(parent)
                     local pr = list[k]
                     if pr then
                         local done = pr[1] >= pr[2]
-                        GameTooltip:AddDoubleLine(o.text or "", pr[1] .. "/" .. pr[2], 0.85, 0.85, 0.85,
+                        ns.T.Dbl(GameTooltip, o.text or "", pr[1] .. "/" .. pr[2], 0.85, 0.85, 0.85,
                             done and GREEN[1] or 1, done and GREEN[2] or 1, done and GREEN[3] or 1)
                     end
                 end
             end
-            GameTooltip:AddLine(("전체 %d%%"):format(math.floor(p * 100 + 0.5)), 0.6, 0.6, 0.6)
+            ns.T.Add(GameTooltip, ns.T("전체 %d%%"):format(math.floor(p * 100 + 0.5)), 0.6, 0.6, 0.6)
         end
         GameTooltip:Show()
     end)
@@ -4036,11 +4044,11 @@ local function MakeRow(i)
     r:SetScript("OnEnter", function(self)
         if not self.e then return end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText(self.e.title, 1, 0.84, 0.88)
+        ns.T.Set(GameTooltip, self.e.title, 1, 0.84, 0.88)
         local _, _, src = QuestPos(self.e, PlayerMap())
-        GameTooltip:AddLine("위치: " .. SRC[src or "none"], 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("클릭: 지도에서 위치 · Shift+클릭: 자세히 보기", 0.75, 0.75, 0.75)
-        GameTooltip:AddLine("오른쪽 클릭: 이번 길에서 빼기", 0.75, 0.75, 0.75)
+        ns.T.Add(GameTooltip, "위치: " .. SRC[src or "none"], 0.8, 0.8, 0.8)
+        ns.T.Add(GameTooltip, "클릭: 지도에서 위치 · Shift+클릭: 자세히 보기", 0.75, 0.75, 0.75)
+        ns.T.Add(GameTooltip, "오른쪽 클릭: 이번 길에서 빼기", 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -4108,8 +4116,8 @@ local function MakeTracker()
         trk.SavePos()
     end)
     bun:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText("Leel Quest")
-        GameTooltip:AddLine("클릭: 고르기 판 · 끌기: 창 옮기기", 0.8, 0.8, 0.8); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, "Leel Quest")
+        ns.T.Add(GameTooltip, "클릭: 고르기 판 · 끌기: 창 옮기기", 0.8, 0.8, 0.8); GameTooltip:Show()
     end)
     bun:SetScript("OnLeave", function() GameTooltip:Hide() end)
     trk.title = Font(head, 17, P.acc); trk.title:SetPoint("LEFT", bun, "RIGHT", 7, 0); trk.title:SetText("Leel Quest")
@@ -4126,8 +4134,8 @@ local function MakeTracker()
     trk.miniV = mv
     mini:SetScript("OnClick", function() DB.trkFold = not DB.trkFold; RefreshTracker() end)
     mini:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText(DB.trkFold and "펼치기" or "접기")
-        GameTooltip:AddLine("머리를 끌면 옮기기 · 오른쪽 클릭: 고르기 판", 0.75, 0.75, 0.75); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, DB.trkFold and "펼치기" or "접기")
+        ns.T.Add(GameTooltip, "머리를 끌면 옮기기 · 오른쪽 클릭: 고르기 판", 0.75, 0.75, 0.75); GameTooltip:Show()
     end)
     mini:SetScript("OnLeave", function() GameTooltip:Hide() end)
     local line = trk:CreateTexture(nil, "ARTWORK"); line:SetTexture(WHITE)
@@ -4198,9 +4206,9 @@ local function MakeTracker()
     band.s:SetPoint("RIGHT", band.b, "LEFT", -6, 0)
     band:EnableMouse(true)
     band:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText(self.full1 or "", P.accHi[1], P.accHi[2], P.accHi[3])
-        if self.full2 then GameTooltip:AddLine(self.full2, 1, 1, 1, true) end
-        GameTooltip:AddLine("오른쪽 클릭: 닫기", 0.7, 0.7, 0.7)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, self.full1 or "", P.accHi[1], P.accHi[2], P.accHi[3])
+        if self.full2 then ns.T.Add(GameTooltip, self.full2, 1, 1, 1, true) end
+        ns.T.Add(GameTooltip, "오른쪽 클릭: 닫기", 0.7, 0.7, 0.7)
         GameTooltip:Show()
         self.hover = true
     end)
@@ -4233,9 +4241,9 @@ local function MakeTracker()
     near:SetScript("OnEnter", function(self)
         local g = trk.nearG
         if not g then return end
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText(g.npc .. " 에게 반납", 1, 0.95, 0.8)
-        for _, e in ipairs(g.list) do GameTooltip:AddLine("· " .. e.title, 1, 1, 1) end
-        GameTooltip:AddLine("누르면 길 맨 앞으로", 0.75, 0.75, 0.75)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, g.npc .. " 에게 반납", 1, 0.95, 0.8)
+        for _, e in ipairs(g.list) do ns.T.Add(GameTooltip, "· " .. e.title, 1, 1, 1) end
+        ns.T.Add(GameTooltip, "누르면 길 맨 앞으로", 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
     near:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -4259,8 +4267,8 @@ local function MakeTracker()
     dx.t = Font(dx, 11, P.tx2); dx.t:SetPoint("CENTER", 0, 0); dx.t:SetText("그만")
     dx:SetScript("OnClick", function() CDB.dunBack = nil; RefreshTracker() end)
     dx:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText("던전 보고 모드 끝내기")
-        GameTooltip:AddLine("원래 동선 목록으로 돌아가요", 0.75, 0.75, 0.75); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, "던전 보고 모드 끝내기")
+        ns.T.Add(GameTooltip, "원래 동선 목록으로 돌아가요", 0.75, 0.75, 0.75); GameTooltip:Show()
     end)
     dx:SetScript("OnLeave", function() GameTooltip:Hide() end)
     dbd:Hide()
@@ -4331,9 +4339,9 @@ local function MakeTracker()
     trk.grip, trk.box = grip, box
     grip:SetScript("OnEnter", function(self)
         self:SetAlpha(1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("끌면 크기 조절")
-        GameTooltip:AddLine("옆으로 = 폭 · 아래로 = 최대 길이", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("오른쪽 클릭: 처음 크기", 0.75, 0.75, 0.75); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); ns.T.Set(GameTooltip, "끌면 크기 조절")
+        ns.T.Add(GameTooltip, "옆으로 = 폭 · 아래로 = 최대 길이", 0.8, 0.8, 0.8)
+        ns.T.Add(GameTooltip, "오른쪽 클릭: 처음 크기", 0.75, 0.75, 0.75); GameTooltip:Show()
     end)
     grip:SetScript("OnLeave", function(self) if not self.drag then self:SetAlpha(0.55) end; GameTooltip:Hide() end)
     grip:SetScript("OnClick", function() DB.trkW, DB.trkH = nil, nil; trk:SetWidth(290); RefreshTracker() end)
@@ -4464,7 +4472,7 @@ NearToast = function(g)
     seenNear[g.npc] = true
     local t0 = _G.ForgLevelingFrame
     if t0 and t0:IsShown() and not DB.trkFold then return end   -- 추적 창의 노란 반납 띠가 이미 알려 줘요
-    if Toast then Toast("근처에서 반납할 수 있어요", ("%s · %d개"):format(g.npc, #g.list), "길 앞으로", function()
+    if Toast then Toast("근처에서 반납할 수 있어요", ns.T("%s · %d개"):format(g.npc, #g.list), "길 앞으로", function()
         if trk and trk.PullNear then trk.PullNear() end
     end) end
 end
@@ -4647,7 +4655,7 @@ RefreshTracker = function()
     if near and near.npc ~= trk.nearSnd then trk.nearSnd = near.npc; if AskSound then AskSound() end
     elseif not near then trk.nearSnd = nil end
     if near and not DB.trkFold and DB.autoNear == false then
-        trk.near.t:SetText(("여기서 반납 %d개 · %s"):format(#near.list, near.npc))
+        trk.near.t:SetText(ns.T("여기서 반납 %d개 · %s"):format(#near.list, near.npc))
         trk.near.d:SetText(near.d < 15 and "" or ("%dm"):format(near.d))
         trk.near:Show()
     else
@@ -4697,7 +4705,7 @@ RefreshTracker = function()
         end
     end
     if backN > 0 and not DB.trkFold then
-        trk.dunBand.t:SetText(("%s · 보고하기 %d"):format(CDB.dunBack.name or "던전", backN))
+        trk.dunBand.t:SetText(ns.T("%s · 보고하기 %d"):format(CDB.dunBack.name or "던전", backN))
         trk.dunBand:ClearAllPoints()
         trk.dunBand:SetPoint("TOPLEFT", trk.head, "BOTTOMLEFT", 0, -6 - nearH); trk.dunBand:SetPoint("TOPRIGHT", trk.head, "BOTTOMRIGHT", 0, -6 - nearH)
         trk.dunBand:Show()
@@ -4719,7 +4727,7 @@ RefreshTracker = function()
         trk.count:SetText("")
         trk.grip:Hide()
         if DB.trkFold then trk.hint:Hide(); trk.pick:Hide(); trk:SetHeight(30 + bandH) return end
-        trk.hint:SetText(("%s\n여기서 할 퀘 %d개 · 완료 %d개"):format(MapName(m) or ZoneText(), here, done))
+        trk.hint:SetText(ns.T("%s\n여기서 할 퀘 %d개 · 완료 %d개"):format(MapName(m) or ZoneText(), here, done))
         trk.hint:ClearAllPoints(); trk.hint:SetPoint("TOPLEFT", trk.head, "BOTTOMLEFT", 0, -10 - nearH); trk.hint:SetPoint("RIGHT", 0, 0)
         trk.hint:Show()
         trk.pick:ClearAllPoints(); trk.pick:SetPoint("TOPLEFT", trk.hint, "BOTTOMLEFT", 0, -8); trk.pick:Show()
@@ -4777,7 +4785,7 @@ RefreshTracker = function()
             if newAt[ge.id] and (GetTime() - newAt[ge.id]) < 60 then isNew = true end
         end
         if it.group then
-            r.title:SetText(("%s에게 반납 %d"):format(it.npc, #it.group) .. (isNew and " |cff8fdc9b새 반납|r" or ""))
+            r.title:SetText(ns.T("%s에게 반납 %d"):format(it.npc, #it.group) .. (isNew and " |cff8fdc9b새 반납|r" or ""))
         else
             r.title:SetText(isNew and (e.title .. " |cff8fdc9b새 퀘|r") or e.title)
         end
@@ -4839,7 +4847,7 @@ RefreshTracker = function()
             end
             lines[1] = { table.concat(names, " · "), false }
             if nearG and nearG.npc == it.npc and nearG.d < 15 then
-                lines[2] = { #it.group > 1 and ("▶ 말 걸면 %d개 다 반납할 수 있어요"):format(#it.group) or "▶ 말 걸면 반납할 수 있어요", false, "next" }
+                lines[2] = { #it.group > 1 and ns.T("▶ 말 걸면 %d개 다 반납할 수 있어요"):format(#it.group) or "▶ 말 걸면 반납할 수 있어요", false, "next" }
             end
         elseif e.done then
             local g = guide[e.key]
@@ -4907,10 +4915,10 @@ RefreshTracker = function()
         local he = byId[id]
         if he and not Sel()[id] then held = held + 1; heldName = heldName or he.title else CDB.held[id] = nil end
     end
-    local moreTxt = rest > 0 and ("+ %d개 더"):format(rest) or nil
+    local moreTxt = rest > 0 and ns.T("+ %d개 더"):format(rest) or nil
     if (trk.dunHidden or 0) > 0 then
-        local h = (trk.dunBackN or 0) > 0 and ("|cff9a8a86다른 퀘 %d개는 다 보고하면 다시 보여요|r"):format(trk.dunHidden)
-            or ("|cff9a8a86던전 밖 퀘 %d개는 나오면 다시 보여요|r"):format(trk.dunHidden)
+        local h = (trk.dunBackN or 0) > 0 and ns.T("|cff9a8a86다른 퀘 %d개는 다 보고하면 다시 보여요|r"):format(trk.dunHidden)
+            or ns.T("|cff9a8a86던전 밖 퀘 %d개는 나오면 다시 보여요|r"):format(trk.dunHidden)
         moreTxt = moreTxt and (moreTxt .. "   " .. h) or h
     end
     -- (보류 퀘는 아래 "그 밖의 퀘"에 다 나와요)
@@ -4967,16 +4975,16 @@ do
             local e = self.e
             if not e then return end
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-            GameTooltip:SetText(e.title, 1, 0.84, 0.88)
-            GameTooltip:AddLine(("레벨 %d · %s"):format(e.level or 0, ZoneKey(e)), 0.84, 0.63, 0.61)
-            if e.failed then GameTooltip:AddLine("실패했어요. 퀘판에서 [포기]하고 다시 받아요.", 1, 0.56, 0.56, true)
+            ns.T.Set(GameTooltip, e.title, 1, 0.84, 0.88)
+            ns.T.Add(GameTooltip, ns.T("레벨 %d · %s"):format(e.level or 0, ZoneKey(e)), 0.84, 0.63, 0.61)
+            if e.failed then ns.T.Add(GameTooltip, "실패했어요. 퀘판에서 [포기]하고 다시 받아요.", 1, 0.56, 0.56, true)
             else
                 for _, o in ipairs(e.objs or {}) do
                     local t = (o.have and o.need) and ("%s %d/%d"):format(o.text, o.have, o.need) or o.text
-                    GameTooltip:AddLine("· " .. t, o.done and 0.56 or 0.9, o.done and 0.86 or 0.84, o.done and 0.61 or 0.82)
+                    ns.T.Add(GameTooltip, "· " .. t, o.done and 0.56 or 0.9, o.done and 0.86 or 0.84, o.done and 0.61 or 0.82)
                 end
             end
-            GameTooltip:AddLine("클릭: 지도에서 보기 · Shift+클릭: 자세히 보기" .. (e.failed and "" or " · Ctrl+클릭: 길에 넣기"), 0.75, 0.75, 0.75)
+            ns.T.Add(GameTooltip, "클릭: 지도에서 보기 · Shift+클릭: 자세히 보기" .. (e.failed and "" or " · Ctrl+클릭: 길에 넣기"), 0.75, 0.75, 0.75)
             GameTooltip:Show()
         end)
         r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -5018,8 +5026,8 @@ do
             h.ln:SetPoint("LEFT", h.fs, "RIGHT", 8, 0); h.ln:SetPoint("RIGHT", 0, 0); h.ln:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 0.18)
             h:SetScript("OnClick", function() DB.trkOtherFold = not DB.trkOtherFold; RefreshTracker() end)
             h:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetText("그 밖의 퀘")
-                GameTooltip:AddLine("길에 안 든 받은 퀘예요. 눌러서 접기 / 펴기", 0.85, 0.85, 0.85, true); GameTooltip:Show()
+                GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, "그 밖의 퀘")
+                ns.T.Add(GameTooltip, "길에 안 든 받은 퀘예요. 눌러서 접기 / 펴기", 0.85, 0.85, 0.85, true); GameTooltip:Show()
             end)
             h:SetScript("OnLeave", function() GameTooltip:Hide() end)
             trk.oHead = h
@@ -5027,7 +5035,7 @@ do
         end
         local h = trk.oHead
         h:ClearAllPoints(); h:SetPoint("TOPLEFT", trk, "TOPLEFT", 0, y); h:SetWidth(W)
-        h.fs:SetText(("그 밖의 퀘 %d  |cff8a7a76%s|r"):format(#list, DB.trkOtherFold and "· 펴기" or "· 접기"))
+        h.fs:SetText(ns.T("그 밖의 퀘 %d  |cff8a7a76%s|r"):format(#list, DB.trkOtherFold and "· 펴기" or "· 접기"))
         h:Show()
         y = y - 20
         if not DB.trkOtherFold then
@@ -5074,7 +5082,7 @@ do
             end
             if #list > n then
                 trk.oMore:ClearAllPoints(); trk.oMore:SetPoint("TOPLEFT", trk, "TOPLEFT", 8, y - 3)
-                trk.oMore:SetText(("+ %d개 더 (퀘판에서 보기)"):format(#list - n)); trk.oMore:Show()
+                trk.oMore:SetText(ns.T("+ %d개 더 (퀘판에서 보기)"):format(#list - n)); trk.oMore:Show()
                 y = y - 18
             end
         end
@@ -5106,7 +5114,7 @@ do
         b:SetScript("OnEnter", function(self)
             if not self.link then return end
             GameTooltip:SetOwner(self, "ANCHOR_LEFT"); GameTooltip:SetHyperlink(self.link)
-            GameTooltip:AddLine("누르면 바로 써요", 1, 0.7, 0.76); GameTooltip:Show()
+            ns.T.Add(GameTooltip, "누르면 바로 써요", 1, 0.7, 0.76); GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
         b:Hide()
@@ -5367,15 +5375,15 @@ local function PaintWorldMap()
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 -- 레벨 · 진행 · 경험치 · 돈 · 보상 템 (문제가 생기면 예전처럼 이름만)
                 if not pcall(PinTooltip, gg) then
-                    GameTooltip:SetText(#gg.ns > 1 and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
+                    ns.T.Set(GameTooltip, #gg.ns > 1 and ("이 자리 퀘 " .. #gg.ns .. "개") or "Leel Quest", 1, 0.84, 0.88)
                     for i, num in ipairs(gg.ns) do
                         local e = gg.es[i]
                         local t = e and e.title or "?"
                         if e and e.done then t = t .. " |cffffd34d(반납)|r" end
-                        GameTooltip:AddLine(("|cfff2b3c2%d|r  %s"):format(num, t), 1, 1, 1)
+                        ns.T.Add(GameTooltip, ("|cfff2b3c2%d|r  %s"):format(num, t), 1, 1, 1)
                     end
                 end
-                GameTooltip:AddLine("|cff9a8a86Shift + 클릭 = 르엘 퀘스트에서 보기|r")
+                ns.T.Add(GameTooltip, "|cff9a8a86Shift + 클릭 = 르엘 퀘스트에서 보기|r")
                 GameTooltip:Show()
             end)
             mk:SetScript("OnMouseUp", function(self, btn)
@@ -5620,9 +5628,9 @@ local function ZoneToast()
     if here + done == 0 then return end
     seenZone[zone] = true
     if Voice then Voice("zone") end
-    Toast(zone .. " 도착!", ("받아 둔 퀘 중 여기서 할 것 %d개 · 완료 %d개"):format(here, done), "고르기", function()
+    Toast(zone .. " 도착!", ns.T("받아 둔 퀘 중 여기서 할 것 %d개 · 완료 %d개"):format(here, done), "고르기", function()
         MakeBoard(); board:Show(); AutoRoute()
-    end, zone, ("할 것 %d · 완료 %d"):format(here, done))
+    end, zone, ns.T("할 것 %d · 완료 %d"):format(here, done))
 end
 
 -- 새 퀘를 받으면 (B안): 혼자 하기 좋은 퀘는 알아서 길에 넣고, 위험한 퀘만 물어봐요
@@ -5868,13 +5876,13 @@ SLASH_FORGLEVELING3 = "/퀘판"
 SlashCmdList.FORGLEVELING = function(msg)
     msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if not DB then return end
-    if msg == "따라" or msg == "창" then
+    if msg == "따라" or msg == "창" or msg == "track" then
         if trk then trk:SetShown(not trk:IsShown()) end
-    elseif msg:find("^소리") then
-        local a = msg:gsub("^소리%s*", "")
-        if a == "끔" or a == "끄기" then
+    elseif msg:find("^소리") or msg:find("^sound") then
+        local a = msg:gsub("^소리%s*", ""):gsub("^sound%s*", "")
+        if a == "끔" or a == "끄기" or a == "off" then
             DB.sndOff = true; Print("퀘스트 소리 끔")
-        elseif a == "켬" or a == "켜기" then
+        elseif a == "켬" or a == "켜기" or a == "on" then
             DB.sndOff = nil; DoneSound(); Print("퀘스트 소리 켬")
         else
             Print("퀘스트 소리: " .. (DB.sndOff and "끔" or "켬") .. "  ·  /퀘판 소리 켬 · 끔")
@@ -5883,27 +5891,27 @@ SlashCmdList.FORGLEVELING = function(msg)
     elseif msg == "목표" then
         local e = Route()[1] or log[1]
         if e then Goal(e.id, false, "시험 목표 1/1") end
-    elseif msg == "도장" then
+    elseif msg == "도장" or msg == "stamp" then
         -- 시험: 맨 위 퀘에 완료 도장을 찍어 봐요
         local e = Route()[1] or log[1]
         if e then Goal(e.id, true) end
-    elseif msg:find("^효과") then
-        local a = msg:gsub("^효과%s*", "")
-        if a == "끔" or a == "끄기" then DB.fxOff = true elseif a == "켬" or a == "켜기" then DB.fxOff = nil end
+    elseif msg:find("^효과") or msg:find("^fx") then
+        local a = msg:gsub("^효과%s*", ""):gsub("^fx%s*", "")
+        if a == "끔" or a == "끄기" or a == "off" then DB.fxOff = true elseif a == "켬" or a == "켜기" or a == "on" then DB.fxOff = nil end
         Print("완료 도장 효과: " .. (DB.fxOff and "끔" or "켬") .. "  ·  /퀘판 효과 켬 · 끔  ·  /퀘판 도장 (시험)")
-    elseif msg == "알림" then
+    elseif msg == "알림" or msg == "toast" then
         DB.zoneToast = DB.zoneToast == false
         Print("지역 알림 " .. (DB.zoneToast ~= false and "켬" or "끔"))
     elseif msg == "점검" then
         local m = PlayerMap(); local px, py = PlayerXY(m)
         local e = Route()[1]
-        Print(("지도 %s · 내 위치 %s"):format(tostring(m), px and ("%.1f, %.1f"):format(px, py) or "모름"))
+        Print(ns.T("지도 %s · 내 위치 %s"):format(tostring(m), px and ("%.1f, %.1f"):format(px, py) or "모름"))
         if e then
             local x, y, src = QuestPos(e, m)
-            Print(("첫 퀘 %s · 위치 %s (%s)"):format(e.title, x and ("%.1f, %.1f"):format(x, y) or "모름", SRC[src]))
+            Print(ns.T("첫 퀘 %s · 위치 %s (%s)"):format(e.title, x and ("%.1f, %.1f"):format(x, y) or "모름", SRC[src]))
             if px and x then
                 local yd, dx, dy = Yards(m, px, py, x, y)
-                Print(("거리 %s야드 · 북 %s · 서 %s"):format(tostring(yd and math.floor(yd)), tostring(dx and math.floor(dx)), tostring(dy and math.floor(dy))))
+                Print(ns.T("거리 %s야드 · 북 %s · 서 %s"):format(tostring(yd and math.floor(yd)), tostring(dx and math.floor(dx)), tostring(dy and math.floor(dy))))
             end
         end
     elseif msg == "초기화" then
@@ -5988,7 +5996,7 @@ end
         for _, ic in ipairs(tip._showIcons or {}) do add(ic.data) end
         D("퀘 개수", #ids)
         if #ids == 0 then return end
-        tip:AddLine(" ")
+        ns.T.Add(tip, " ")
         for _, id in ipairs(ids) do
             local ok, lv = pcall(DB.QueryQuestSingle, id, "questLevel")
             local _, req = pcall(DB.QueryQuestSingle, id, "requiredLevel")
@@ -5998,7 +6006,7 @@ end
             if XP and XP.GetQuestLogRewardXP then local okX, v = pcall(XP.GetQuestLogRewardXP, XP, id); if okX then xp = tonumber(v) or 0 end end
             local money = 0
             if XP and XP.GetQuestRewardMoney then local okM, v = pcall(XP.GetQuestRewardMoney, id); if okM then money = tonumber(v) or 0 end end
-            if #ids > 1 and type(name) == "string" then tip:AddLine(LvCol(lv) .. "[" .. (lv or "?") .. "]|r " .. name, 1, 1, 1) end
+            if #ids > 1 and type(name) == "string" then ns.T.Add(tip, LvCol(lv) .. "[" .. (lv or "?") .. "]|r " .. name, 1, 1, 1) end
             local left = (xp > 0) and ("경험치 |cffffd6e0+" .. Comma2(xp) .. "|r") or "경험치 |cff9a8a86?|r"
             local right = (money > 0 and GetCoinTextureString) and GetCoinTextureString(money) or ""
             tip:AddDoubleLine(left, right, 0.95, 0.88, 0.86, 1, 1, 1)
@@ -6008,7 +6016,7 @@ end
             if req and req > 0 then
                 info = info .. (info ~= "" and "  ·  " or "") .. ((myLv < req) and ("|cffff7a7a" .. req .. "레벨부터|r") or ("|cff9a8a86받을 수 있음 " .. req .. "+|r"))
             end
-            if info ~= "" then tip:AddLine(info) end
+            if info ~= "" then ns.T.Add(tip, info) end
             local rw = LogRewards(id)
             if rw and (#rw.items > 0 or #rw.choices > 0) then
                 local s = ""
@@ -6017,12 +6025,12 @@ end
                     for _, tx in ipairs(rw.choices) do s = s .. "|T" .. tx .. ":20:20:0:0|t " end
                     s = s .. " |cff9a8a86중 1개 고르기|r"
                 end
-                tip:AddLine(s)
+                ns.T.Add(tip, s)
             end
         end
         local inLog = false
         for _, id in ipairs(ids) do if byId and byId[id] then inLog = true end end
-        if inLog then tip:AddLine("|cff9a8a86Shift + 클릭 = 르엘 퀘스트에서 보기|r") end
+        if inLog then ns.T.Add(tip, "|cff9a8a86Shift + 클릭 = 르엘 퀘스트에서 보기|r") end
         tip:Show()
     end
     local busy = false   -- 우리가 붙이고 다시 Show 하는 동안 또 불리면 무한 반복 (C stack overflow) → 막기

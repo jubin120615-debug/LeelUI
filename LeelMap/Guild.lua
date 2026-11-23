@@ -27,11 +27,16 @@ local function DB()
     return d
 end
 
-local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Map]|r " .. msg) end
+-- 영어 (르엘 UI 언어 설정을 따라가요)
+local function T(s) local L = _G.LeelUI; if L and L.L then return L.L(s) end return s end
+local function TipAdd(s, ...) return GameTooltip:AddLine(T(s), ...) end
+local function TipSet(s, ...) return GameTooltip:SetText(T(s), ...) end
+local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Map]|r " .. T(msg)) end
 
 local function Font(parent, size, color, file)
     local fs = parent:CreateFontString(nil, "OVERLAY")
     local L = _G.LeelUI
+    if L and L.LWrap then L.LWrap(fs) end
     fs:SetFont(file or (L and L.FONT) or FONT, size, "")
     fs:SetShadowColor(0, 0, 0, 0.9); fs:SetShadowOffset(1, -1)
     color = color or C.tx
@@ -185,12 +190,12 @@ local function MakePin(parent, size)
         if not e then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         local r, g, bl = ClassColor(e.cls)
-        GameTooltip:SetText(e.name, r, g, bl)
+        TipSet(e.name, r, g, bl)
         local cname = e.cls and LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[e.cls] or ""
-        GameTooltip:AddLine(("레벨 %d %s"):format(e.lvl or 0, cname), 1, 1, 1)
+        TipAdd(T("레벨 %d %s"):format(e.lvl or 0, cname), 1, 1, 1)
         local d = Dist(e)
-        GameTooltip:AddLine(MapName(e.map) .. (d and ("  ·  " .. DistText(d)) or ""), C.accHi[1], C.accHi[2], C.accHi[3])
-        GameTooltip:AddLine("클릭: 귓말 · 오른쪽 클릭: 길 안내 핀", 0.75, 0.75, 0.75)
+        TipAdd(MapName(e.map) .. (d and ("  ·  " .. DistText(d)) or ""), C.accHi[1], C.accHi[2], C.accHi[3])
+        TipAdd("클릭: 귓말 · 오른쪽 클릭: 길 안내 핀", 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -352,8 +357,8 @@ local function MakePanel()
     if _G.LeelMapPlaceTools then _G.LeelMapPlaceTools() end
     pill:SetScript("OnClick", function() list:SetShown(not list:IsShown()); PanelPaint() end)
     pill:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT"); GameTooltip:SetText("르엘 UI 쓰는 길드원")
-        GameTooltip:AddLine("누르면 목록 · 목록에서 클릭하면 그 지역 지도로, 오른쪽 클릭은 귓말", 0.85, 0.85, 0.85, true); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT"); TipSet("르엘 UI 쓰는 길드원")
+        TipAdd("누르면 목록 · 목록에서 클릭하면 그 지역 지도로, 오른쪽 클릭은 귓말", 0.85, 0.85, 0.85, true); GameTooltip:Show()
     end)
     pill:SetScript("OnLeave", function() GameTooltip:Hide() end)
     panel.pill, panel.list, panel.rows = pill, list, {}

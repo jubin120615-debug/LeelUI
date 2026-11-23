@@ -1663,7 +1663,7 @@ local function CreateCenter(hud)
             return
         elseif msg == "지우기" then
             if ns.db then ns.db.tlog = {} end
-            print("|cfff2b3c2[토템]|r 기록을 지웠어요")
+            print(ns.L("|cfff2b3c2[토템]|r 기록을 지웠어요"))
             return
         end
         if ns.ToggleHub then ns:ToggleHub("LeelUI_TotemSet") end
@@ -1766,10 +1766,10 @@ local function CreatePet(hud, preview)
         local N = { "불만", "보통", "행복" }
         local CC = { { 1, 0.42, 0.42 }, { 1, 0.83, 0.42 }, { 0.5, 0.84, 0.48 } }
         local c = CC[h] or { 1, 1, 1 }
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("만족도: " .. (N[h] or "?") .. (dmg and ("  ·  피해 " .. dmg .. "%") or ""), c[1], c[2], c[3])
-        if loy and loy ~= 0 then GameTooltip:AddLine("충성도 " .. (loy > 0 and "오르는 중" or "내려가는 중"), 0.8, 0.74, 0.72) end
-        if h == 1 then GameTooltip:AddLine("먹이를 주세요!", 1, 0.42, 0.42) end
+        ns.TAdd(GameTooltip, " ")
+        ns.TAdd(GameTooltip, "만족도: " .. (N[h] or "?") .. (dmg and ("  ·  피해 " .. dmg .. "%") or ""), c[1], c[2], c[3])
+        if loy and loy ~= 0 then ns.TAdd(GameTooltip, "충성도 " .. (loy > 0 and "오르는 중" or "내려가는 중"), 0.8, 0.74, 0.72) end
+        if h == 1 then ns.TAdd(GameTooltip, "먹이를 주세요!", 1, 0.42, 0.42) end
         GameTooltip:Show()
     end)
     return f
@@ -1826,7 +1826,7 @@ function ns.StylePet(f, isPv)
     if ok and type(h) == "number" and not ns.IsSecret(h) then
         if h == 1 and (f.lastHappy or 0) > 1 then
             local a = O("alert")
-            if a == "chat" then print("|cfff2b3c2[르엘 펫]|r 펫이 배고파요. 먹이를 주세요!")
+            if a == "chat" then print(ns.L("|cfff2b3c2[르엘 펫]|r 펫이 배고파요. 먹이를 주세요!"))
             elseif a == "sound" then pcall(PlaySoundFile, ns.MEDIA .. "leel_black_warn.ogg", "Master") end
         end
         f.lastHappy = h
@@ -1885,8 +1885,8 @@ local function SetupFollow(f)
     bf:SetAlpha(0)
     bf:HookScript("PreClick", function() local ok, n = pcall(UnitName, "target"); if ok then pending = n end end)
     bf:SetScript("OnEnter", function(s2)
-        GameTooltip:SetOwner(s2, "ANCHOR_RIGHT"); GameTooltip:AddLine("따라가기", 1, 0.84, 0.88)
-        GameTooltip:AddLine("초상화 Alt + 클릭도 돼요 · 움직이면 멈춰요", 0.75, 0.68, 0.66); GameTooltip:Show()
+        GameTooltip:SetOwner(s2, "ANCHOR_RIGHT"); ns.TAdd(GameTooltip, "따라가기", 1, 0.84, 0.88)
+        ns.TAdd(GameTooltip, "초상화 Alt + 클릭도 돼요 · 움직이면 멈춰요", 0.75, 0.68, 0.66); GameTooltip:Show()
     end)
     bf:SetScript("OnLeave", function() GameTooltip:Hide() end)
     local pill = CreateFrame("Frame", nil, f); pill:SetHeight(20); pill:SetFrameLevel(por:GetFrameLevel() + 9)
@@ -1929,7 +1929,7 @@ local function SetupFollow(f)
             if type(followName) == "string" then followName = followName:gsub("%-.*$", "") end
             if ns.db and ns.db.followDbg then print("|cfff2b3c2[따라가기]|r 시작 이름=" .. tostring(name) .. " · 대상=" .. tostring(UnitName("target"))) end
         elseif event == "AUTOFOLLOW_END" then
-            if followName then print("|cfff2b3c2르엘|r 따라가기 끝: " .. followName) end
+            if followName then print(ns.L("|cfff2b3c2르엘|r 따라가기 끝: " .. followName)) end
             followName = nil
         end
         Paint()
@@ -2500,8 +2500,8 @@ do
                 local have = GetTotemInfo(i)
                 if issecret(have) then have = self.lastIcon ~= nil end
                 if have and GameTooltip.SetTotem then pcall(GameTooltip.SetTotem, GameTooltip, i)
-                else GameTooltip:SetText(e[1] .. " 토템"); GameTooltip:AddLine("깔린 토템이 없어요", 0.8, 0.8, 0.8) end
-                GameTooltip:AddLine("오른쪽 클릭: 토템 없애기", 0.95, 0.70, 0.76)
+                else ns.TSet(GameTooltip, e[1] .. " 토템"); ns.TAdd(GameTooltip, "깔린 토템이 없어요", 0.8, 0.8, 0.8) end
+                ns.TAdd(GameTooltip, "오른쪽 클릭: 토템 없애기", 0.95, 0.70, 0.76)
                 GameTooltip:Show()
             end)
             b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2617,7 +2617,7 @@ do
         for e = 1, 4 do
             local have, name, start, dur = GetTotemInfo(e)
             if issecret(have) or issecret(name) then out[#out + 1] = e .. ":비밀"
-            elseif have and name and name ~= "" then out[#out + 1] = e .. ":" .. name .. string.format("(%d초)", math.max(0, (start or 0) + (dur or 0) - GetTime()))
+            elseif have and name and name ~= "" then out[#out + 1] = e .. ":" .. name .. string.format(ns.L("(%d초)"), math.max(0, (start or 0) + (dur or 0) - GetTime()))
             else out[#out + 1] = e .. ":-" end
         end
         return table.concat(out, " ")
@@ -2769,23 +2769,23 @@ do
             Motion(true)
             local tt = SDB()
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            GameTooltip:SetText("토템 세트 · " .. (SETNAMES[tt.cur] or ""), 0.95, 0.70, 0.76)
+            ns.TSet(GameTooltip, "토템 세트 · " .. (SETNAMES[tt.cur] or ""), 0.95, 0.70, 0.76)
             for k, id in ipairs(seq) do
                 local e = ElemOf(id)
                 local c = e and ELEM[e][2] or { 1, 1, 1 }
                 local mark = (k <= step) and "|TInterface\\RaidFrame\\ReadyCheck-Ready:12|t " or (k == step + 1 and "|cfff2b3c2>>|r " or "     ")
-                GameTooltip:AddLine(mark .. (SpellName(id) or "?"), c[1], c[2], c[3])
+                ns.TAdd(GameTooltip, mark .. (SpellName(id) or "?"), c[1], c[2], c[3])
             end
             if #seq == 0 then
-                if #CurList() > 0 then GameTooltip:AddLine("토템이 다 깔려 있어요 (끝나거나 거두면 다시 깔 수 있어요)", 0.62, 0.88, 0.54)
-                else GameTooltip:AddLine("허브 > 토템 세트에서 토템을 골라 주세요", 0.8, 0.8, 0.8) end
+                if #CurList() > 0 then ns.TAdd(GameTooltip, "토템이 다 깔려 있어요 (끝나거나 거두면 다시 깔 수 있어요)", 0.62, 0.88, 0.54)
+                else ns.TAdd(GameTooltip, "허브 > 토템 세트에서 토템을 골라 주세요", 0.8, 0.8, 0.8) end
             end
             local key = tt.key or ""
-            GameTooltip:AddLine(" ")
-            if key ~= "" then GameTooltip:AddLine(key .. ": 다음 토템 깔기" .. ((tt.shift and not key:find("-", 1, true)) and ("  ·  Shift+" .. key .. ": 다음 세트") or ""), 0.8, 0.74, 0.72) end
-            if tt.recallKey and tt.recallKey ~= "" then GameTooltip:AddLine(tt.recallKey .. ": " .. RECALL, 0.8, 0.74, 0.72) end
-            GameTooltip:AddLine("오른쪽 클릭: 1번부터 다시 (전투 밖)", 0.8, 0.74, 0.72)
-            GameTooltip:AddLine("세트 고치기: 아래 세트 이름 오른쪽 클릭 · /르엘토템", 0.8, 0.74, 0.72)
+            ns.TAdd(GameTooltip, " ")
+            if key ~= "" then ns.TAdd(GameTooltip, key .. ": 다음 토템 깔기" .. ((tt.shift and not key:find("-", 1, true)) and ("  ·  Shift+" .. key .. ": 다음 세트") or ""), 0.8, 0.74, 0.72) end
+            if tt.recallKey and tt.recallKey ~= "" then ns.TAdd(GameTooltip, tt.recallKey .. ": " .. RECALL, 0.8, 0.74, 0.72) end
+            ns.TAdd(GameTooltip, "오른쪽 클릭: 1번부터 다시 (전투 밖)", 0.8, 0.74, 0.72)
+            ns.TAdd(GameTooltip, "세트 고치기: 아래 세트 이름 오른쪽 클릭 · /르엘토템", 0.8, 0.74, 0.72)
             GameTooltip:Show()
         end)
         q:SetScript("OnLeave", function() Motion(false); GameTooltip:Hide() end)
@@ -2833,9 +2833,9 @@ do
         end)
         tb:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            GameTooltip:SetText("토템 세트 · " .. (SETNAMES[SDB().cur] or ""), 0.95, 0.70, 0.76)
-            GameTooltip:AddLine("클릭: 사냥 → 던전 → 보스 (전투 밖)", 0.8, 0.74, 0.72)
-            GameTooltip:AddLine("오른쪽 클릭: 세트 고치기 (허브)", 0.8, 0.74, 0.72)
+            ns.TSet(GameTooltip, "토템 세트 · " .. (SETNAMES[SDB().cur] or ""), 0.95, 0.70, 0.76)
+            ns.TAdd(GameTooltip, "클릭: 사냥 → 던전 → 보스 (전투 밖)", 0.8, 0.74, 0.72)
+            ns.TAdd(GameTooltip, "오른쪽 클릭: 세트 고치기 (허브)", 0.8, 0.74, 0.72)
             GameTooltip:Show()
         end)
         tb:SetScript("OnLeave", function() GameTooltip:Hide() end)

@@ -232,8 +232,8 @@ local function ClockButton(parent, flat)
     end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("시계")
-        GameTooltip:AddLine("누르면 시계/알람 창", 0.84, 0.63, 0.61)
+        ns.TAdd(GameTooltip, "시계")
+        ns.TAdd(GameTooltip, "누르면 시계/알람 창", 0.84, 0.63, 0.61)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -255,8 +255,8 @@ local function BunnyButton(parent, size)
     end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
-        GameTooltip:AddLine("|cfff2b3c2르엘|r UI")
-        GameTooltip:AddLine("좌클릭: 르엘 허브   우클릭: 이동 모드", 1, 1, 1)
+        ns.TAdd(GameTooltip, "|cfff2b3c2르엘|r UI")
+        ns.TAdd(GameTooltip, "좌클릭: 르엘 허브   우클릭: 이동 모드", 1, 1, 1)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -723,6 +723,10 @@ local function Dedupe(comp)
     if type(list) ~= "table" then return end
     local Icon = LibStub and LibStub("LibDBIcon-1.0", true)
     local changed = false
+    -- 퀘스티는 르엘이 넣은 칸을 써요 (라이브러리 칸은 눌러도 창이 안 떠요)
+    if collected["Questie"] and Icon and Icon.IsButtonInCompartment and Icon:IsButtonInCompartment("Questie") then
+        pcall(Icon.RemoveButtonFromCompartment, Icon, "Questie"); changed = true
+    end
     for i = #list, 1, -1 do
         local d = list[i]
         local mine = type(d) == "table" and (d.leelOurs or addedByUs[NormName(d.text)])
@@ -765,6 +769,41 @@ local function Collect()
     local comp = _G.AddonCompartmentFrame
     if not (comp and comp.RegisterAddon) then return end
     local Icon = LibStub and LibStub("LibDBIcon-1.0", true)
+    -- 퀘스티: 목록에서 누르면 퀘스티가 "목록 메뉴"로 알아듣고 아무 창도 안 떠요
+    --   → 르엘이 따로 넣어요: 왼쪽 클릭 = 퀘스티 설정 창 · 오른쪽 클릭 = 퀘스티 메뉴 · Shift+왼쪽 = 내 여정
+    local qbtn = Icon and Icon.objects and Icon.objects["Questie"]
+    if qbtn and not collected["Questie"] then
+        collected["Questie"] = true
+        if Icon.IsButtonInCompartment and Icon:IsButtonInCompartment("Questie") then pcall(Icon.RemoveButtonFromCompartment, Icon, "Questie") end
+        local LDB = LibStub("LibDataBroker-1.1", true)
+        local obj = LDB and LDB:GetDataObjectByName("Questie")
+        pcall(comp.RegisterAddon, comp, { leelOurs = true,
+            text = "Questie", icon = (obj and obj.icon) or "Interface\\Addons\\Questie\\Icons\\questie.png",
+            notCheckable = true, registerForAnyClick = true,
+            func = function(_, data)
+                local btn = (data and data.buttonName) or "LeftButton"
+                if btn == "LeftButton" and not IsShiftKeyDown() and not IsControlKeyDown() then
+                    local ok = pcall(function()
+                        local E = QuestieLoader and QuestieLoader:ImportModule("QuestieOptionsEngine")
+                        E:ToggleConfigWindow()
+                    end)
+                    if ok then return end
+                end
+                -- 퀘스티 자기 클릭 (창 대신 nil → 목록 메뉴로 오해하지 않게)
+                if obj and obj.OnClick then pcall(obj.OnClick, nil, btn) end
+            end,
+            funcOnEnter = function(b)
+                if not (obj and obj.OnTooltipShow) then return end
+                GameTooltip:SetOwner(b, "ANCHOR_LEFT")
+                pcall(obj.OnTooltipShow, GameTooltip)
+                ns.TAdd(GameTooltip, " ")
+                ns.TAdd(GameTooltip, "르엘: 왼쪽 클릭 = 퀘스티 설정 · Shift+왼쪽 = 내 여정", 1, 0.84, 0.88)
+                GameTooltip:Show()
+            end,
+            funcOnLeave = function() GameTooltip:Hide() end,
+        })
+        Keep(qbtn)
+    end
     -- LibDBIcon 버튼: 라이브러리 기능으로 목록에 넣고 숨김
     if Icon and Icon.objects then
         for name, btn in pairs(Icon.objects) do

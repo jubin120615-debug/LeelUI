@@ -31,7 +31,12 @@ local BAR_ORDER = { 8, 7, 6, 5, 4, 3, 2, 1 }
 local defaults = { pos = nil, show = "group", announce = false, scale = 1, order = true }
 local db
 
-local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Mark]|r " .. msg) end
+-- 영어 (르엘 UI 언어 설정을 따라가요)
+local function T(s) local L = _G.LeelUI; if L and L.L then return L.L(s) end return s end
+local function TipAdd(s, ...) return GameTooltip:AddLine(T(s), ...) end
+local function TipSet(s, ...) return GameTooltip:SetText(T(s), ...) end
+local function EN() local L = _G.LeelUI; return L and L.EnOn and L.EnOn() or false end
+local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Mark]|r " .. T(msg)) end
 
 ----------------------------------------------------------------------
 -- 징 읽기·찍기 (숨겨진 값이어도 에러 없이)
@@ -239,10 +244,11 @@ local function BuildAutoMacro()
         oi = oi + 1
     end
     local parts = {}
-    if got[8] then parts[#parts + 1] = "해골 먼저" end
-    if got[7] then parts[#parts + 1] = "X 다음" end
-    for m, r in pairs(roles) do if got[m] then parts[#parts + 1] = MARK_NAME[m] .. "는 " .. r end end
-    if cut > 0 then parts[#parts + 1] = "멀리 있는 " .. cut .. "마리는 뺐어요" end
+    local en = EN()
+    if got[8] then parts[#parts + 1] = en and "Skull first" or "해골 먼저" end
+    if got[7] then parts[#parts + 1] = en and "X next" or "X 다음" end
+    for m, r in pairs(roles) do if got[m] then parts[#parts + 1] = en and (T(MARK_NAME[m]) .. ": " .. T(r)) or (MARK_NAME[m] .. "는 " .. r) end end
+    if cut > 0 then parts[#parts + 1] = en and (cut .. " far away left out") or ("멀리 있는 " .. cut .. "마리는 뺐어요") end
     return table.concat(lines, "\n"), table.concat(parts, " · ")
 end
 
@@ -337,13 +343,14 @@ local function PlanText(plan)
     table.sort(kills, function(a, b) return a[2] < b[2] end)
     local parts, chain = {}, {}
     for i, k in ipairs(kills) do
-        chain[#chain + 1] = RT[k[1]] .. (i == 1 and " 먼저" or (i == 2 and " 다음" or (" " .. i .. "번")))
+        if EN() then chain[#chain + 1] = RT[k[1]] .. (i == 1 and " first" or (i == 2 and " next" or (" #" .. i)))
+        else chain[#chain + 1] = RT[k[1]] .. (i == 1 and " 먼저" or (i == 2 and " 다음" or (" " .. i .. "번"))) end
     end
     if #chain > 0 then parts[#parts + 1] = table.concat(chain, " → ") end
     for _, idx in ipairs({ 5, 6, 1, 2, 3, 4, 7, 8 }) do
         local p = plan[idx]
         if p and p.kind == "cc" and (not any or used[idx]) then
-            parts[#parts + 1] = RT[idx] .. " " .. ((p.who ~= "" and (p.who .. " ")) or "") .. p.role
+            parts[#parts + 1] = RT[idx] .. " " .. ((p.who ~= "" and (p.who .. " ")) or "") .. (EN() and T(p.role) or p.role)
         end
     end
     return table.concat(parts, " · ")
@@ -387,8 +394,8 @@ end
 local function Tip(b, title, line)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(title, 1, 1, 1)
-        if line then GameTooltip:AddLine(line, C.tx2[1], C.tx2[2], C.tx2[3], true) end
+        TipAdd(title, 1, 1, 1)
+        if line then TipAdd(line, C.tx2[1], C.tx2[2], C.tx2[3], true) end
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -426,17 +433,17 @@ local function MarkBtn(parent, idx)
     local bo = b.badge:CreateTexture(nil, "ARTWORK"); bo:SetTexture(MEDIA .. "circle"); bo:SetPoint("CENTER"); bo:SetSize(18, 18)
     bo:SetVertexColor(C.plate[1], C.plate[2], C.plate[3], 1)
     b.badgeIn = b.badge:CreateTexture(nil, "ARTWORK", nil, 1); b.badgeIn:SetTexture(MEDIA .. "circle"); b.badgeIn:SetAllPoints()
-    b.badgeFs = b.badge:CreateFontString(nil, "OVERLAY"); LeelFont(b.badgeFs, 10, ""); b.badgeFs:SetPoint("CENTER", 0, 0)
+    b.badgeFs = b.badge:CreateFontString(nil, "OVERLAY"); if _G.LeelUI and _G.LeelUI.LWrap then _G.LeelUI.LWrap(b.badgeFs) end; LeelFont(b.badgeFs, 10, ""); b.badgeFs:SetPoint("CENTER", 0, 0)
     b.badgeFs:SetTextColor(C.ink[1], C.ink[2], C.ink[3])
     b:SetScript("OnEnter", function(self)
         self.ring:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(MARK_NAME[idx], 1, 1, 1)
+        TipAdd(MARK_NAME[idx], 1, 1, 1)
         local p = self.plan
-        if p and p.kind == "kill" then GameTooltip:AddLine(p.n .. "번째로 잡아요", 1, 0.84, 0.88)
-        elseif p then GameTooltip:AddLine(((p.who ~= "" and (p.who .. " ")) or "") .. p.role, 1, 0.84, 0.88)
-        else GameTooltip:AddLine("안 씀", 0.6, 0.55, 0.53) end
-        GameTooltip:AddLine("왼쪽 클릭: 대상에 찍기 · 오른쪽 클릭: 대상 징 지우기", C.tx2[1], C.tx2[2], C.tx2[3])
+        if p and p.kind == "kill" then TipAdd(p.n .. "번째로 잡아요", 1, 0.84, 0.88)
+        elseif p then TipAdd(((p.who ~= "" and (p.who .. " ")) or "") .. p.role, 1, 0.84, 0.88)
+        else TipAdd("안 씀", 0.6, 0.55, 0.53) end
+        TipAdd("왼쪽 클릭: 대상에 찍기 · 오른쪽 클릭: 대상 징 지우기", C.tx2[1], C.tx2[2], C.tx2[3])
         GameTooltip:Show()
         if OpenDrawer then OpenDrawer(idx) end
     end)
@@ -462,7 +469,7 @@ local function BuildDrawer()
     for k, c in ipairs(CHIPS) do
         local ch = CreateFrame("Button", nil, drawer); ch:SetHeight(22)
         ch.bg = PillTex(ch, "pill22", 11, C.btn, 1); ch.bg:SetAllPoints()
-        ch.fs = ch:CreateFontString(nil, "OVERLAY"); LeelFont(ch.fs, 11.5, ""); ch.fs:SetPoint("CENTER")
+        ch.fs = ch:CreateFontString(nil, "OVERLAY"); if _G.LeelUI and _G.LeelUI.LWrap then _G.LeelUI.LWrap(ch.fs) end; LeelFont(ch.fs, 11.5, ""); ch.fs:SetPoint("CENTER")
         ch.key = c[1]
         ch:SetScript("OnClick", function(self)
             if not drawerIdx then return end
@@ -650,7 +657,7 @@ local function CreateBar()
     bun:SetScript("OnDragStop", function() bar:StopMovingOrSizing(); SavePos(); ApplyPos() end)
     Tip(bun, "Leel Mark", "끌어서 옮기기 · 징에 마우스 = 약속 서랍 · 단축키(애드온 > Leel Mark) · /lmark")
     -- 다른 파티원 약속을 따를 때: 바 위에 작게
-    bar.fromFs = bar:CreateFontString(nil, "OVERLAY"); LeelFont(bar.fromFs, 10.5, ""); bar.fromFs:SetTextColor(1, 0.84, 0.88)
+    bar.fromFs = bar:CreateFontString(nil, "OVERLAY"); if _G.LeelUI and _G.LeelUI.LWrap then _G.LeelUI.LWrap(bar.fromFs) end; LeelFont(bar.fromFs, 10.5, ""); bar.fromFs:SetTextColor(1, 0.84, 0.88)
     bar.fromFs:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", 14, 2)
 
     for idx = 1, 8 do MarkBtn(bar, idx) end

@@ -37,7 +37,7 @@ end
 -- 이름만: "이름-서버" / 와우 포에버 채팅의 "이름 길드" 꼴도 앞 이름만 (와우 이름엔 띄어쓰기가 없어요)
 local function Short(name) return name and (name:gsub("%-.*$", ""):gsub("%s.*$", "")) or "" end
 local function ItemID(link) return link and tonumber(link:match("item:(%d+)")) end
-local function P(m) print("|cfff2b3c2[르엘 주사위]|r " .. m) end
+local function P(m) print(ns.L("|cfff2b3c2[르엘 주사위]|r ") .. ns.L(m)) end
 
 ----------------------------------------------------------------------
 -- 내 특성 · 역할 이름 ("야성 드루이드 기준 · 근접 딜")
@@ -61,6 +61,11 @@ local function BasisText()
     local spec = SpecName()
     local role = ns.GearRole and ns.GearRoleName and ns.GearRoleName[ns.GearRole()]
     local auto = not (ns.GearDB and ns.GearDB().role)
+    if ns.EnOn and ns.EnOn() then
+        local t = "Based on " .. (spec and (spec .. " ") or "") .. cls
+        if role then t = t .. " · " .. ns.L(role) .. (auto and "" or " (manual)") end
+        return t
+    end
     local t = (spec and (spec .. " ") or "") .. cls .. " 기준"
     if role then t = t .. " · " .. role .. (auto and "" or " (직접 고름)") end
     return t
@@ -82,7 +87,7 @@ local function Gains(res, n)
         local g = res.gains[i]
         local v = g.d
         local num = (math.abs(v - math.floor(v + 0.5)) < 0.05) and string.format("%d", math.floor(v + 0.5)) or string.format("%.1f", v)
-        out[#out + 1] = (names[g.k] or g.k) .. " +" .. num
+        out[#out + 1] = (((ns.EnOn and ns.EnOn()) and ns.GearStatNameEn and ns.GearStatNameEn[g.k]) or names[g.k] or g.k) .. " +" .. num
     end
     return table.concat(out, " · ")
 end
@@ -104,8 +109,9 @@ local function RecommendBase(e)
         end
         return w .. a
     end
+    local en = ns.EnOn and ns.EnOn()
     if res.kind == "cant" then
-        return "greed", TXT_NO, "● 못 껴요" .. (res.reason and (" · " .. res.reason) or ""), true
+        return "greed", TXT_NO, (en and "● Can't wear" or "● 못 껴요") .. (res.reason and (" · " .. res.reason) or ""), true
     end
     -- 주 방어구가 아니면 (전사가 가죽 등) 차비
     if GetItemInfoInstant then
@@ -115,9 +121,23 @@ local function RecommendBase(e)
         if ok and classID == 4 and ARMOR_SLOT[equipLoc] and main and subID and subID >= 1 and subID <= 4 then
             if main >= 3 and (UnitLevel("player") or 60) < 40 then main = main - 1 end   -- 사슬 · 판금은 40레벨부터
             if subID < main then
-                return "greed", TXT_SIDE, "● " .. (ARMOR_NAME[subID] or "") .. "은 주 방어구가 아니에요", true
+                return "greed", TXT_SIDE, en and ("● " .. ns.L(ARMOR_NAME[subID] or "") .. " isn't your main armor") or ("● " .. (ARMOR_NAME[subID] or "") .. "은 주 방어구가 아니에요"), true
             end
         end
+    end
+    if en then
+        local sn = ns.L(slotName):lower()
+        if res.kind == "empty" then return "need", TXT_UP, "▲ Your " .. sn .. " slot is empty · equip it" end
+        if res.kind == "twohand" then return nil, TXT_SIDE, "● Hard to compare with a two-hander equipped" end
+        local role = ns.L(ns.GearRoleName and ns.GearRole and ns.GearRoleName[ns.GearRole()] or "your role")
+        if #(res.gains or {}) == 0 and (res.new or 0) <= 0.5 then return "greed", TXT_SIDE, "● No useful stats for " .. role, true end
+        if res.kind == "up" then
+            local g = Gains(res, 2)
+            return "need", TXT_UP, "▲ Better than your " .. sn .. (g ~= "" and (" · " .. g) or "")
+        elseif res.kind == "down" then
+            return "greed", TXT_SIDE, "● Your current " .. sn .. " is better"
+        end
+        return nil, TXT_SIDE, "● About the same as your " .. sn .. " · your call"
     end
     if res.kind == "empty" then return "need", TXT_UP, "▲ " .. slotName .. " 칸이 비어 있어요 · 바로 끼자" end
     if res.kind == "twohand" then return nil, TXT_SIDE, "● 양손 무기를 들고 있어 비교가 어려워요" end
@@ -231,8 +251,13 @@ local function WhoseText(link)
         local ok, _, _, _, loc, _, classID, subID = pcall(GetItemInfoInstant, link)
         if ok and classID == 4 and ARMOR_SLOT[loc] and ARMOR_NAME[subID] then pre = ARMOR_NAME[subID] .. " 장비 · " end
     end
-    if #names == 0 then return pre ~= "" and (pre .. "다른 사람 몫") or nil end
     if #names > 3 then names = { names[1], names[2], names[3] } end
+    if ns.EnOn and ns.EnOn() then
+        pre = pre:gsub("^(.-) 장비 · $", function(a) return ns.L(a) .. " · " end)
+        if #names == 0 then return pre ~= "" and (pre .. "for someone else") or nil end
+        return pre .. "for " .. table.concat(names, " · ")
+    end
+    if #names == 0 then return pre ~= "" and (pre .. "다른 사람 몫") or nil end
     return pre .. table.concat(names, " · ") .. " 몫"
 end
 
@@ -244,7 +269,7 @@ local function Recommend(e)
     if #fits > 0 then
         local names = {}
         for i = 1, math.min(2, #fits) do names[#names + 1] = fits[i].name .. "(" .. fits[i].clsName .. ")" end
-        e.party = table.concat(names, ", ") .. (#fits > 2 and (" 외 " .. (#fits - 2) .. "명") or "")
+        e.party = table.concat(names, ", ") .. (#fits > 2 and ((ns.EnOn and ns.EnOn()) and (" +" .. (#fits - 2)) or (" 외 " .. (#fits - 2) .. "명")) or "")
         local _, myCls = UnitClass("player")
         local mine = FitOf(myCls, UnitLevel("player"), e.link)
         if rec == "need" and fits[1].fit > mine then
@@ -254,7 +279,11 @@ local function Recommend(e)
     if notMine then
         e.notMine = true
         -- 파티에 맞는 사람이 있으면 그 사람 몫, 없으면 맞는 직업들
+        if ns.EnOn and ns.EnOn() then
+            e.whose = (#fits > 0) and ("for " .. fits[1].name .. "(" .. fits[1].clsName .. ")" .. (#fits > 1 and (" · +" .. (#fits - 1)) or "")) or WhoseText(e.link)
+        else
         e.whose = (#fits > 0) and (fits[1].name .. "(" .. fits[1].clsName .. ") 몫" .. (#fits > 1 and (" · 외 " .. (#fits - 1) .. "명") or "")) or WhoseText(e.link)
+        end
         -- 이유 줄은 짧은 원래 이유를 툴팁용으로 남기고, 카드엔 누구 몫인지
         e.whyLong = why
         return "greed", { 0.72, 0.65, 0.63 }, e.whose or why
@@ -569,10 +598,10 @@ local function MakeBadge()
         s.target = 56
         s.icon:SetRotation(math.rad(8)); s.aura:SetVertexColor(1, 0.561, 0.639, 0.6)   -- 마우스: 살짝 기울고 뒤 빛 밝게
         GameTooltip:SetOwner(s, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cfff2b3c2르엘 주사위|r")
-        GameTooltip:AddLine("클릭: 기록장 · 블랙리스트 · 미리 보기 · 설정", 0.85, 0.78, 0.76)
-        GameTooltip:AddLine("오른쪽 클릭: 경매 창 접기 · 펴기", 0.85, 0.78, 0.76)
-        GameTooltip:AddLine("끌기: 옮기기 · Shift + 휠: 크기 (" .. (DB().scale or 100) .. "%)", 0.85, 0.78, 0.76)
+        ns.TAdd(GameTooltip, "|cfff2b3c2르엘 주사위|r")
+        ns.TAdd(GameTooltip, "클릭: 기록장 · 블랙리스트 · 미리 보기 · 설정", 0.85, 0.78, 0.76)
+        ns.TAdd(GameTooltip, "오른쪽 클릭: 경매 창 접기 · 펴기", 0.85, 0.78, 0.76)
+        ns.TAdd(GameTooltip, "끌기: 옮기기 · Shift + 휠: 크기 (" .. (DB().scale or 100) .. "%)", 0.85, 0.78, 0.76)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function(s) s.target = 50; s.icon:SetRotation(0); s.aura:SetVertexColor(1, 0.561, 0.639, 0.25); GameTooltip:Hide() end)
@@ -685,8 +714,8 @@ local function RoundBtn(card, col, tex, label)
     b.ag = ag
     b:SetScript("OnEnter", function(s)
         s.bg:SetVertexColor(math.min(1, s.col[1] + 0.12), math.min(1, s.col[2] + 0.12), math.min(1, s.col[3] + 0.12), 1)
-        GameTooltip:SetOwner(s, "ANCHOR_TOP"); GameTooltip:AddLine(s.isRec and (s.tip .. "  |cffff8fa3(토끼 추천)|r") or s.tip)
-        if s.isRec then GameTooltip:AddLine(BasisText(), 1, 0.7, 0.48) end
+        GameTooltip:SetOwner(s, "ANCHOR_TOP"); ns.TAdd(GameTooltip, s.isRec and (s.tip .. "  |cffff8fa3(토끼 추천)|r") or s.tip)
+        if s.isRec then ns.TAdd(GameTooltip, BasisText(), 1, 0.7, 0.48) end
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function(s) s.bg:SetVertexColor(s.col[1], s.col[2], s.col[3], 1); GameTooltip:Hide() end)
@@ -730,9 +759,9 @@ local function BoardRow(card, i)
         local b = s2.who and ns.BlackGet and ns.BlackGet(s2.who)
         if not b then return end
         GameTooltip:SetOwner(s2, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("|cffff6b7f블랙리스트|r  " .. s2.who)
-        if b.note and b.note ~= "" then GameTooltip:AddLine(b.note, 1, 0.6, 0.66, true) end
-        GameTooltip:AddLine(date("%m월 %d일", b.at or time()) .. " · 같이 만남 " .. (b.met or 0) .. "번", 0.6, 0.55, 0.53)
+        ns.TAdd(GameTooltip, "|cffff6b7f블랙리스트|r  " .. s2.who)
+        if b.note and b.note ~= "" then ns.TAdd(GameTooltip, b.note, 1, 0.6, 0.66, true) end
+        ns.TAdd(GameTooltip, date(ns.L("%m월 %d일"), b.at or time()) .. " · 같이 만남 " .. (b.met or 0) .. "번", 0.6, 0.55, 0.53)
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -770,11 +799,11 @@ local function SegBtn(card, col, tex, label)
     b.tip = label or "포기"
     b:SetScript("OnEnter", function(s2)
         s2.hov = true; ns.RollSegPaint(s2)
-        GameTooltip:SetOwner(s2, "ANCHOR_TOP"); GameTooltip:AddLine(s2.isRec and (s2.tip .. "  |cffff8fa3(토끼 추천)|r") or s2.tip)
-        if s2.isRec then GameTooltip:AddLine(BasisText(), 1, 0.7, 0.48) end
+        GameTooltip:SetOwner(s2, "ANCHOR_TOP"); ns.TAdd(GameTooltip, s2.isRec and (s2.tip .. "  |cffff8fa3(토끼 추천)|r") or s2.tip)
+        if s2.isRec then ns.TAdd(GameTooltip, BasisText(), 1, 0.7, 0.48) end
         local e = s2:GetParent().e
-        if e and e.notMine and e.whyLong then GameTooltip:AddLine(e.whyLong, 0.85, 0.78, 0.76, true) end
-        if e and e.party then GameTooltip:AddLine("이 템이 맞는 파티원: " .. e.party, 0.56, 0.91, 0.6, true) end
+        if e and e.notMine and e.whyLong then ns.TAdd(GameTooltip, e.whyLong, 0.85, 0.78, 0.76, true) end
+        if e and e.party then ns.TAdd(GameTooltip, "이 템이 맞는 파티원: " .. e.party, 0.56, 0.91, 0.6, true) end
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function(s2) s2.hov = false; ns.RollSegPaint(s2); GameTooltip:Hide() end)
@@ -1159,12 +1188,12 @@ end
 function ns.RollPillTip(f)
     local e = f.e
     GameTooltip:SetOwner(f, "ANCHOR_BOTTOM")
-    if e.link then pcall(GameTooltip.SetHyperlink, GameTooltip, e.link) else GameTooltip:AddLine(e.name or "") end
-    if e.why and not e.mine then GameTooltip:AddLine(" "); GameTooltip:AddLine((e.notMine and "파티 매너 · 내 장비가 아니에요\n" or "") .. (e.whyLong or e.why), 1, 0.82, 0.6, true) end
-    if e.party and not e.mine then GameTooltip:AddLine("맞는 파티원: " .. e.party, 0.56, 0.91, 0.6, true) end
+    if e.link then pcall(GameTooltip.SetHyperlink, GameTooltip, e.link) else ns.TAdd(GameTooltip, e.name or "") end
+    if e.why and not e.mine then ns.TAdd(GameTooltip, " "); ns.TAdd(GameTooltip, (e.notMine and "파티 매너 · 내 장비가 아니에요\n" or "") .. (e.whyLong or e.why), 1, 0.82, 0.6, true) end
+    if e.party and not e.mine then ns.TAdd(GameTooltip, "맞는 파티원: " .. e.party, 0.56, 0.91, 0.6, true) end
     if e.mine or e.winner then
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("모두의 선택", 0.73, 0.65, 0.63)
+        ns.TAdd(GameTooltip, " ")
+        ns.TAdd(GameTooltip, "모두의 선택", 0.73, 0.65, 0.63)
         local ICON = { need = "roll_btn_need", greed = "roll_btn_greed", pass = "roll_btn_pass" }
         local bestGreed, winNeed = nil, nil
         for _, it in ipairs(SortedRolls(e)) do
@@ -1175,15 +1204,15 @@ function ns.RollPillTip(f)
             local left = ("%s|cff%02x%02x%02x%s|r  |cff%02x%02x%02x%s|r%s"):format(ic,
                 math.floor(tc[1] * 255), math.floor(tc[2] * 255), math.floor(tc[3] * 255), TYPE_TXT[it.t] or "고민 중…",
                 math.floor(cc[1] * 255), math.floor(cc[2] * 255), math.floor(cc[3] * 255), it.name, crown)
-            GameTooltip:AddDoubleLine(left, it.n and tostring(it.n) or "-", 1, 1, 1, tc[1], tc[2], tc[3])
+            ns.TDbl(GameTooltip, left, it.n and tostring(it.n) or "-", 1, 1, 1, tc[1], tc[2], tc[3])
             if it.t == "greed" and it.n and (not bestGreed or it.n > bestGreed) then bestGreed = it.n end
             if e.winner == it.name and it.t == "need" then winNeed = it.n end
         end
         if winNeed and bestGreed and bestGreed > winNeed then
-            GameTooltip:AddLine(("입찰한 사람이 있으면 차비 %d보다 입찰 %d이 먼저 가져가요"):format(bestGreed, winNeed), 0.73, 0.65, 0.63, true)
+            ns.TAdd(GameTooltip, ns.L("입찰한 사람이 있으면 차비 %d보다 입찰 %d이 먼저 가져가요"):format(bestGreed, winNeed), 0.73, 0.65, 0.63, true)
         end
     else
-        GameTooltip:AddLine("누르면 펼쳐서 고르기", 0.6, 0.55, 0.53)
+        ns.TAdd(GameTooltip, "누르면 펼쳐서 고르기", 0.6, 0.55, 0.53)
     end
     GameTooltip:Show()
 end
@@ -1651,11 +1680,11 @@ do
         f:SetScript("OnEnter", function(s2)
             s2.hold = true; s2.rim:SetColor({ 1, 0.42, 0.5 }, 0.8)
             GameTooltip:SetOwner(s2, "ANCHOR_RIGHT")
-            if s2.link then pcall(GameTooltip.SetHyperlink, GameTooltip, s2.link) else GameTooltip:AddLine(s2.iname or "") end
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cffff6b7f블랙리스트|r  " .. (s2.whoName or ""))
-            if s2.note then GameTooltip:AddLine(s2.note, 1, 0.6, 0.66, true) end
-            GameTooltip:AddLine("클릭 = 닫기", 0.6, 0.55, 0.53); GameTooltip:Show()
+            if s2.link then pcall(GameTooltip.SetHyperlink, GameTooltip, s2.link) else ns.TAdd(GameTooltip, s2.iname or "") end
+            ns.TAdd(GameTooltip, " ")
+            ns.TAdd(GameTooltip, "|cffff6b7f블랙리스트|r  " .. (s2.whoName or ""))
+            if s2.note then ns.TAdd(GameTooltip, s2.note, 1, 0.6, 0.66, true) end
+            ns.TAdd(GameTooltip, "클릭 = 닫기", 0.6, 0.55, 0.53); GameTooltip:Show()
         end)
         f:SetScript("OnLeave", function(s2) s2.hold = nil; s2.rim:SetColor({ 1, 0.42, 0.5 }, 0.42); GameTooltip:Hide() end)
         f:SetScript("OnUpdate", function(s2, el)
@@ -1700,7 +1729,7 @@ do
                 Sound()
                 if Opt().blackChat ~= false then
                     local tc = (t == "need") and "8fe899" or "f3c55a"
-                    P(("|cffff6b7f블랙리스트 %s|r님이 %s |cff%s%s|r → |cffffffff%d|r%s"):format(who, e.link or (e.name or "템"), tc, TYPE_TXT[t] or "", n, (b.note and b.note ~= "") and ("  |cff998a86(" .. b.note .. ")|r") or ""))
+                    P(ns.L("|cffff6b7f블랙리스트 %s|r님이 %s |cff%s%s|r → |cffffffff%d|r%s"):format(who, e.link or (e.name or "템"), tc, TYPE_TXT[t] or "", n, (b.note and b.note ~= "") and ("  |cff998a86(" .. b.note .. ")|r") or ""))
                 end
                 return
             end
@@ -1737,7 +1766,7 @@ do
         Layout()
         Sound()
         if Opt().blackChat ~= false then
-            P(("|cffff6b7f블랙리스트 %s|r님이 %s |cff%s%s|r → |cffffffff%d|r%s"):format(who, e.link or (e.name or "템"), tc, TYPE_TXT[t] or "", n, why and ("  |cff998a86(" .. why .. ")|r") or ""))
+            P(ns.L("|cffff6b7f블랙리스트 %s|r님이 %s |cff%s%s|r → |cffffffff%d|r%s"):format(who, e.link or (e.name or "템"), tc, TYPE_TXT[t] or "", n, why and ("  |cff998a86(" .. why .. ")|r") or ""))
         end
     end
     ns.RollBlackPlace = Place
@@ -2085,7 +2114,7 @@ local function LogList()
             local key = date("%m/%d", it.at) .. "|" .. (it.zone or "")
             if key ~= lastKey then
                 lastKey = key
-                out[#out + 1] = { head = true, text = date("%m월 %d일", it.at):gsub("^0", ""):gsub(" 0", " ") .. "  ·  " .. (it.zone ~= "" and it.zone or "어딘가") }
+                out[#out + 1] = { head = true, text = date(ns.L("%m월 %d일"), it.at):gsub("^0", ""):gsub(" 0", " ") .. "  ·  " .. (it.zone ~= "" and it.zone or "어딘가") }
             end
             out[#out + 1] = { it = it }
         end
@@ -2110,10 +2139,10 @@ local function LogRow(i)
         local it = s.it; if not it then return end
         GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
         if it.link then pcall(GameTooltip.SetHyperlink, GameTooltip, it.link) end
-        GameTooltip:AddLine(" ")
-        if #it.rolls == 0 then GameTooltip:AddLine("굴린 기록 없음", 0.6, 0.55, 0.53) end
+        ns.TAdd(GameTooltip, " ")
+        if #it.rolls == 0 then ns.TAdd(GameTooltip, "굴린 기록 없음", 0.6, 0.55, 0.53) end
         for _, x in ipairs(it.rolls) do
-            GameTooltip:AddDoubleLine("|cff" .. (x.c or "d8c6c1") .. x.name .. "|r  " .. (TYPE_TXT[x.t] or "고민 중") .. ((ns.IsBlack and ns.IsBlack(x.name)) and "  |cffff6b7f블랙리스트|r" or ""),
+            ns.TDbl(GameTooltip, "|cff" .. (x.c or "d8c6c1") .. x.name .. "|r  " .. (TYPE_TXT[x.t] or "고민 중") .. ((ns.IsBlack and ns.IsBlack(x.name)) and "  |cffff6b7f블랙리스트|r" or ""),
                 x.n and tostring(x.n) or "-", 0.85, 0.78, 0.76, 1, 0.88, 0.54)
         end
         GameTooltip:Show()
@@ -2416,8 +2445,8 @@ local function Toast(name, b)
         toast = t
     end
     local cc = ClassHex(b.cls)
-    toast.l1:SetText(("|cff%s%s|r 님은 블랙리스트예요"):format(Hex(cc), name))
-    toast.l2:SetText(((b.note and b.note ~= "") and ("\"" .. b.note .. "\" · ") or "") .. date("%m월 %d일", b.at or time()) .. " 넣음 · 같이 만남 " .. (b.met or 0) .. "번")
+    toast.l1:SetText(ns.L("|cff%s%s|r 님은 블랙리스트예요"):format(Hex(cc), name))
+    toast.l2:SetText(((b.note and b.note ~= "") and ("\"" .. b.note .. "\" · ") or "") .. date(ns.L("%m월 %d일"), b.at or time()) .. " 넣음 · 같이 만남 " .. (b.met or 0) .. "번")
     local w = math.max(toast.l1:GetStringWidth(), math.min(350, toast.l2:GetStringWidth())) + 50 + 22
     toast:SetWidth(math.max(240, w))
     toast:Show(); toast:SetAlpha(1); toast.ag:Stop(); toast.ag:Play()
@@ -2529,7 +2558,7 @@ function GR.New()
         GR.hold = true
         if s2.kind == "broll" and s2.link then
             GameTooltip:SetOwner(s2, "ANCHOR_TOP"); pcall(GameTooltip.SetHyperlink, GameTooltip, s2.link)
-            GameTooltip:AddLine("클릭 = 닫기", 0.6, 0.55, 0.53); GameTooltip:Show()
+            ns.TAdd(GameTooltip, "클릭 = 닫기", 0.6, 0.55, 0.53); GameTooltip:Show()
         end
     end)
     f:SetScript("OnLeave", function() GR.hold = false; GameTooltip:Hide() end)
@@ -2561,9 +2590,9 @@ function GR.Fill(f, kind, x)
         -- "잠깐! 블랙리스트 슈엘이 / [투구]에 차비 눌렀어 → 42 / 지금 슈엘이 1등이야 · 메모: 템 먹튀"
         f.key, f.link = x.key, x.link
         local cc = x.cls and Hex(ClassHex(x.cls)) or "ffffff"
-        f.l1:SetText(("|cffff8fab잠깐!|r 블랙리스트 |cff%s%s|r이"):format(cc, x.who))
+        f.l1:SetText(ns.L("|cffff8fab잠깐!|r 블랙리스트 |cff%s%s|r이"):format(cc, x.who))
         local tc = (x.t == "need") and "8fe899" or "f3c55a"
-        f.lm:SetText(("%s에 |cff%s%s|r 눌렀어 → |cff%s%d|r"):format(x.item, tc, TYPE_TXT[x.t] or "", x.top and "ff6b7f" or "ffffff", x.n))
+        f.lm:SetText(ns.L("%s에 |cff%s%s|r 눌렀어 → |cff%s%d|r"):format(x.item, tc, TYPE_TXT[x.t] or "", x.top and "ff6b7f" or "ffffff", x.n))
         f.lm:Show()
         f.l2:ClearAllPoints(); f.l2:SetPoint("TOPLEFT", f.lm, "BOTTOMLEFT", 0, -3)
         local tail = {}
@@ -2579,7 +2608,7 @@ function GR.Fill(f, kind, x)
         f:SetSize(math.min(330, math.max(f.l1:GetStringWidth(), f.l2:GetStringWidth())) + 60, 44)
     else
         local b = x.b or {}
-        f.l1:SetText(("|cffff8fab잠깐!|r 블랙리스트 |cff%s%s|r 님이 있어"):format(Hex(ClassHex(b.cls)), x.name))
+        f.l1:SetText(ns.L("|cffff8fab잠깐!|r 블랙리스트 |cff%s%s|r 님이 있어"):format(Hex(ClassHex(b.cls)), x.name))
         local note = (b.note and b.note ~= "") and ("메모: " .. b.note .. " · ") or ""
         f.l2:SetText(note .. (b.met or 1) .. "번째 만남"); f.l2:SetTextColor(0.91, 0.73, 0.75)
         local w = math.min(250, math.max(f.l1:GetStringWidth(), f.l2:GetStringWidth()))
@@ -2791,7 +2820,7 @@ function ns.BlackPaint()
             r.dot:SetVertexColor(cc[1], cc[2], cc[3])
             r.name:SetText(x.name); r.name:SetTextColor(cc[1], cc[2], cc[3])
             r.note:SetText((x.b.note and x.b.note ~= "") and x.b.note or "|cff8a7a76이유 없음|r")
-            r.date:SetText(date("%m월 %d일", x.b.at or time()) .. "\n같이 만남 " .. (x.b.met or 0) .. "번")
+            r.date:SetText(date(ns.L("%m월 %d일"), x.b.at or time()) .. "\n같이 만남 " .. (x.b.met or 0) .. "번")
             r.now:SetShown(InGroupNamed(x.name) and true or false)
             r.del.armed = nil; r.del.t:SetVertexColor(0.62, 0.55, 0.53)
         end
@@ -2868,7 +2897,7 @@ local function MakeBlack()
                 C_Timer.After(3, function() if s2.armed then s2.armed = nil; s2.t:SetVertexColor(0.62, 0.55, 0.53) end end)
             end
         end)
-        r.del:SetScript("OnEnter", function(s2) GameTooltip:SetOwner(s2, "ANCHOR_RIGHT"); GameTooltip:AddLine(s2.armed and "한 번 더 누르면 빼요" or "블랙리스트에서 빼기 (두 번 클릭)"); GameTooltip:Show() end)
+        r.del:SetScript("OnEnter", function(s2) GameTooltip:SetOwner(s2, "ANCHOR_RIGHT"); ns.TAdd(GameTooltip, s2.armed and "한 번 더 누르면 빼요" or "블랙리스트에서 빼기 (두 번 클릭)"); GameTooltip:Show() end)
         r.del:SetScript("OnLeave", function() GameTooltip:Hide() end)
         r.date = ns.Font(r, 10.5, { 0.54, 0.48, 0.46 }); r.date:SetPoint("RIGHT", r.del, "LEFT", -10, 0); r.date:SetJustifyH("RIGHT")
         -- 클릭 = 이유 고치기 (넣기 줄에 불러오기)
@@ -2939,7 +2968,7 @@ local function MakeFan()
         b.cnt:Hide()
         b:SetScript("OnEnter", function(s2)
             s2.ring:SetVertexColor(1, 0.561, 0.639); s2.ring:SetAlpha(0.8); s2.ic:SetSize(50, 50); s2.ic:ClearAllPoints(); s2.ic:SetPoint("CENTER")
-            GameTooltip:SetOwner(s2, "ANCHOR_LEFT"); GameTooltip:AddLine(d.tip); GameTooltip:Show()
+            GameTooltip:SetOwner(s2, "ANCHOR_LEFT"); ns.TAdd(GameTooltip, d.tip); GameTooltip:Show()
             fan.idle = 0
         end)
         b:SetScript("OnLeave", function(s2) GameTooltip:Hide(); s2.ring:SetAlpha(0); s2.ic:ClearAllPoints(); s2.ic:SetAllPoints(); ns.RollFanPaint() end)
@@ -2997,12 +3026,12 @@ SlashCmdList.LEELROLL = function(msg)
     elseif msg == "인사" then ns.RollGreetTest()
     else
         P("지금: " .. (DB().on and "켜짐" or "꺼짐") .. " · " .. BasisText())
-        print("  /르엘주사위 테스트 — 가짜 템으로 미리 보기")
-        print("  /르엘주사위 기록 — 주사위 기록장 · /르엘주사위 블랙 — 블랙리스트")
-        print("  /르엘주사위 이동 — 자리 옮기기 · 크기 (마우스 휠)")
-        print("  /르엘주사위 위치 — 처음 자리 · 크기로 (Shift + 카드 끌기로도 옮겨요)")
-        print("  /르엘주사위 인사 — 파티 인사 말풍선 미리 보기")
-        print("  /르엘주사위 끄기 · 켜기")
+        print(ns.L("  /르엘주사위 테스트 — 가짜 템으로 미리 보기"))
+        print(ns.L("  /르엘주사위 기록 — 주사위 기록장 · /르엘주사위 블랙 — 블랙리스트"))
+        print(ns.L("  /르엘주사위 이동 — 자리 옮기기 · 크기 (마우스 휠)"))
+        print(ns.L("  /르엘주사위 위치 — 처음 자리 · 크기로 (Shift + 카드 끌기로도 옮겨요)"))
+        print(ns.L("  /르엘주사위 인사 — 파티 인사 말풍선 미리 보기"))
+        print(ns.L("  /르엘주사위 끄기 · 켜기"))
     end
 end
 
@@ -3016,7 +3045,7 @@ SlashCmdList.LEELMOUSE = function()
     for i, f in ipairs(list) do
         local name = (f.GetDebugName and f:GetDebugName()) or (f.GetName and f:GetName()) or tostring(f)
         local w, h = f:GetSize()
-        P(("%d. %s · %dx%d · 보임 %s · 투명도 %.2f"):format(i, tostring(name), w or 0, h or 0, tostring(f:IsVisible()), f:GetEffectiveAlpha() or 1))
+        P(ns.L("%d. %s · %dx%d · 보임 %s · 투명도 %.2f"):format(i, tostring(name), w or 0, h or 0, tostring(f:IsVisible()), f:GetEffectiveAlpha() or 1))
     end
     -- 화면을 크게 덮는데 안 보이는(투명한) 클릭 받는 창 찾기
     local sw, sh = UIParent:GetWidth() * UIParent:GetEffectiveScale(), UIParent:GetHeight() * UIParent:GetEffectiveScale()

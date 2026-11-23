@@ -23,7 +23,11 @@ local C = {
 local DEFAULTS = { on = true, all = false, size = 1.0, y = 0, key = true, stem = 34, loot = true, lootY = -70, lootSize = 1.0, lootBob = true, lootMulti = true, sparkle = true, prog = true, halo = true }   -- prog = 진행도 숫자 · halo = 숨쉬는 빛 (허브)
 local db
 
-local function P(msg) print("|cfff2b3c2[Leel Spot]|r " .. msg) end
+-- 영어 (르엘 UI 언어 설정을 따라가요)
+local function T(s) local L = _G.LeelUI; if L and L.L then return L.L(s) end return s end
+local function TipAdd(s, ...) return GameTooltip:AddLine(T(s), ...) end
+local function TipSet(s, ...) return GameTooltip:SetText(T(s), ...) end
+local function P(msg) print("|cfff2b3c2[Leel Spot]|r " .. T(msg)) end
 local function Slice(t, m) pcall(t.SetTextureSliceMargins, t, m, m, m, m) end
 
 ----------------------------------------------------------------------
@@ -488,7 +492,7 @@ local function Refresh()
 
     local kt = nil -- 줍기 키 칩은 안 씀 (오른쪽 클릭으로 줍기)
     if kt then
-        kFS:SetText("|cff3a1c24" .. kt .. "|r  줍기")
+        kFS:SetText("|cff3a1c24" .. kt .. "|r  " .. T("줍기"))
         key:SetWidth(kFS:GetUnboundedStringWidth() + 18)
         key:Show()
     else
@@ -572,16 +576,16 @@ end)
 ----------------------------------------------------------------------
 local function Help()
     P("/lspot 또는 /물건")
-    print("  켜기 · 끄기  — 이름표 켜고 끄기")
-    print("  퀘만  — 퀘스트 물건(진행도 있는 것)에만 표시 / 다시 치면 모든 물건")
-    print("  크기 0.8~1.6  — 이름표 크기")
-    print("  선 숫자  — 이름표에서 물건까지 선 길이 (기본 34, 0이면 끔)")
-    print("  높이 숫자  — 선 끝 위치 위아래 미세 조정 (기본 0)")
-    print("  시체  — 주울 시체 위 반짝 상자 켜고 끄기")
-    print("  여러시체  — 다른 주울 시체에도 작은 상자 켜고 끄기")
-    print("  시체높이 숫자  — 상자 위아래 (기본 -70, 더 작게 = 더 아래로)")
-    print("  반짝  — 게임 반짝이(테두리 강조 대신) 켜고 끄기")
-    print("  점검  — 지금 고른 물건 정보")
+    print(T("  켜기 · 끄기  — 이름표 켜고 끄기"))
+    print(T("  퀘만  — 퀘스트 물건(진행도 있는 것)에만 표시 / 다시 치면 모든 물건"))
+    print(T("  크기 0.8~1.6  — 이름표 크기"))
+    print(T("  선 숫자  — 이름표에서 물건까지 선 길이 (기본 34, 0이면 끔)"))
+    print(T("  높이 숫자  — 선 끝 위치 위아래 미세 조정 (기본 0)"))
+    print(T("  시체  — 주울 시체 위 반짝 상자 켜고 끄기"))
+    print(T("  여러시체  — 다른 주울 시체에도 작은 상자 켜고 끄기"))
+    print(T("  시체높이 숫자  — 상자 위아래 (기본 -70, 더 작게 = 더 아래로)"))
+    print(T("  반짝  — 게임 반짝이(테두리 강조 대신) 켜고 끄기"))
+    print(T("  점검  — 지금 고른 물건 정보"))
 end
 
 local function Slash(msg)

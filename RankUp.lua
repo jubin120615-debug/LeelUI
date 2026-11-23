@@ -28,29 +28,68 @@ local function SpellName(id)
     return n
 end
 local function RankOf(id)
-    local sub = GetSpellSubtext and GetSpellSubtext(id)
+    local sub
+    if C_Spell and C_Spell.GetSpellSubtext then local ok, t = pcall(C_Spell.GetSpellSubtext, id); if ok then sub = t end end
+    if type(sub) ~= "string" and GetSpellSubtext then local ok, t = pcall(GetSpellSubtext, id); if ok then sub = t end end
     if type(sub) ~= "string" then return nil end
     local n = sub:match("(%d+)")
     return n and tonumber(n) or nil
 end
 
+-- 이름 → 배운 가장 높은 레벨 (게임이 이름으로 찾으면 보통 배운 최고 레벨을 줘요)
+function ns.RankByName(name)
+    local id
+    if C_Spell and C_Spell.GetSpellInfo then
+        local ok, info = pcall(C_Spell.GetSpellInfo, name)
+        if ok and type(info) == "table" then id = info.spellID end
+    end
+    if not id and GetSpellInfo then local ok, _, _, _, _, _, _, sid = pcall(GetSpellInfo, name); if ok then id = sid end end
+    if not id then return end
+    if IsPlayerSpell and not IsPlayerSpell(id) and not (IsSpellKnown and IsSpellKnown(id)) then return end
+    local r = RankOf(id)
+    if r then return { id = id, rank = r } end
+end
+
 -- 주문책: 이름 → 가장 높은 레벨 { id, rank }
 local best = {}
+local function Note(id)
+    if not id then return end
+    local name = SpellName(id)
+    local r = RankOf(id)
+    if name and r then
+        local b = best[name]
+        if not b or r > b.rank then best[name] = { id = id, rank = r } end
+    end
+end
 local function ScanBook()
     wipe(best)
-    local BOOK = BOOKTYPE_SPELL or "spell"
-    local tabs = GetNumSpellTabs and GetNumSpellTabs() or 0
-    for t = 1, tabs do
-        local _, _, offset, num = GetSpellTabInfo(t)
-        for i = (offset or 0) + 1, (offset or 0) + (num or 0) do
-            local ok, kind, id = pcall(GetSpellBookItemInfo, i, BOOK)
-            if ok and kind == "SPELL" and id then
-                local name = SpellName(id)
-                local r = RankOf(id)
-                if name and r then
-                    local b = best[name]
-                    if not b or r > b.rank then best[name] = { id = id, rank = r } end
+    local SB = C_SpellBook
+    -- 새 방식 (C_SpellBook): 게임 판에 따라 옛 함수가 없어요
+    if SB and SB.GetNumSpellBookSkillLines and SB.GetSpellBookItemInfo then
+        local bank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
+        local SPELL = Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.Spell
+        local okN, lines = pcall(SB.GetNumSpellBookSkillLines)
+        for t = 1, (okN and lines or 0) do
+            local okL, info = pcall(SB.GetSpellBookSkillLineInfo, t)
+            if okL and type(info) == "table" then
+                local off, num = info.itemIndexOffset or 0, info.numSpellBookItems or 0
+                for i = off + 1, off + num do
+                    local okI, it = pcall(SB.GetSpellBookItemInfo, i, bank)
+                    if okI and type(it) == "table" and (it.itemType == SPELL or it.itemType == 1) and not it.isPassive then
+                        Note(it.spellID or it.actionID)
+                    end
                 end
+            end
+        end
+    end
+    -- 옛 방식
+    if GetNumSpellTabs and GetSpellTabInfo and GetSpellBookItemInfo then
+        local BOOK = BOOKTYPE_SPELL or "spell"
+        for t = 1, GetNumSpellTabs() or 0 do
+            local _, _, offset, num = GetSpellTabInfo(t)
+            for i = (offset or 0) + 1, (offset or 0) + (num or 0) do
+                local ok, kind, id = pcall(GetSpellBookItemInfo, i, BOOK)
+                if ok and kind == "SPELL" and id then Note(id) end
             end
         end
     end
@@ -62,13 +101,16 @@ end
 local low = {}          -- [칸] = { name, rank, bestId, bestRank, id }
 local function ScanBars()
     wipe(low)
-    for slot = 1, 180 do
+    for slot = 1, 360 do
         if HasAction(slot) then
             local kind, id = GetActionInfo(slot)
             if kind == "spell" and id then
                 local name = SpellName(id)
                 local b = name and best[name]
                 local r = RankOf(id)
+                -- 주문책이 낮은 레벨만 알려줄 때: 이름으로 가장 높은 배운 레벨을 다시 물어봐요
+                local nb = name and ns.RankByName and ns.RankByName(name)
+                if nb and (not b or nb.rank > b.rank) then b = nb; best[name] = nb end
                 if b and r and b.rank > r and not DB().keep[slot .. ":" .. id] then
                     low[slot] = { name = name, rank = r, id = id, bestId = b.id, bestRank = b.rank }
                 end
@@ -112,7 +154,7 @@ local function Replace(name)
     if done > 0 then
         local parts = {}
         for n, r in pairs(names) do parts[#parts + 1] = n .. " " .. r .. "레벨" end
-        ns.Print(("단축바 %d칸을 새 레벨로 바꿨어요: %s"):format(done, table.concat(parts, ", ")))
+        ns.Print(ns.L("단축바 %d칸을 새 레벨로 바꿨어요: %s"):format(done, table.concat(parts, ", ")))
     end
     C_Timer.After(0.1, function() if Refresh then Refresh() end end)
 end
@@ -214,7 +256,7 @@ if GameTooltip and GameTooltip.SetAction then
         local l = low[slot]
         if not (l and DB().on and DB().mark) then return end
         local col = ClassCol()
-        tt:AddLine(("↑ %d레벨 · 배운 최고 %d레벨"):format(l.rank, l.bestRank), col[1], col[2], col[3])
+        tt:AddLine(ns.L("↑ %d레벨 · 배운 최고 %d레벨"):format(l.rank, l.bestRank), col[1], col[2], col[3])
         tt:AddLine("화면 위 알약 [바꾸기] 또는 허브 > 단축바 주문 레벨", 0.75, 0.75, 0.75)
         tt:Show()
     end)
@@ -260,7 +302,7 @@ local function ShowToast(name)
     local tex = (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(l.bestId)) or (GetSpellTexture and GetSpellTexture(l.bestId))
     toast.ic:SetTexture(tex)
     local acc = "|cffffd0db"
-    toast.fs:SetText(("%s%s %d레벨|r 배웠어요 · 단축바 |cffff9a4d%d칸|r은 아직 %d레벨"):format(acc, l.name, l.bestRank, #list, l.rank))
+    toast.fs:SetText(ns.L("%s%s %d레벨|r 배웠어요 · 단축바 |cffff9a4d%d칸|r은 아직 %d레벨"):format(acc, l.name, l.bestRank, #list, l.rank))
     toast:SetWidth(5 + 24 + 8 + toast.fs:GetStringWidth() + 12 + toast.go:GetWidth() + 5 + toast.keep:GetWidth() + 8)
     toast.t = 0; toast:SetAlpha(1); toast:Show()
 end
@@ -278,12 +320,12 @@ ev:RegisterEvent("PLAYER_LOGIN")
 ev:SetScript("OnEvent", function(self, e, a1)
     if e == "PLAYER_LOGIN" then
         if not ns.db then return end
-        for _, x in ipairs({ "LEARNED_SPELL_IN_TAB", "SPELLS_CHANGED", "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED",
+        for _, x in ipairs({ "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE", "SPELLS_CHANGED", "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED",
                              "UPDATE_BONUS_ACTIONBAR", "PLAYER_REGEN_ENABLED", "UPDATE_SHAPESHIFT_FORM" }) do pcall(self.RegisterEvent, self, x) end
         C_Timer.After(2, Refresh)
         return
     end
-    if e == "LEARNED_SPELL_IN_TAB" then
+    if e == "LEARNED_SPELL_IN_TAB" or e == "LEARNED_SPELL_IN_SKILL_LINE" then
         local name = a1 and SpellName(a1)
         if name then learned[name] = true end
         -- 트레이너에서 여러 개를 한꺼번에 배워도 한 번에 (잠깐 모았다가)
@@ -309,3 +351,27 @@ ev:SetScript("OnEvent", function(self, e, a1)
     self.soon = true
     C_Timer.After(0.3, function() self.soon = false; Refresh() end)
 end)
+
+-- 점검: /lrank  (주문책에서 읽은 주문 수 · 낮은 레벨 칸)
+SLASH_LEELRANK1 = "/lrank"
+SlashCmdList.LEELRANK = function(msg)
+    local want = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    ScanBook(); ScanBars()
+    local nb = 0; for _ in pairs(best) do nb = nb + 1 end
+    print(("|cfff2b3c2[LeelUI rank]|r book=%d · low=%d · C_SpellBook=%s · GetNumSpellTabs=%s"):format(nb, ns.RankLowCount(),
+        tostring(C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines ~= nil), tostring(GetNumSpellTabs ~= nil)))
+    for slot, l in pairs(low) do print(("  slot %d: %s %d → %d"):format(slot, l.name, l.rank, l.bestRank)) end
+    local n = 0
+    for slot = 1, 360 do
+        if HasAction(slot) and n < 14 then
+            local kind, id = GetActionInfo(slot)
+            local name = kind == "spell" and id and SpellName(id)
+            if name and RankOf(id) and (want == "" or name:find(want, 1, true)) then
+                local b = best[name]; local nb = ns.RankByName(name)
+                n = n + 1
+                print(("  slot %d · %s id%d r%s · book %s · name %s"):format(slot, tostring(name), id, tostring(RankOf(id)),
+                    b and (b.id .. " r" .. b.rank) or "-", nb and (nb.id .. " r" .. nb.rank) or "-"))
+            end
+        end
+    end
+end

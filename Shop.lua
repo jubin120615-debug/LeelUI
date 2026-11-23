@@ -57,7 +57,7 @@ end
 
 local function Money(c)
     if GetCoinTextureString then return GetCoinTextureString(c) end
-    return string.format("%d골 %d은 %d동", c / 10000, (c / 100) % 100, c % 100)
+    return string.format(ns.L("%d골 %d은 %d동"), c / 10000, (c / 100) % 100, c % 100)
 end
 
 local function BAGS() return 0, (NUM_BAG_SLOTS or 4) end
@@ -136,7 +136,7 @@ local function Report(repaired, noMoney)
     if not d.report then return end
     local rows = {}
     if soldN > 0 then
-        rows[#rows + 1] = { string.format("회색 잡템 %d개 판매", soldN), "|cff9fe3a8+" .. Money(sold) .. "|r" }
+        rows[#rows + 1] = { string.format(ns.L("회색 잡템 %d개 판매"), soldN), "|cff9fe3a8+" .. Money(sold) .. "|r" }
     end
     if repaired and repaired > 0 then
         rows[#rows + 1] = { "장비 수리", "|cffff8fa3-" .. Money(repaired) .. "|r" }

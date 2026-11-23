@@ -347,8 +347,8 @@ function ns.PartyFollowBadge(f, area)
     b:HookScript("PreClick", function() local ok, n = pcall(UnitName, f.unit); if ok and ns.FollowPending then ns.FollowPending(n) end end)
     b:SetScript("OnEnter", function(self)
         b:SetAlpha(1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("따라가기", 1, 0.84, 0.88)
-        GameTooltip:AddLine("Alt + 클릭도 돼요 · 움직이면 멈춰요", 0.75, 0.68, 0.66); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); ns.TAdd(GameTooltip, "따라가기", 1, 0.84, 0.88)
+        ns.TAdd(GameTooltip, "Alt + 클릭도 돼요 · 움직이면 멈춰요", 0.75, 0.68, 0.66); GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide(); PaintFollow(f) end)
     f.follow = b
@@ -1265,12 +1265,12 @@ SlashCmdList.LEELPARTYDBG = function(msg)
         if not box then return end
         if box.preview and box.dispelTest then
             ns:SetPartyPreview(false)
-            print("|cfff2b3c2[르엘 파티]|r 해제 디버프 시험을 끝냈어요.")
+            print(ns.L("|cfff2b3c2[르엘 파티]|r 해제 디버프 시험을 끝냈어요."))
         else
-            if InCombatLockdown() then print("|cfff2b3c2[르엘 파티]|r 전투가 끝나고 해 주세요.") return end
+            if InCombatLockdown() then print(ns.L("|cfff2b3c2[르엘 파티]|r 전투가 끝나고 해 주세요.")) return end
             box.dispelTest = true
             ns:SetPartyPreview(true)
-            print("|cfff2b3c2[르엘 파티]|r 해제 디버프 시험: 마법(파랑) · 저주(보라) · 독(초록) · 질병(주황). 끄기 = /르엘파티 해제")
+            print(ns.L("|cfff2b3c2[르엘 파티]|r 해제 디버프 시험: 마법(파랑) · 저주(보라) · 독(초록) · 질병(주황). 끄기 = /르엘파티 해제"))
         end
         return
     end
@@ -1278,7 +1278,7 @@ SlashCmdList.LEELPARTYDBG = function(msg)
         for i, f in ipairs(ns.partyMembers or {}) do
             if UnitExists(f.unit) then
                 local found, typ, hasSecret = DispelOf(f.unit, f.debuffs)
-                print(("|cfff2b3c2[르엘 파티]|r %d번: 해제할 디버프 %s · 종류 %s"):format(i, hasSecret and "(숨김 값)" or tostring(found), tostring(typ or "모름")))
+                print(ns.L("|cfff2b3c2[르엘 파티]|r %d번: 해제할 디버프 %s · 종류 %s"):format(i, hasSecret and "(숨김 값)" or tostring(found), tostring(typ or "모름")))
             end
         end
         return

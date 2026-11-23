@@ -939,13 +939,13 @@ do
         local mine = false
         pcall(function() mine = (sGUID == me) or (pet and sGUID == pet) end)
         if not mine then return end
-        local msg = "끊음!"
+        local msg = ns.L("끊음!")
         pcall(function() if xName then msg = msg .. " " .. xName end end)
         pcall(function() if dName then msg = msg .. "  (" .. dName .. ")" end end)
         if mode == "screen" then
             if UIErrorsFrame then UIErrorsFrame:AddMessage(msg, 0.95, 0.70, 0.76) end
         elseif mode == "chat" then
-            DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[르엘 시전바]|r " .. msg)
+            DEFAULT_CHAT_FRAME:AddMessage(ns.L("|cfff2b3c2[르엘 시전바]|r ") .. ns.L(msg))
         elseif mode == "sound" then
             pcall(PlaySound, (SOUNDKIT and SOUNDKIT.RAID_WARNING) or 8959, "Master")
         end

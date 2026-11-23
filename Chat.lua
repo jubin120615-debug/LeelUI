@@ -253,12 +253,12 @@ local function RailItem(i)
     end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(TabName(self.frame or ChatFrame1))
+        ns.TSet(GameTooltip, TabName(self.frame or ChatFrame1))
         local n = unread[self.frame] or 0
-        if n > 0 then GameTooltip:AddLine("새 글 " .. n .. "개", 1, 0.62, 0.55) end
-        if whisper[self.frame] then GameTooltip:AddLine("귓말이 왔어요", 1, 0.62, 0.82) end
-        GameTooltip:AddLine("오른쪽 클릭: 탭 메뉴 (이름 바꾸기, 설정)", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("Shift + 끌기: 채팅창 옮기기", 0.8, 0.8, 0.8)
+        if n > 0 then ns.TAdd(GameTooltip, "새 글 " .. n .. "개", 1, 0.62, 0.55) end
+        if whisper[self.frame] then ns.TAdd(GameTooltip, "귓말이 왔어요", 1, 0.62, 0.82) end
+        ns.TAdd(GameTooltip, "오른쪽 클릭: 탭 메뉴 (이름 바꾸기, 설정)", 0.8, 0.8, 0.8)
+        ns.TAdd(GameTooltip, "Shift + 끌기: 채팅창 옮기기", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -412,7 +412,7 @@ local function Build()
     pi:SetVertexColor(0.6, 0.52, 0.5)
     plus:SetScript("OnClick", function() pcall(FCF_OpenNewWindow) end)
     plus:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("새 채팅 탭 만들기"); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); ns.TSet(GameTooltip, "새 채팅 탭 만들기"); GameTooltip:Show()
     end)
     plus:SetScript("OnLeave", function() GameTooltip:Hide() end)
     rail.plus = plus
@@ -486,8 +486,8 @@ local function Build()
     end)
     mb:SetScript("OnEnter", function(self)
         self.fill:SetColor({ 0.26, 0.19, 0.18 })
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:SetText("다른 탭 " .. #(self.hidden or {}) .. "개")
-        GameTooltip:AddLine("누르면 목록이 열려요", 0.8, 0.8, 0.8); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); ns.TSet(GameTooltip, "다른 탭 " .. #(self.hidden or {}) .. "개")
+        ns.TAdd(GameTooltip, "누르면 목록이 열려요", 0.8, 0.8, 0.8); GameTooltip:Show()
     end)
     mb:SetScript("OnLeave", function(self) self.fill:SetColor({ 0.173, 0.133, 0.125 }); GameTooltip:Hide() end)
     mb:Hide()
@@ -515,7 +515,7 @@ local function Build()
         if tab then tab:EnableMouse(true); pcall(tab.Click, tab, "RightButton"); tab:EnableMouse(false) end
     end)
     gear:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("이 탭 설정 (채널 고르기, 이름, 글씨 크기)"); GameTooltip:Show()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP"); ns.TSet(GameTooltip, "이 탭 설정 (채널 고르기, 이름, 글씨 크기)"); GameTooltip:Show()
     end)
     gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
     head:EnableMouse(true)
@@ -681,6 +681,7 @@ end
 
 local function ChipTag(tex, size)
     local h = math.floor((size or 13) * 1.15 + 0.5)
+    if ns.EnOn and ns.EnOn() then tex = tex .. "_en" end      -- 영어 칩 그림
     return ("|T%s%s:%d:%d:0:-1|t"):format(ns.MEDIA, tex, h, h * 2)
 end
 
@@ -1075,7 +1076,7 @@ function ns:SetChatMoveMode(on)
         local gh = grip:CreateTexture(nil, "HIGHLIGHT")
         gh:SetTexture(ns.MEDIA .. "circle"); gh:SetAllPoints(); gh:SetVertexColor(1, 1, 1, 0.25); gh:SetBlendMode("ADD")
         grip:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("끌면 크기 조절"); GameTooltip:Show()
+            GameTooltip:SetOwner(self, "ANCHOR_TOP"); ns.TSet(GameTooltip, "끌면 크기 조절"); GameTooltip:Show()
         end)
         grip:SetScript("OnLeave", function() GameTooltip:Hide() end)
         grip:RegisterForDrag("LeftButton")
@@ -1359,7 +1360,7 @@ do
     SLASH_LEELCHATHIST1 = "/르엘채팅기록"
     SlashCmdList.LEELCHATHIST = function()
         local eb = ChatFrame1EditBox
-        print(("|cfff2b3c2[르엘 채팅]|r 기억한 말 %d개 · 켜짐 %s · 연결 %s · Alt 화살표 %s"):format(#H(), tostring(On()),
+        print(ns.L("|cfff2b3c2[르엘 채팅]|r 기억한 말 %d개 · 켜짐 %s · 연결 %s · Alt 화살표 %s"):format(#H(), tostring(On()),
             tostring(eb and eb.leelHist), tostring(eb and eb.GetAltArrowKeyMode and eb:GetAltArrowKeyMode())))
     end
     if ChatEdit_AddHistory then
@@ -1642,7 +1643,7 @@ do
     SlashCmdList.LEELBUBBLE = function()
         local P = function(t) print("|cfff2b3c2[르엘 말풍선]|r " .. t) end
         local n = 0; for _ in pairs(recent) do n = n + 1 end
-        P(("켜짐 %s · 파티 %s · 기억한 말 %d · 파티 말풍선 설정 %s · 일반 말풍선 설정 %s"):format(tostring(On()),
+        P(ns.L("켜짐 %s · 파티 %s · 기억한 말 %d · 파티 말풍선 설정 %s · 일반 말풍선 설정 %s"):format(tostring(On()),
             tostring(IsInGroup and IsInGroup()), n, tostring(GetCVar and GetCVar("chatBubblesParty")), tostring(GetCVar and GetCVar("chatBubbles"))))
         if not (C_ChatBubbles and C_ChatBubbles.GetAllChatBubbles) then P("C_ChatBubbles 없음") return end
         local ok, list = pcall(C_ChatBubbles.GetAllChatBubbles, true)
@@ -1654,7 +1655,7 @@ do
             local child = (not forb) and b:GetChildren() or nil
             local str = child and (child.String or child.Text)
             local txt = str and str:GetText()
-            P(("%d: 막힘 %s · 자식 %d · 글 %s · 맞음 %s"):format(i, tostring(forb), kids, tostring(txt), tostring(txt and recent[txt] ~= nil)))
+            P(ns.L("%d: 막힘 %s · 자식 %d · 글 %s · 맞음 %s"):format(i, tostring(forb), kids, tostring(txt), tostring(txt and recent[txt] ~= nil)))
         end
     end
     local f = CreateFrame("Frame")

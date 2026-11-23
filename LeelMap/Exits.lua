@@ -9,6 +9,10 @@
 local M = "Interface\\AddOns\\LeelMap\\media\\"
 local LM = "Interface\\AddOns\\LeelUI\\media\\"
 local FONT = STANDARD_TEXT_FONT or "Fonts\\2002.TTF"
+-- 영어 (르엘 UI 언어 설정을 따라가요)
+local function T(s) local L = _G.LeelUI; if L and L.L then return L.L(s) end return s end
+local function TipAdd(s, ...) return GameTooltip:AddLine(T(s), ...) end
+local function TipSet(s, ...) return GameTooltip:SetText(T(s), ...) end
 local ACC = { 0.949, 0.702, 0.761 }
 local INK = { 0.227, 0.11, 0.141 }
 
@@ -217,15 +221,15 @@ local function Tip(self)
     if not e then return end
     local name = (Info(e.to) or {}).name or "?"
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("→ " .. name, ACC[1], ACC[2], ACC[3])
+    TipSet("→ " .. name, ACC[1], ACC[2], ACC[3])
     local f = _G.LeelMapLevelInfo
     local minL, maxL, c, hint
     if f then minL, maxL, c, hint = f(e.to) end
     if minL then
-        GameTooltip:AddLine(("레벨 %s  %s"):format(minL == maxL and minL or (minL .. "-" .. maxL), hint or ""), c[1], c[2], c[3])
+        TipAdd(T("레벨 %s  %s"):format(minL == maxL and minL or (minL .. "-" .. maxL), T(hint or "")), c[1], c[2], c[3])
     end
-    GameTooltip:AddLine("클릭하면 그 지역 지도로", 0.8, 0.8, 0.8)
-    if not e.sure then GameTooltip:AddLine("한 번 넘어가 보면 실제 길 자리로 옮겨져요", 0.6, 0.6, 0.6, true) end
+    TipAdd("클릭하면 그 지역 지도로", 0.8, 0.8, 0.8)
+    if not e.sure then TipAdd("한 번 넘어가 보면 실제 길 자리로 옮겨져요", 0.6, 0.6, 0.6, true) end
     GameTooltip:Show()
 end
 
@@ -352,7 +356,7 @@ _G.LeelMapExits = {
         if not z then return end
         cache[z] = nil
         local p = function(t) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Map]|r " .. t) end
-        p(("%s (%d) 출구:"):format((Info(z) or {}).name or "?", z))
+        p(T("%s (%d) 출구:"):format((Info(z) or {}).name or "?", z))
         for _, e in ipairs(Exits(z)) do
             p(("  → %s (%d)  %.1f, %.1f  %s"):format((Info(e.to) or {}).name or "?", e.to, e.x * 100, e.y * 100, e.sure and "다녀 본 길" or "경계"))
         end

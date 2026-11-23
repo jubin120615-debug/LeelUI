@@ -584,6 +584,16 @@ local MODULES = {
               dimIf = function() return not (ns.ABarDB and ns.ABarDB().wskin == "tac") end, dimWhy = "각진 전술형에서만",
               get = function() return ns.ABarDB and ns.ABarDB().tacAuras ~= false end,
               set = function(v) ns.ABarDB().tacAuras = v and true or false; if ns.ABarSkin then ns.ABarSkin() end end },
+            { t = "slider", label = "버프 줄 크기", hint = "내 버프 · 이동 모드에서 끌어 옮기기 · 휠 = 크기", sec = 3, min = 50, max = 200, step = 5, noPeek = true,
+              dimIf = function() return not (ns.ABarDB and ns.ABarDB().wskin == "tac") end, dimWhy = "각진 전술형에서만",
+              get = function() return (ns.ABarDB and ns.ABarDB().buffPct) or 100 end,
+              set = function(v) if ns.ABarAuraSize then ns.ABarAuraSize("b", v) end end },
+            { t = "slider", label = "디버프 줄 크기", hint = "내 디버프 · 이동 모드에서 끌어 옮기기 · 휠 = 크기", sec = 3, min = 50, max = 200, step = 5, noPeek = true,
+              dimIf = function() return not (ns.ABarDB and ns.ABarDB().wskin == "tac") end, dimWhy = "각진 전술형에서만",
+              get = function() return (ns.ABarDB and ns.ABarDB().debuffPct) or 100 end,
+              set = function(v) if ns.ABarAuraSize then ns.ABarAuraSize("d", v) end end },
+            { t = "button", label = "버프 · 디버프 줄 위치 초기화", sec = 5,
+              run = function() if ns.ABarAuraReset then ns.ABarAuraReset() end end },
             { t = "toggle", label = "로아식 화면", hint = "날개 모양일 때 · 내 창 숨기기 · 대상은 화면 위 가운데 긴 줄", sec = 3,
               dimIf = function() return not (ns.ABarDB and ns.ABarDB().style == "wing") end, dimWhy = "날개 모양에서만",
               get = function() return ns.ABarDB and ns.ABarDB().laTop ~= false end,
@@ -1616,6 +1626,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.48", "영어 지원 (English) · 모던 버프 줄 옮기기 · 퀘스티 아이콘 · 주문 레벨 고침", "게임 언어가 영어면 자동으로 영어 · 허브 맨 위 언어 고르기 · /leel lang en · ko · 모던 버프 · 디버프 줄을 이동 모드에서 따로 옮기기 · 크기 · 미니맵 모음의 퀘스티 = 왼쪽 클릭 설정 창 · 단축바 주문 레벨 알림이 와우 포에버 주문책을 읽게" },
     { "1.3.47", "모던: 가운데 원 보기 · 빠른 설정 · 오른쪽 쪽 탭 · 혜성 · 변신 구슬", "원 왼쪽 클릭 = 레벨 · 직업 자원 · 진영 문장 · 오른쪽 클릭 = 빠른 설정 (버프 · 디버프 크기 · 줄 두께) · 오른쪽 칸 I · II · III 쪽 · 전투 중 원 둘레 혜성 · 변신 · 태세는 원 위 구슬" },
     { "1.3.46", "고침: 펫 원 팝업 · 지도 퀘 툴팁 오류", "펫 원을 눌러도 기술이 안 펼쳐지던 것 · 지도 퀘스트 아이콘에 마우스를 올리면 C stack overflow 오류가 나던 것" },
     { "1.3.45", "모던: 펫 원 · 나 찍기 · 들어오는 치유 · 파티 따라가기 배지", "펫 = 생명력 줄 왼쪽 동그라미 (둘레 = 펫 체력 · 누르면 기술 부채꼴) · 생명력 줄 · 레벨 원 누르면 나 · 내 생명력 줄에 들어올 치유 + 숫자 · 모던 파티 칸 따라가기 배지 · 다른 사람이 찍은 징도 이름표에" },
@@ -2225,7 +2236,7 @@ local function ChoiceRow(pane, i)
     r.pill = CreateFrame("Button", nil, r)
     r.pill:SetHeight(24); r.pill:SetPoint("RIGHT", 0, 0)
     r.pill.bg = ns.RoundRect(r.pill, 12, { 0.23, 0.18, 0.17 }, "BACKGROUND", 0, 0)
-    r.pill.fs = r.pill:CreateFontString(nil, "OVERLAY")
+    r.pill.fs = ns.LWrap(r.pill:CreateFontString(nil, "OVERLAY"))
     r.pill.fs:SetPoint("LEFT", 12, 0)
     r.pill.ic = r.pill:CreateTexture(nil, "OVERLAY"); r.pill.ic:SetSize(18, 18); r.pill.ic:SetPoint("LEFT", 4, 0)
     r.pill.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -2289,7 +2300,7 @@ local function OpenDropdown(anchor, slot, onPick)
             b = CreateFrame("Button", nil, dd)
             b:SetHeight(24)
             b.hl = ns.RoundRect(b, 10, nil, "BACKGROUND", 2, 0)
-            b.fs = b:CreateFontString(nil, "OVERLAY"); b.fs:SetPoint("LEFT", 10, 0)
+            b.fs = ns.LWrap(b:CreateFontString(nil, "OVERLAY")); b.fs:SetPoint("LEFT", 10, 0)
             b.tag = ns.Font(b, 10, { 0.62, 0.54, 0.52 }); b.tag:SetPoint("RIGHT", -8, 0)
             b.ic = b:CreateTexture(nil, "OVERLAY"); b.ic:SetSize(20, 20); b.ic:SetPoint("LEFT", 6, 0)
             b.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -2342,7 +2353,7 @@ local function InputRow(pane)
     box:SetTextInsets(10, 10, 0, 0)
     box:SetMaxLetters(80)
     box.bg = ns.RoundRect(box, 12, { 0.23, 0.18, 0.17 }, "BACKGROUND", 0, 0)
-    box.ph = box:CreateFontString(nil, "ARTWORK"); box.ph:SetFont(STANDARD_TEXT_FONT or ns.FONT, 12, "")
+    box.ph = ns.LWrap(box:CreateFontString(nil, "ARTWORK")); box.ph:SetFont(STANDARD_TEXT_FONT or ns.FONT, 12, "")
     box.ph:SetTextColor(0.5, 0.44, 0.42); box.ph:SetPoint("LEFT", 10, 0)
     box.ph:SetText("예: Cafe24DongdongRegular.ttf")
     box:SetScript("OnTextChanged", function(self) self.ph:SetShown(self:GetText() == "") end)
@@ -2516,7 +2527,7 @@ local function PaintHead(m)
             ns:ResetPosition(); if ns.ResetHudParts then ns:ResetHudParts() end
             Print("Leel HUD 자리를 처음대로 돌렸어요 (내 창 · 가운데 · 대상 창).")
         end)
-        hd.allB:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetText("Leel HUD 전체 크기"); GameTooltip:AddLine("이동 모드에서 토끼 손잡이 테두리 위 크기 줄", 1, 1, 1); GameTooltip:Show() end)
+        hd.allB:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetText(ns.L("Leel HUD 전체 크기")); GameTooltip:AddLine(ns.L("이동 모드에서 토끼 손잡이 테두리 위 크기 줄"), 1, 1, 1); GameTooltip:Show() end)
         hd.allB:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
     -- 설명 글은 오른쪽 단추들 앞까지만
@@ -2695,7 +2706,7 @@ ShowPane = function()
             nfs = nfs + 1
             local f = nw.fs[nfs]
             if not f then
-                f = num and nw.top:CreateFontString(nil, "OVERLAY") or ns.Font(nw.top, size, col)
+                f = num and ns.LWrap(nw.top:CreateFontString(nil, "OVERLAY")) or ns.Font(nw.top, size, col)
                 nw.fs[nfs] = f
             end
             if num then f:SetFont(ns.NUM or ns.FONT, size, "") else f:SetFont(ns.FONT, size, "") end
@@ -2927,7 +2938,7 @@ ShowPane = function()
         if not r.leelTipHooked then
             r.leelTipHooked = true
             r:HookScript("OnEnter", function(self)
-                if self.tipText then GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT"); GameTooltip:SetText(self.tipText, 1, 0.92, 0.94, 1, true); GameTooltip:Show() end
+                if self.tipText then GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT"); GameTooltip:SetText(ns.L(self.tipText), 1, 0.92, 0.94, 1, true); GameTooltip:Show() end
             end)
             r:HookScript("OnLeave", function(self) if self.tipText then GameTooltip:Hide() end end)
         end
@@ -4745,7 +4756,7 @@ PV.LeelUI_Font = function(st)
         return z
     end
     local function FS(p, col)
-        local fs = p:CreateFontString(nil, "OVERLAY"); fs:SetFont(ns.FONT, 12, "")
+        local fs = ns.LWrap(p:CreateFontString(nil, "OVERLAY")); fs:SetFont(ns.FONT, 12, "")
         fs:SetTextColor(col[1], col[2], col[3]); fs:SetShadowColor(0, 0, 0, 0.85); fs:SetShadowOffset(1, -1)
         return fs
     end
@@ -4770,7 +4781,7 @@ PV.LeelUI_Font = function(st)
     c.l2 = FS(c, { 0.62, 0.74, 0.96 }); c.l2:SetPoint("TOPLEFT", c.l1, "BOTTOMLEFT", 0, -6); c.l2:SetText("[파티] [나]: 넵 준비 완료!")
     c.bub = CreateFrame("Frame", nil, c); c.bub:SetSize(130, 34); c.bub:SetPoint("BOTTOM", c, "BOTTOM", 0, 10)
     ns.RoundPlate(c.bub, 11, { 0.96, 0.94, 0.92, 0.96 }, { 0.6, 0.55, 0.5, 0.5 })
-    c.bt = c.bub:CreateFontString(nil, "OVERLAY"); c.bt:SetFont(ns.FONT, 12, ""); c.bt:SetTextColor(0.15, 0.11, 0.1); c.bt:SetPoint("CENTER"); c.bt:SetText("안녕하세요!")
+    c.bt = ns.LWrap(c.bub:CreateFontString(nil, "OVERLAY")); c.bt:SetFont(ns.FONT, 12, ""); c.bt:SetTextColor(0.15, 0.11, 0.1); c.bt:SetPoint("CENTER"); c.bt:SetText("안녕하세요!")
     -- ④ 피해 숫자 (숫자)
     local d = Zone(532, 108, "숫자")
     d.big = FS(d, { 1, 0.84, 0.35 }); d.big:SetPoint("CENTER", 0, 14); d.big:SetText("1,284")
@@ -4926,7 +4937,7 @@ PV.ForgLeveling = function(st)
     end
     -- 블리자드 기본 퀘스트 목록 (미니맵 아래 · 바탕 없이 노란 제목 + 흰 목표)
     local function Line(p, t, size, col, x, y)
-        local fs = p:CreateFontString(nil, "OVERLAY"); fs:SetFont(STANDARD_TEXT_FONT, size, ""); fs:SetShadowColor(0, 0, 0, 1); fs:SetShadowOffset(1, -1)
+        local fs = ns.LWrap(p:CreateFontString(nil, "OVERLAY")); fs:SetFont(STANDARD_TEXT_FONT, size, ""); fs:SetShadowColor(0, 0, 0, 1); fs:SetShadowOffset(1, -1)
         fs:SetTextColor(col[1], col[2], col[3]); fs:SetText(t); fs:SetJustifyH("LEFT"); fs:SetPoint("TOPLEFT", p, "TOPLEFT", x, y)
         return fs
     end

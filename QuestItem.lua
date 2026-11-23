@@ -245,9 +245,9 @@ local function MakeButton()
         if not current then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetItemByID(current.id)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("클릭: 지금 대상에게 쓰기", 1, 0.84, 0.88)
-        GameTooltip:AddLine("오른쪽 클릭: 이 몹에선 그만 보기", 0.75, 0.75, 0.75)
+        ns.TAdd(GameTooltip, " ")
+        ns.TAdd(GameTooltip, "클릭: 지금 대상에게 쓰기", 1, 0.84, 0.88)
+        ns.TAdd(GameTooltip, "오른쪽 클릭: 이 몹에선 그만 보기", 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -260,7 +260,7 @@ local function MakeButton()
                 d.no[current.id] = d.no[current.id] or {}
                 d.no[current.id][name] = true
                 if d.mobs[current.id] then d.mobs[current.id][name] = nil end
-                ns.Print(("%s 에는 [%s] 표시를 그만 보여줘요."):format(name, current.name or "?"))
+                ns.Print(ns.L("%s 에는 [%s] 표시를 그만 보여줘요."):format(name, current.name or "?"))
                 ns.QuestItemRefresh()
             end
         end
