@@ -4032,3 +4032,105 @@ function ns.ABarAuraReset()
     DB().bufPos, DB().debPos = nil, nil
     if ns.ABarAncPlace then ns.ABarAncPlace() end
 end
+
+-- 비행 중 내리기 (모던): 기본 단축바와 같이 숨은 "내리기" 단추를 가운데 레벨 원 위 구슬로
+-- 안에는 타고 있는 동물의 게임 아이콘 (와이번 · 그리폰 · 박쥐) · 누르면 다음 비행 지점에서 내려요
+do
+    local ICON = {
+        wyvern = "Interface\\Icons\\Ability_Mount_Wyvern_01",
+        gryphon = "Interface\\Icons\\Ability_Mount_Gryphon_01",
+        bat = "Interface\\Icons\\Ability_Hunter_Pet_Bat",
+    }
+    -- 호드 박쥐 노선이 있는 로데론 지역 (티리스팔 · 언더시티 · 은빛소나무 · 힐스브래드 · 역병지대)
+    local BAT = { [1420] = true, [1458] = true, [1421] = true, [1424] = true, [1422] = true, [1423] = true }
+    local orb, dest, startMap, asked
+    local function Kind()
+        if UnitFactionGroup("player") ~= "Horde" then return "gryphon" end
+        return (startMap and BAT[startMap]) and "bat" or "wyvern"
+    end
+    local function Paint()
+        if not orb then return end
+        orb.icon:SetDesaturated(asked and true or false)
+        orb.icon:SetVertexColor(asked and 0.6 or 1, asked and 0.6 or 1, asked and 0.6 or 1)
+        orb.edge:SetVertexColor(asked and 0.55 or C.acc[1], asked and 0.5 or C.acc[2], asked and 0.52 or C.acc[3], 1)
+        orb.down:SetVertexColor(asked and 0.55 or C.acc[1], asked and 0.5 or C.acc[2], asked and 0.52 or C.acc[3], 1)
+        orb.next:SetShown(asked and true or false)
+        if asked then orb.pulse:Stop(); orb.glow:SetAlpha(0) else if not orb.pulse:IsPlaying() then orb.pulse:Play() end end
+    end
+    local function Build()
+        local big = wing.big
+        local b = CreateFrame("Button", "LeelUI_TaxiExit", big)
+        b:SetFrameLevel(big:GetFrameLevel() + 8)
+        b:RegisterForClicks("AnyUp")
+        local g = b:CreateTexture(nil, "BACKGROUND", nil, -8)
+        g:SetTexture(ns.MEDIA .. "circle"); g:SetBlendMode("ADD"); g:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+        g:SetPoint("TOPLEFT", -9, 9); g:SetPoint("BOTTOMRIGHT", 9, -9)
+        local ic = b:CreateTexture(nil, "ARTWORK")
+        ic:SetAllPoints(); ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local mk = b:CreateMaskTexture()
+        mk:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); mk:SetAllPoints(ic)
+        ic:AddMaskTexture(mk)
+        local e = b:CreateTexture(nil, "OVERLAY", nil, 6)
+        e:SetTexture(ns.MEDIA .. "ring"); e:SetPoint("TOPLEFT", -3, 3); e:SetPoint("BOTTOMRIGHT", 3, -3)
+        -- 오른쪽 아래 작은 분홍 ↓ 배지
+        local d = b:CreateTexture(nil, "OVERLAY", nil, 7)
+        d:SetTexture(ns.MEDIA .. "circle"); d:SetSize(15, 15); d:SetPoint("CENTER", b, "BOTTOMRIGHT", -3, 3)
+        local dt = b:CreateFontString(nil, "OVERLAY")
+        pcall(dt.SetFont, dt, ns.FONT, 11, "OUTLINE"); dt:SetPoint("CENTER", d, "CENTER", 0, 0); dt:SetText("v"); dt:SetTextColor(0.16, 0.05, 0.08)
+        dt:SetDrawLayer("OVERLAY", 7)
+        local nx = ns.Font(b, 9.5, { 1, 1, 1 }); nx:SetPoint("CENTER"); nx:SetText(ns.L("다음 지점")); nx:Hide()
+        local ag = g:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+        local al = ag:CreateAnimation("Alpha"); al:SetFromAlpha(0.15); al:SetToAlpha(0.6); al:SetDuration(0.9); al:SetSmoothing("IN_OUT")
+        b.icon, b.edge, b.down, b.glow, b.pulse, b.next = ic, e, d, g, ag, nx
+        b:SetScript("OnClick", function()
+            if asked then return end
+            if TaxiRequestEarlyLanding then pcall(TaxiRequestEarlyLanding) end
+            asked = true; Paint()
+        end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(ns.L(asked and "다음 비행 지점에서 내려요" or "내리기"), 1, 0.84, 0.88)
+            if not asked then GameTooltip:AddLine(ns.L("다음 비행 지점에서 내려요"), 1, 1, 1) end
+            if dest then GameTooltip:AddLine((ns.L("%s로 비행 중")):format(dest), 0.84, 0.63, 0.61) end
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        b:Hide()
+        return b
+    end
+    local function Place()
+        local big = wing.big
+        local D = (wing.geo and wing.geo.D) or big:GetWidth() or 120
+        local ssz = math.max(22, math.floor(D * 0.2 + 0.5))
+        local sz = math.floor(ssz * 1.35 + 0.5)
+        local T2 = wing.tc
+        local R = ((T2 and T2.tickR) or (D / 2 + 12)) + sz / 2 + 7
+        -- 변신 · 태세 구슬이 위에 있으면 그 바깥으로
+        local st = _G.StanceButton1 or _G.ShapeshiftButton1
+        if st and st:IsVisible() then R = R + ssz + 8 end
+        orb:SetSize(sz, sz); orb:ClearAllPoints(); orb:SetPoint("CENTER", big, "CENTER", 0, R)
+    end
+    local function Update()
+        local on = UnitOnTaxi and UnitOnTaxi("player")
+        local modern = wing and wing.big and wing.big:IsVisible() and DB().taxiBtn ~= false
+        if not (on and modern) then
+            if orb then orb:Hide(); orb.pulse:Stop() end
+            if not on then asked, dest = nil, nil end
+            return
+        end
+        orb = orb or Build()
+        orb.icon:SetTexture(ICON[Kind()])
+        Place(); Paint(); orb:Show()
+    end
+    ns.ABarTaxiUpdate = Update
+    if TakeTaxiNode then
+        hooksecurefunc("TakeTaxiNode", function(i)
+            local ok, n = pcall(TaxiNodeName, i); dest = ok and n or nil
+            startMap = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or nil
+            asked = nil
+        end)
+    end
+    local tev = CreateFrame("Frame")
+    tev:RegisterEvent("PLAYER_CONTROL_LOST"); tev:RegisterEvent("PLAYER_CONTROL_GAINED"); tev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    tev:SetScript("OnEvent", function() C_Timer.After(0.3, Update); C_Timer.After(1.5, Update) end)
+end

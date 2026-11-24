@@ -610,6 +610,9 @@ local MODULES = {
               set = function(v) if ns.ABarLASetScale then ns.ABarLASetScale(v) else ns.ABarDB().laScale = v end end },
             { t = "button", label = "대상 줄 위치 초기화", sec = 5,
               run = function() ns.ABarDB().laPos = nil; if ns.ABarLAPlace then ns.ABarLAPlace() end end },
+            { t = "toggle", label = "비행 중 내리기 구슬", hint = "와이번 · 그리폰 · 박쥐를 탈 때 가운데 원 위에 · 누르면 다음 비행 지점에서 내려요", sec = 3,
+              get = function() return not (ns.ABarDB and ns.ABarDB().taxiBtn == false) end,
+              set = function(v) if ns.ABarDB then ns.ABarDB().taxiBtn = v and true or false end; if ns.ABarTaxiUpdate then ns.ABarTaxiUpdate() end end },
             { t = "seg", label = "페이지 넘기기 키", hint = "왼쪽 10칸만 바뀌어요", sec = 3,
               dimIf = function() return not (ns.ABarDB and ns.ABarDB().style == "wing") end, dimWhy = "날개 모양에서만",
               options = { { "끔", "off" }, { "Z · X", "zx" } },
@@ -1676,6 +1679,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.51", "모던: 비행 중 내리기 구슬", "모던 모드에서 와이번 · 그리폰 · 박쥐를 타면 가운데 레벨 원 위에 그 동물 아이콘 구슬 · 누르면 다음 비행 지점에서 내려요 (허브 > 액션바 \"비행 중 내리기 구슬\")" },
     { "1.3.50", "오류 알리기 · 지도 첫 M 멈춤 고침 · 파티 찾기 칸 · 토끼 초상화", "애드온 오류가 나면 토끼 알림 → 캡처용 카드 · 코드 복사 (허브 > 시작 > 오류 알리기 · /르엘오류) · 리로드 후 처음 M 지도 멈춤을 로딩 화면 동안 미리 불러오기 · 파티 찾기 설정을 파티·전투 새 칸으로 + 미리 보기 · Leel HUD 내 초상화를 르엘 토끼로 · 허브 새 로고 · 멈춤 찾기 /르엘측정" },
     { "1.3.49", "음성 채팅 칩 · 파티 찾기 위치 · Leel Quest 파티 같이 · 오류 고침", "채팅 머리줄에 말하는 사람 칩 · 음성 소리 · 마이크 단추 르엘 모양 · 파티 찾기 신청자 지역 + 같은 곳 · 던전 안 · 입구 · 멀리 · Leel Quest 파티원과 같은 퀘만 길 (얼굴로 고르기) · 단축바 주문 레벨 바꾸기 · 숨긴 기본 파티 창 오류" },
     { "1.3.48", "영어 지원 (English) · 모던 버프 줄 옮기기 · 퀘스티 아이콘 · 주문 레벨 고침", "게임 언어가 영어면 자동으로 영어 · 허브 맨 위 언어 고르기 · /leel lang en · ko · 모던 버프 · 디버프 줄을 이동 모드에서 따로 옮기기 · 크기 · 미니맵 모음의 퀘스티 = 왼쪽 클릭 설정 창 · 단축바 주문 레벨 알림이 와우 포에버 주문책을 읽게" },

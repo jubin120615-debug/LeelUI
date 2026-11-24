@@ -438,3 +438,11 @@ E["지도 미리 불러오기"] = "Preload map"; E["접속 · 리로드 후 처�
 -- 새 소식 1.3.50
 E["오류 알리기 · 지도 첫 M 멈춤 고침 · 파티 찾기 칸 · 토끼 초상화"] = "Error reports · first-M map freeze fix · Group Finder tab · bunny portrait"
 E["애드온 오류가 나면 토끼 알림 → 캡처용 카드 · 코드 복사 (허브 > 시작 > 오류 알리기 · /르엘오류) · 리로드 후 처음 M 지도 멈춤을 로딩 화면 동안 미리 불러오기 · 파티 찾기 설정을 파티·전투 새 칸으로 + 미리 보기 · Leel HUD 내 초상화를 르엘 토끼로 · 허브 새 로고 · 멈춤 찾기 /르엘측정"] = "On an addon error, a bunny alert → screenshot card · copy code (Hub > Start > Error reports · /leelerr) · the first M map freeze after reload is preloaded during the loading screen · Group Finder settings moved to a new Party·Combat tab with a preview · Leel HUD portrait can be the Leel bunny · new hub logo · freeze finder /leelprof"
+-- 비행 중 내리기 (모던)
+E["비행 중 내리기 구슬"] = "In-flight land button"; E["와이번 · 그리폰 · 박쥐를 탈 때 가운데 원 위에 · 누르면 다음 비행 지점에서 내려요"] = "Above the center ring while on a wyvern · gryphon · bat · click to land at the next flight point"
+E["다음 지점"] = "Next stop"; E["내리기"] = "Land"; E["다음 비행 지점에서 내려요"] = "Lands at the next flight point"
+P[#P + 1] = { "^(.+)로 비행 중$", "Flying to %1" }
+E["%s로 비행 중"] = "Flying to %s"
+-- 새 소식 1.3.51
+E["모던: 비행 중 내리기 구슬"] = "Modern: in-flight land button"
+E["모던 모드에서 와이번 · 그리폰 · 박쥐를 타면 가운데 레벨 원 위에 그 동물 아이콘 구슬 · 누르면 다음 비행 지점에서 내려요 (허브 > 액션바 \"비행 중 내리기 구슬\")"] = "In modern mode, riding a wyvern · gryphon · bat shows its icon in an orb above the center level ring · click to land at the next flight point (Hub > Action bars \"In-flight land button\")"
