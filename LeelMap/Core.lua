@@ -1003,7 +1003,7 @@ local function ApplyFade()
     if not fader then
         fader = CreateFrame("Frame")
         fader:SetScript("OnUpdate", function(_, el)
-            if not wm:IsShown() then return end
+            if not wm:IsShown() or wm.leelPreload then return end
             local moving = false
             if db.fade and not wm:IsMouseOver() and not wm.leelMoving then
                 local ok, m = pcall(IsPlayerMoving)
@@ -1018,7 +1018,7 @@ local function ApplyFade()
             end
         end)
     end
-    if not db.fade then wm:SetAlpha(1) end
+    if not db.fade and not wm.leelPreload then wm:SetAlpha(1) end
 end
 
 local function ApplyCVars()
@@ -1245,7 +1245,34 @@ ev:RegisterEvent("ADDON_LOADED")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_LOGOUT")
+ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+-- 지도 미리 불러오기: 리로드 · 접속 후 처음 M을 누를 때 멈추는 것 (퀘스트 핀 · 지도 그림을 처음 만드는 일)을
+-- 로딩 화면이 걷히기 전에 몰래 한 번 열었다 닫아서 미리 끝내 둬요 (안 보이게 · 소리 없이 · 전투 중엔 안 함)
+local preloaded = false
+local Preload
+Preload = function()
+    if preloaded or not WorldMapFrame or WorldMapFrame:IsShown() then return end
+    if InCombatLockdown() then C_Timer.After(5, Preload) return end
+    if db and db.preload == false then return end
+    preloaded = true
+    local sfx = GetCVar("Sound_EnableSFX")
+    if sfx == "1" then SetCVar("Sound_EnableSFX", "0") end
+    local a = WorldMapFrame:GetAlpha()
+    WorldMapFrame.leelPreload = true
+    WorldMapFrame:SetAlpha(0)
+    local ok = pcall(WorldMapFrame.Show, WorldMapFrame)
+    C_Timer.After(0.1, function()
+        if ok and WorldMapFrame:IsShown() then pcall(WorldMapFrame.Hide, WorldMapFrame) end
+        WorldMapFrame:SetAlpha(a or 1)
+        WorldMapFrame.leelPreload = nil
+        if sfx == "1" then C_Timer.After(0.3, function() SetCVar("Sound_EnableSFX", "1") end) end
+    end)
+end
 ev:SetScript("OnEvent", function(_, event, arg1)
+    if event == "PLAYER_ENTERING_WORLD" then
+        if not preloaded then C_Timer.After(0, Preload) end   -- 로딩 화면이 아직 덮고 있을 때 (멈춤이 안 보이게)
+        return
+    end
     if event == "ADDON_LOADED" then
         if arg1 == ADDON then
             LeelMapDB = LeelMapDB or {}

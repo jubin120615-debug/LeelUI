@@ -1453,7 +1453,8 @@ do
         if mfs and type(mfs:GetText()) == "string" and mfs:GetText() ~= "" then After(p.tag, mfs, 10); p.tag:Show()
         elseif dfs then p.tag:ClearAllPoints(); p.tag:SetPoint("TOPLEFT", dfs, "BOTTOMLEFT", 0, -3); p.tag:Show()
         else p.tag:Hide() end
-        p.fs:Show()
+        p.fs:SetShown(ns.db.lfgZone ~= false)
+        if ns.db.lfgTag == false then p.tag:Hide() end
     end
     local function Walk(f, here, depth)
         for _, c in ipairs({ f:GetChildren() }) do
@@ -1462,10 +1463,26 @@ do
         end
     end
     local function Root() return _G.LFGBrowseFrame end
+    -- 허브 설정을 바꾸면 바로: 끄면 다 숨기고 · 켜면 다시 그려요
+    function ns.LFGLocRefresh()
+        local r = Root()
+        if not r then return end
+        local off = ns.db.lfgLoc == false
+        local function Each(f, d)
+            for _, c in ipairs({ f:GetChildren() }) do
+                if c.leelLoc then
+                    if off then c.leelLoc:Hide() else c.leelMineId = nil end
+                end
+                if d < 8 then Each(c, d + 1) end
+            end
+        end
+        Each(r, 0)
+        if not off and r:IsVisible() then pcall(Walk, r, GetRealZoneText and GetRealZoneText() or "", 0) end
+    end
     -- 레벨대 /누구 한 번: 지역을 안 주는 사람만 채워요 (검색을 누른 그 순간에만 · 게임 규칙)
     local whoBusy, lastWho = false, 0
     local function WhoFill()
-        if whoBusy or GetTime() - lastWho < 8 then return end
+        if whoBusy or GetTime() - lastWho < 8 or (ns.db and ns.db.lfgWho == false) then return end
         if not (C_FriendList and C_FriendList.SendWho and C_LFGList and C_LFGList.GetSearchResults) then return end
         local ok, ids = pcall(C_LFGList.GetSearchResults)
         if not ok or type(ids) ~= "table" then return end
@@ -1519,8 +1536,8 @@ do
         acc = acc + el
         if acc < 0.5 then return end
         acc = 0
-        if ns.db and ns.db.lfgLoc == false then return end
         local r = Root()
+        if ns.db and ns.db.lfgLoc == false then return end
         if not (r and r:IsVisible()) then return end
         local here = GetRealZoneText and GetRealZoneText() or ""
         pcall(Walk, r, here, 0)

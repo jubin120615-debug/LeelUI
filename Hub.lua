@@ -166,6 +166,11 @@ local MODULES = {
               get = function() return not (ns.db.hudText and ns.db.hudText.player and ns.db.hudText.player.porOff) end,
               set = function(v) if ns.SetHudText then ns.SetHudText("player", "porOff", not v) end end,
               more = "내 창 왼쪽 초상화를 쓰거나 안 써요. 직업 아이콘은 체력 바 앞에 그대로 있어요.\n안 써도 이름 · 체력 바 자리는 그대로예요." },
+            { t = "seg", label = "초상화 그림", hint = "내 얼굴 대신 르엘 토끼", hl = "por",
+              options = { { "캐릭터 얼굴", "face" }, { "르엘 토끼", "bunny" } },
+              get = function() return (ns.db.hudText and ns.db.hudText.player and ns.db.hudText.player.porFace) or "face" end,
+              set = function(v) if ns.SetHudText then ns.SetHudText("player", "porFace", v) end end,
+              more = "르엘 토끼 = 소개 그림의 분홍 토끼가 내 초상화로 · 쓰러지면 회색이 돼요." },
             { t = "slider", label = "초상화 크기", min = 50, max = 150, step = 5, fmt = "%d%%", noPeek = true, hl = "por",
               get = function() return (ns.db.hudText and ns.db.hudText.player and tonumber(ns.db.hudText.player.porScale)) or 100 end,
               set = function(v) if ns.SetHudText then ns.SetHudText("player", "porScale", v) end end,
@@ -1003,6 +1008,9 @@ local MODULES = {
             { sec = 3, t = "toggle", label = "지역 출구 화살표", hl = "exits", hint = "옆 지역으로 넘어가는 곳에 분홍 동그라미 화살표 (클릭하면 그 지역 지도로)",
               get = function() return MapDB().exits ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.exits = v and true or false; if LeelMapExits then LeelMapExits.Refresh() end end end },
+            { sec = 2, t = "toggle", label = "지도 미리 불러오기", hint = "접속 · 리로드 후 처음 M이 멈추지 않게 (로딩 화면 동안 몰래 한 번 열어 둬요)",
+              get = function() return MapDB().preload ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.preload = v and true or false end end },
             { sec = 3, t = "toggle", label = "길드원 위치 보기", hl = "guild", hint = "르엘 UI 쓰는 길드원이 지도 · 미니맵에 토끼 점으로",
               get = function() return MapDB().gShow ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.gShow = v and true or false end end },
@@ -1182,6 +1190,25 @@ local MODULES = {
             { t = "toggle", label = "해제할 디버프 알림", hint = "내가 풀 수 있는 디버프: 왼쪽 세로 줄 + 아이콘 링 맥박 (종류별 색)",
               get = function() return ns.db.partyDispelFx ~= false end,
               set = function(v) ns.db.partyDispelFx = v and true or false; PartyCells() end },
+        },
+    },
+    {
+        key = "LeelUI_LFG", builtin = true, cat = "party",
+        title = "파티 찾기", sub = "신청한 사람 위치 · 거리", icon = "hb_search",
+        desc = "게임 파티 찾기 목록에서 신청한 사람이 어디 있는지 보여줘요.\n던전 이름 옆에 지역 · 메모 옆에 거리 말 (같은 곳 · 던전 안 · 입구 · 멀리).",
+        onoff = { get = function() return ns.db.lfgLoc ~= false end,
+                  set = function(v) ns.db.lfgLoc = v and true or false; if ns.LFGLocRefresh then ns.LFGLocRefresh() end end },
+        items = {
+            { t = "toggle", label = "지역 이름", hint = "던전 이름 옆 \"· 티리스팔 숲\"", hl = "zone",
+              get = function() return ns.db.lfgZone ~= false end,
+              set = function(v) ns.db.lfgZone = v and true or false; if ns.LFGLocRefresh then ns.LFGLocRefresh() end end },
+            { t = "toggle", label = "거리 말", hint = "메모 옆 같은 곳 · 던전 안 · 입구 · 멀리 (색)", hl = "tag",
+              get = function() return ns.db.lfgTag ~= false end,
+              set = function(v) ns.db.lfgTag = v and true or false; if ns.LFGLocRefresh then ns.LFGLocRefresh() end end },
+            { t = "toggle", label = "모르는 위치는 /누구로 찾기", hint = "게임이 지역을 안 주는 사람만 · 검색할 때 레벨대로 한 번 (채팅엔 안 떠요)", hl = "who",
+              get = function() return ns.db.lfgWho ~= false end,
+              set = function(v) ns.db.lfgWho = v and true or false end,
+              more = "게임이 지역을 알려주지 않는 신청자는 /누구 검색으로 찾아 채워요. 8초에 한 번까지만 해요." },
         },
     },
     {
@@ -1385,6 +1412,26 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_Err", builtin = true, always = true, cat = "start",
+        title = "오류 알리기", sub = "캡처 · 코드 복사로 알려주기", icon = "hb_bell",
+        desc = "애드온 오류가 나면 게임 기본 창 대신 토끼 알림이 떠요.\n'보기' → 카드를 캡처하거나 '코드 복사' → 채채TV 커뮤니티에 붙여넣으면 끝. (/르엘오류)",
+        items = {
+            { t = "seg", label = "알림 방식", hint = "끄기 = 알림 없이 기록만",
+              options = { { "토끼 알림", "bunny" }, { "게임 기본 창", "blizz" }, { "끄기", "off" } },
+              get = function() return ns.db.errMode or "bunny" end,
+              set = function(v) ns.db.errMode = v end,
+              more = "BugSack을 쓰면 BugSack이 그대로 받아요 · 빨간 오류 창(/console scriptErrors 1)을 켠 사람도 그대로예요." },
+            { t = "seg", label = "다른 애드온 오류도", hint = "르엘 말고 Questie · DBM 같은 애드온",
+              options = { { "알리기", "all" }, { "기록만", "log" } },
+              get = function() return ns.db.errOthers or "all" end,
+              set = function(v) ns.db.errOthers = v end },
+            { t = "button", label = function() local n = ns.Err and #ns.Err.Log() or 0; return "최근 오류 보기 (" .. n .. ")" end,
+              run = function() if ns.Err then ns.Err.Open(1) end end },
+            { t = "button", label = "알림 미리 보기", run = function() if ns.Err then ns.Err.Test() end end },
+            { t = "button", label = "기록 비우기", run = function() if ns.Err then ns.Err.Clear() end end },
+        },
+    },
+    {
         key = "LeelUI_Profile", builtin = true, always = true, cat = "util",
         title = "설정 나누기", sub = "내보내기 · 가져오기", icon = "hb_apps",
         desc = "르엘 UI · 지도 · 징 · 반짝 상자 설정을 글자 한 줄로.\n친구에게 보내거나 다른 컴퓨터·캐릭터로 옮길 때 써요. (/르엘설정)",
@@ -1558,15 +1605,15 @@ local MOD_CAT = {
     LeelUI_Chat = "view", LeelUI_Font = "view", LeelUI_RankUp = "view",
     ForgLeveling = "quest", LeelUI_QTracker = "none", LeelUI_Quest = "quest", LeelUI_QItem = "quest", LeelSpot = "quest",
     LeelMap = "map", LeelUI_Minimap = "map",
-    LeelUI_Party = "party", LeelMark = "party", LeelUI_TotemSet = "party", LeelUI_Roll = "party",
+    LeelUI_Party = "party", LeelUI_LFG = "party", LeelMark = "party", LeelUI_TotemSet = "party", LeelUI_Roll = "party",
     LeelUI_Bags = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
-    LeelUI_Profile = "start", _news = "start",
+    LeelUI_Profile = "start", LeelUI_Err = "start", _news = "start",
 }
 local MOD_ORDER = {}
 do
-    local order = { "_news", "LeelUI_Profile", "LeelUI", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font", "LeelUI_RankUp", "LeelUI_ABar",
+    local order = { "_news", "LeelUI_Profile", "LeelUI_Err", "LeelUI", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font", "LeelUI_RankUp", "LeelUI_ABar",
         "ForgLeveling", "LeelUI_QTracker", "LeelUI_Quest", "LeelUI_QItem", "LeelSpot",
-        "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelMark", "LeelUI_TotemSet", "LeelUI_Roll",
+        "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelUI_LFG", "LeelMark", "LeelUI_TotemSet", "LeelUI_Roll",
         "LeelUI_Bags", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
     for i, k in ipairs(order) do MOD_ORDER[k] = i end
 end
@@ -1629,6 +1676,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.50", "오류 알리기 · 지도 첫 M 멈춤 고침 · 파티 찾기 칸 · 토끼 초상화", "애드온 오류가 나면 토끼 알림 → 캡처용 카드 · 코드 복사 (허브 > 시작 > 오류 알리기 · /르엘오류) · 리로드 후 처음 M 지도 멈춤을 로딩 화면 동안 미리 불러오기 · 파티 찾기 설정을 파티·전투 새 칸으로 + 미리 보기 · Leel HUD 내 초상화를 르엘 토끼로 · 허브 새 로고 · 멈춤 찾기 /르엘측정" },
     { "1.3.49", "음성 채팅 칩 · 파티 찾기 위치 · Leel Quest 파티 같이 · 오류 고침", "채팅 머리줄에 말하는 사람 칩 · 음성 소리 · 마이크 단추 르엘 모양 · 파티 찾기 신청자 지역 + 같은 곳 · 던전 안 · 입구 · 멀리 · Leel Quest 파티원과 같은 퀘만 길 (얼굴로 고르기) · 단축바 주문 레벨 바꾸기 · 숨긴 기본 파티 창 오류" },
     { "1.3.48", "영어 지원 (English) · 모던 버프 줄 옮기기 · 퀘스티 아이콘 · 주문 레벨 고침", "게임 언어가 영어면 자동으로 영어 · 허브 맨 위 언어 고르기 · /leel lang en · ko · 모던 버프 · 디버프 줄을 이동 모드에서 따로 옮기기 · 크기 · 미니맵 모음의 퀘스티 = 왼쪽 클릭 설정 창 · 단축바 주문 레벨 알림이 와우 포에버 주문책을 읽게" },
     { "1.3.47", "모던: 가운데 원 보기 · 빠른 설정 · 오른쪽 쪽 탭 · 혜성 · 변신 구슬", "원 왼쪽 클릭 = 레벨 · 직업 자원 · 진영 문장 · 오른쪽 클릭 = 빠른 설정 (버프 · 디버프 크기 · 줄 두께) · 오른쪽 칸 I · II · III 쪽 · 전투 중 원 둘레 혜성 · 변신 · 태세는 원 위 구슬" },
@@ -3715,31 +3763,7 @@ local CHANNEL  = "https://www.youtube.com/@채채TV_2"
 local DOWNLOAD = "https://github.com/jubin120615-debug/LeelUI/releases/latest"
 local PROBLEMS = { "오류 창이 떠요", "모양이 이상해요", "위치가 틀어져요", "기타" }
 
--- 르엘 애드온에서 난 마지막 오류 기억 (문제 알리기 한 줄에 넣음)
-do
-    local okH, orig = pcall(geterrorhandler)
-    if okH and orig and seterrorhandler then
-        pcall(seterrorhandler, function(msg, ...)
-            -- 와우 포에버 특성 창 자체 오류: 잠긴 특성에 마우스를 올릴 때마다 한국어 조건 문구 조합에서 터져요
-            -- (게임 문구 버그, 툴팁 조건 줄만 빠지고 기능엔 영향 없음) → 오류 창만 안 띄워요
-            if type(msg) == "string" and msg:find("Blizzard_SharedTalentUtil", 1, true) and msg:find("invalid option in `format'", 1, true) then
-                return
-            end
-            if type(msg) == "string" and (msg:find("AddOns[\\/]Leel") or msg:find("AddOns[\\/]ForgLeveling")) then
-                local f, l = msg:match("([%w_]+%.lua)[^%d]*(%d+)")
-                ns.lastErr = f and (f .. ":" .. l) or msg:sub(1, 40)
-            end
-            return orig(msg, ...)
-        end)
-    end
-    local ev = CreateFrame("Frame")
-    ev:RegisterEvent("ADDON_ACTION_BLOCKED"); ev:RegisterEvent("ADDON_ACTION_FORBIDDEN")
-    ev:SetScript("OnEvent", function(_, _, who, what)
-        if type(who) == "string" and (who:find("^Leel") or who == "ForgLeveling") then
-            ns.lastErr = "차단:" .. tostring(what or "?")
-        end
-    end)
-end
+-- 르엘 애드온에서 난 마지막 오류 (ns.lastErr) 는 ErrReport.lua 가 기억해요
 
 -- 읽기 전용 복사 칸: '복사'를 누르면 글자가 선택되고 Ctrl+C
 local function CopyBox(parent, w)
@@ -5722,6 +5746,49 @@ PV.LeelUI_Shop = function(st)
     return v
 end
 
+-- 파티 찾기: 가짜 신청자 4명 (실제 창 모양) · 지역 이름 / 거리 말 줄에 마우스 = 그 부분 반짝
+PV.LeelUI_LFG = function(st)
+    local v = CreateFrame("Frame", nil, st); v:SetSize(560, 176); v:SetPoint("CENTER")
+    local box = CreateFrame("Frame", nil, v); box:SetAllPoints()
+    ns.RoundPlate(box, 6, { 0.043, 0.035, 0.031, 0.98 }, { 0.35, 0.29, 0.16, 0.9 })
+    local GR, PK, YL, GY = { 0.56, 0.91, 0.6 }, C.acc, { 0.94, 0.83, 0.54 }, { 0.66, 0.6, 0.63 }
+    local ROWS = {
+        { "언데드기사 언기", { 0.78, 0.61, 0.43 }, 37, "아라시 고원", GR, "같은 곳", "배우기", "탱" },
+        { "Only Faans", { 0.96, 0.55, 0.73 }, 38, "던전 안", PK, "던전 안", "배우기", "힐" },
+        { "다크 시크", { 0.58, 0.51, 0.79 }, 43, "티리스팔 숲", YL, "입구", "여유로움", "딜" },
+        { "멀리보는 눈", { 0.25, 0.78, 0.92 }, 41, "은빛소나무 숲", GY, "멀리", "여유로움", "딜" },
+    }
+    local zs, ts, rws = {}, {}, {}
+    local RW, RH = 270, 80
+    for i, r in ipairs(ROWS) do
+        local row = CreateFrame("Frame", nil, box); row:SetSize(RW, RH)
+        row:SetPoint("TOPLEFT", 6 + ((i - 1) % 2) * (RW + 8), -6 - math.floor((i - 1) / 2) * (RH + 4))
+        ns.RoundPlate(row, 4, { 0.13, 0.105, 0.075, 1 }, { 0.29, 0.23, 0.14, 1 })
+        local n = ns.Font(row, 12.5, r[2]); n:SetPoint("TOPLEFT", 9, -9); n:SetText(ns.L(r[1]))
+        local lv = ns.Font(row, 10.5, { 0.8, 0.8, 0.8 }); lv:SetPoint("LEFT", n, "RIGHT", 5, 0); lv:SetText("Lv " .. r[3])
+        local dg = ns.Font(row, 11.5, { 0.37, 0.69, 1 }); dg:SetPoint("TOPLEFT", 9, -33); dg:SetText(ns.L("붉은십자군 무기고"))
+        local z = ns.Font(row, 11, r[5]); z:SetPoint("LEFT", dg, "RIGHT", 4, 0); z:SetText("· " .. ns.L(r[4]))
+        local cm = ns.Font(row, 11.5, { 0.48, 0.82, 0.42 }); cm:SetPoint("TOPLEFT", 9, -56); cm:SetText(ns.L(r[7]))
+        local t = ns.Font(row, 11, r[5]); t:SetPoint("LEFT", cm, "RIGHT", 8, 0); t:SetText(ns.L(r[6]))
+        local ro = ns.Font(row, 10.5, { 0.87, 0.87, 0.87 }); ro:SetPoint("RIGHT", -9, 0); ro:SetText(ns.L(r[8]))
+        zs[i], ts[i], rws[i] = z, t, row
+    end
+    function v:Update()
+        local on = ns.db.lfgLoc ~= false
+        for i = 1, 4 do zs[i]:SetShown(on and ns.db.lfgZone ~= false); ts[i]:SetShown(on and ns.db.lfgTag ~= false) end
+        local sw, sh = st:GetWidth() or 640, st:GetHeight() or 200
+        self:SetScale(math.max(0.5, math.min(1.3, (sw - 16) / 560, (sh - 10) / 176)))
+    end
+    local spot = XP.Spot(st)
+    XP.HLREG.LeelUI_LFG = { function(k, text)
+        if not k or not v:IsVisible() then spot.Off() return end
+        if k == "zone" then spot.Show(zs[3], zs[3], text)
+        elseif k == "tag" then spot.Show(ts[3], ts[3], text)
+        else spot.Show(rws[4], rws[4], text) end
+    end, function(a) spot.Alpha(a) end }
+    return v
+end
+
 -- 장비 비교: 장비 툴팁 위에 토끼 + 말풍선 ("끼자! / 그대로 쓰자")
 PV.LeelUI_Gear = function(st)
     local v = CreateFrame("Frame", nil, st); v:SetSize(300, 190); v:SetPoint("CENTER")
@@ -6459,7 +6526,7 @@ local function Build()
     tbar:SetColorTexture(1, 1, 1, 0.03)
     tbar:SetPoint("TOPLEFT", 2, -2); tbar:SetPoint("TOPRIGHT", -2, -2); tbar:SetHeight(HEAD - 2)
     local logo = f:CreateTexture(nil, "ARTWORK")
-    logo:SetTexture(ns.MEDIA .. "roll_badge_dice"); logo:SetSize(36, 36)
+    logo:SetTexture(ns.MEDIA .. "hub_logo"); logo:SetSize(36, 36)
     logo:SetPoint("TOPLEFT", 14, -9)
     local title = ns.Font(f, 19)
     title:SetText("|cfff2b3c2르엘|r 허브")

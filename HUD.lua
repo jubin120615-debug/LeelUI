@@ -385,7 +385,7 @@ function ns.SetHudText(side, k, v)
     local fr = ns.hudFrames
     if fr and fr[side] then
         ns.ApplyHpTextSize(fr[side])
-        if k == "porArt" and ns.HudRefreshInfo then pcall(ns.HudRefreshInfo, fr[side]) end
+        if (k == "porArt" or k == "porFace") and ns.HudRefreshInfo then pcall(ns.HudRefreshInfo, fr[side]) end
     end
 end
 
@@ -580,7 +580,10 @@ local function UpdateInfo(f)
 
     -- 초상화는 늘 얼굴 (직업 아이콘은 체력 바 앞에 따로 있어요)
     f.portrait.tex:SetTexCoord(0, 1, 0, 1)
-    SetPortraitTexture(f.portrait.tex, u)
+    -- 내 창: 허브에서 "르엘 토끼"를 고르면 캐릭터 얼굴 대신 토끼 (시연 그림과 같은 토끼)
+    local PT = ns.db and ns.db.hudText and ns.db.hudText.player
+    if u == "player" and PT and PT.porFace == "bunny" then f.portrait.tex:SetTexture(ns.MEDIA .. "pv_leel")
+    else SetPortraitTexture(f.portrait.tex, u) end
     if ns.HudPorEdge then ns.HudPorEdge(f) end
 end
 ns.HudRefreshInfo = UpdateInfo
