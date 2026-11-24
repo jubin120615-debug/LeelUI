@@ -26,12 +26,87 @@ local BLOCKED = {}
 for _, p in ipairs(BLOCK) do BLOCKED[p[1] .. ":" .. p[2]] = true; BLOCKED[p[2] .. ":" .. p[1]] = true end
 local function Passable(a, b) return a ~= b and not BLOCKED[a .. ":" .. b] end
 
+-- 실제 길목 자리 (걸어서 넘어가는 곳) · { 지역A, x, y, 지역B, x, y }  (지역 지도 좌표 %)
+--   자료: Carbonite Classic 지역 연결 자료(GPL) + 르엘이 직접 다니며 모은 자리
+local ROUTES = {
+    { 1417, 20.34, 29.73, 1424, 81.96, 56.91 },
+    { 1417, 45.45, 89.06, 1437, 51.06, 11.95 },
+    { 1439, 43.69, 94.70, 1440, 29.16, 14.99 },
+    { 1440, 42.34, 70.96, 1442, 78.21, 42.94 },
+    { 1440, 55.85, 31.70, 1448, 54.91, 92.71 },
+    { 1440, 94.56, 47.60, 1447, 10.72, 75.27 },
+    { 1440, 68.63, 86.25, 1413, 48.44, 11.33 },
+    { 1448, 64.97, 8.36, 1450, 35.77, 72.20 },
+    { 1448, 64.97, 8.36, 1452, 27.96, 34.56 },
+    { 1411, 45.54, 12.28, 1454, 52.49, 84.40 },
+    { 1411, 37.20, 43.00, 1413, 60.80, 19.80 },
+    { 1434, 40.81, 4.19, 1431, 44.50, 87.51 },
+    { 1431, 10.60, 63.80, 1436, 68.90, 63.00 },
+    { 1436, 60.90, 19.00, 1429, 22.30, 78.20 },
+    { 1429, 32.33, 49.86, 1453, 73.34, 90.73 },
+    { 1429, 93.21, 72.27, 1433, 8.95, 71.90 },
+    { 1431, 93.75, 11.43, 1433, 7.10, 89.26 },
+    { 1431, 89.88, 41.25, 1430, 33.05, 35.96 },
+    { 1430, 58.29, 41.44, 1435, 5.84, 60.78 },
+    { 1419, 52.03, 5.60, 1435, 33.83, 66.07 },
+    { 1433, 46.52, 8.56, 1428, 78.85, 82.50 },
+    { 1427, 34.81, 83.74, 1428, 31.83, 50.44 },
+    { 1427, 76.63, 56.67, 1418, 1.09, 62.92 },
+    { 1432, 47.19, 80.82, 1418, 49.36, 7.97 },
+    { 1432, 19.61, 62.81, 1426, 86.13, 51.16 },
+    { 1432, 19.23, 17.21, 1426, 84.37, 31.09 },
+    { 1455, 21.62, 77.79, 1426, 53.40, 35.01 },
+    { 1432, 25.57, 10.47, 1437, 53.97, 70.33 },
+    { 1416, 51.20, 65.60, 1424, 55.50, 16.60 },
+    { 1425, 9.66, 55.77, 1424, 85.06, 31.27 },
+    { 1425, 24.94, 45.71, 1422, 65.48, 88.64 },
+    { 1416, 80.66, 36.42, 1422, 44.05, 86.19 },
+    { 1420, 84.09, 70.49, 1422, 28.62, 57.46 },
+    { 1423, 8.82, 66.22, 1422, 69.67, 50.24 },
+    { 1421, 66.36, 79.80, 1424, 14.35, 46.20 },
+    { 1421, 67.56, 5.45, 1420, 54.14, 75.77 },
+    { 1458, 66.01, 36.85, 1420, 61.86, 64.95 },
+    { 1454, 18.00, 60.43, 1413, 63.88, 0.00 },
+    { 1413, 39.42, 29.68, 1442, 82.78, 96.94 },
+    { 1443, 53.40, 5.52, 1442, 30.21, 75.61 },
+    { 1443, 40.91, 90.72, 1444, 45.45, 2.82 },
+    { 1444, 89.10, 41.14, 1441, 7.98, 10.93 },
+    { 1413, 44.15, 91.23, 1441, 31.92, 24.22 },
+    { 1446, 50.68, 24.29, 1441, 74.24, 93.62 },
+    { 1446, 27.08, 57.20, 1449, 71.44, 77.23 },
+    { 1449, 29.43, 22.42, 1451, 83.68, 14.26 },
+    { 1445, 30.02, 47.11, 1413, 49.53, 78.41 },
+    { 1413, 41.87, 58.62, 1412, 68.59, 60.59 },
+    { 1450, 35.77, 72.20, 1452, 27.96, 34.56 },
+    { 1438, 36.32, 54.38, 1457, 85.73, 35.93 },
+    { 1412, 37.59, 33.03, 1456, 35.69, 63.08 },
+    { 1412, 34.59, 27.91, 1456, 35.69, 63.08 },
+    { 1412, 38.97, 19.09, 1456, 51.17, 31.54 },
+    { 1412, 42.13, 20.20, 1456, 51.17, 31.54 },
+    -- 르엘이 모은 자리 (와우 포에버 새 지역)
+    { 1418, 54.42, 92.71, 2548, 31.84, 29.99 },
+}
+local SEED = {}   -- [지역] = { [옆 지역] = { {x, y}, ... } }
+for _, r in ipairs(ROUTES) do
+    local function Add(z, to, x, y)
+        SEED[z] = SEED[z] or {}
+        SEED[z][to] = SEED[z][to] or {}
+        local t = SEED[z][to]
+        for _, p in ipairs(t) do if math.abs(p[1] - x) < 0.02 and math.abs(p[2] - y) < 0.02 then return end end
+        t[#t + 1] = { x, y }
+    end
+    Add(r[1], r[4], r[2] / 100, r[3] / 100)
+    Add(r[4], r[1], r[5] / 100, r[6] / 100)
+end
+
 local function DB()
     LeelMapDB = LeelMapDB or {}
     LeelMapDB.exitSeen = LeelMapDB.exitSeen or {}
     return LeelMapDB
 end
 local function On() return not (LeelMapDB and LeelMapDB.exits == false) end
+-- 길목 자료가 없는 지역(와우 포에버 새 지역 등)만 지도 경계로 짐작 · 연하게 "?"로 · 끌 수 있어요
+local function Guess() return not (LeelMapDB and LeelMapDB.exitGuess == false) end
 
 local function Info(m)
     local ok, i = pcall(C_Map.GetMapInfo, m)
@@ -164,17 +239,29 @@ local function Exits(z)
         return list
     end
     local seen = DB().exitSeen[z] or {}
-    local auto = Borders(z)
+    local seed = SEED[z]
+    -- 길목 자료가 있는 지역은 짐작 안 해요 (절벽 · 산으로 막힌 경계에 엉뚱한 화살표가 생겨서)
+    local auto = (not seed and Guess()) and Borders(z) or {}
+    seed = seed or {}
     local tos = {}
     for b in pairs(auto) do tos[b] = true end
+    for b in pairs(seed) do tos[b] = true end
     for b in pairs(seen) do if Passable(z, b) then tos[b] = true end end
+    local function Ang(x, y, a) return (a and a.ang) or math.atan2(-(y - 0.5), x - 0.5) end
     for b in pairs(tos) do
-        local s, a = seen[b], auto[b]
-        if s then
-            local ang = a and a.ang or math.atan2(-(s.y - 0.5), s.x - 0.5)
-            list[#list + 1] = { to = b, x = s.x, y = s.y, ang = ang, sure = true }
+        local s, sd, a = seen[b], seed[b], auto[b]
+        if sd then
+            for _, p in ipairs(sd) do list[#list + 1] = { to = b, x = p[1], y = p[2], ang = Ang(p[1], p[2], a), sure = true } end
+            -- 내가 다닌 길이 자료와 많이 다르면 (새 길) 그것도
+            if s then
+                local far = true
+                for _, p in ipairs(sd) do if math.abs(p[1] - s.x) < 0.05 and math.abs(p[2] - s.y) < 0.05 then far = false end end
+                if far then list[#list + 1] = { to = b, x = s.x, y = s.y, ang = Ang(s.x, s.y, a), sure = true } end
+            end
+        elseif s then
+            list[#list + 1] = { to = b, x = s.x, y = s.y, ang = Ang(s.x, s.y, a), sure = true }
         else
-            list[#list + 1] = { to = b, x = a.x, y = a.y, ang = a.ang }
+            list[#list + 1] = { to = b, x = a.x, y = a.y, ang = a.ang, guess = true }
         end
     end
     return list
@@ -193,6 +280,7 @@ local function Learn()
     if not x or (x == 0 and y == 0) then prev = {} return end
     local now = GetTime()
     if prev.m and prev.m ~= m and IsZone(prev.m) and IsZone(m) and Passable(prev.m, m) and now - prev.t < 4
+        and Borders(prev.m)[m]   -- 지도에서 정말 맞닿은 지역만 (배 · 차원문 · 순간이동은 빼요)
         and not (UnitOnTaxi and UnitOnTaxi("player")) then
         local s = DB().exitSeen
         local function Put(a, b, px, py)
@@ -229,15 +317,16 @@ local function Tip(self)
         TipAdd(T("레벨 %s  %s"):format(minL == maxL and minL or (minL .. "-" .. maxL), T(hint or "")), c[1], c[2], c[3])
     end
     TipAdd("클릭하면 그 지역 지도로", 0.8, 0.8, 0.8)
-    if not e.sure then TipAdd("한 번 넘어가 보면 실제 길 자리로 옮겨져요", 0.6, 0.6, 0.6, true) end
+    if e.guess then TipAdd("대략적인 자리 (아직 확인 안 된 길) · 한 번 넘어가 보면 실제 길 자리로 옮겨져요", 0.6, 0.6, 0.6, true) end
     GameTooltip:Show()
 end
 
 local SIZE = 15
 -- 분홍 동그라미 + 안에 작은 화살표. 동그라미는 그대로, 화살표만 가는 쪽으로 돌려요
 local function Shade(b, hot)
-    local a = (b.e and b.e.sure) and 1 or 0.85
+    local a = (b.e and b.e.sure) and 1 or 0.55   -- 짐작한 출구는 연하게 + "?"
     if hot then a = 1 end
+    if b.q then b.q:SetShown(b.e and b.e.guess and true or false); b.glyph:SetShown(not (b.e and b.e.guess)) end
     b:SetAlpha(a)
     if hot then b.disc:SetVertexColor(1, 0.9, 0.93) else b.disc:SetVertexColor(1, 1, 1) end
 end
@@ -246,6 +335,8 @@ local function MakePin()
     b:SetSize(SIZE, SIZE)
     b.disc = b:CreateTexture(nil, "ARTWORK"); b.disc:SetTexture(M .. "exit_disc"); b.disc:SetAllPoints()
     b.glyph = b:CreateTexture(nil, "OVERLAY"); b.glyph:SetTexture(M .. "exit_glyph"); b.glyph:SetAllPoints()
+    b.q = b:CreateFontString(nil, "OVERLAY"); pcall(b.q.SetFont, b.q, FONT, 10, ""); b.q:SetPoint("CENTER", 0, 0)
+    b.q:SetTextColor(INK[1], INK[2], INK[3]); b.q:SetShadowOffset(0, 0); b.q:SetText("?"); b.q:Hide()
     b:SetHitRectInsets(-4, -4, -4, -4)
     b:SetScript("OnEnter", function(self)
         Shade(self, true); self:SetSize(SIZE * 1.25, SIZE * 1.25)
@@ -288,6 +379,7 @@ local function Paint()
             Add(here)
             for z in pairs(_G.LeelMapExitData or {}) do Add(z) end
             for z in pairs(DB().exitSeen) do Add(z) end
+            for z in pairs(SEED) do Add(z) end
         elseif IsZone(m) then
             zones[1] = m
         end
@@ -339,6 +431,17 @@ local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_LOGIN")
 f:SetScript("OnEvent", function()
     DB()
+    -- 예전에 잘못 기억한 자리 (맞닿지 않은 지역끼리: 배 · 순간이동) 지우기
+    C_Timer.After(3, function()
+        local seen = DB().exitSeen
+        for a, t in pairs(seen) do
+            for b in pairs(t) do
+                local ok, nb = pcall(Borders, a)
+                if ok and type(nb) == "table" and not nb[b] then t[b] = nil end
+            end
+            if not next(t) then seen[a] = nil end
+        end
+    end)
     C_Timer.NewTicker(1, Learn)
     local acc = 0
     f:SetScript("OnUpdate", function(_, el)
@@ -358,7 +461,7 @@ _G.LeelMapExits = {
         local p = function(t) DEFAULT_CHAT_FRAME:AddMessage("|cfff2b3c2[Leel Map]|r " .. t) end
         p(T("%s (%d) 출구:"):format((Info(z) or {}).name or "?", z))
         for _, e in ipairs(Exits(z)) do
-            p(("  → %s (%d)  %.1f, %.1f  %s"):format((Info(e.to) or {}).name or "?", e.to, e.x * 100, e.y * 100, e.sure and "다녀 본 길" or "경계"))
+            p(("  → %s (%d)  %.1f, %.1f  %s"):format((Info(e.to) or {}).name or "?", e.to, e.x * 100, e.y * 100, e.sure and "길목" or "짐작"))
         end
     end,
     Refresh = function() Paint() end,

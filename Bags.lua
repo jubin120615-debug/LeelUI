@@ -807,6 +807,11 @@ local function Update()
         chip:SetWidth(math.max(70, 40 + chip.num:GetStringWidth() + chip.tot:GetStringWidth()))
     end
 
+    -- 거의 차거나 꽉 차면: 재료부터 재료 가방으로 알아서 옮기고 (알림만) → 칸이 생기면 버리기 창 · 경고는 안 띄워요
+    if ready and d.on and d.autoReag ~= false and total > 0 and free <= (d.low or 3) and ns.BagReagMove and ns.BagReagMove() then
+        return
+    end
+
     -- 넘어가는 순간에 한 번만 알림
     local full = total > 0 and free == 0
     -- 꽉 차는 순간 (거의 참 알림이 이미 지나간 뒤라도) 버릴 템 고르기 창
@@ -919,10 +924,15 @@ local keepOpen = false  -- 한 번 버리기 시작하면 닫기 전까지 창 �
 local function Candidates()
     local list = {}
     local keep = (ns.ShopDB and ns.ShopDB().keep) or {}
-    for bag = 0, SHOW_LAST do
-        for slot = 1, (NumSlots(bag) or 0) do
+    local reagRoom = ns.BagReagRoom and ns.BagReagRoom() or 0
+    for bag = 0, (NUM_BAG_SLOTS or 4) do
+        local _, family = NumFree(bag)
+        -- 재료 가방 · 특수 가방 안 템은 버려도 일반 칸이 안 생겨요 → 빼요
+        for slot = 1, ((family == nil or family == 0) and NumSlots(bag) or 0) do
             local info = GetInfo(bag, slot)
-            if info and info.hyperlink and not info.hasNoValue and (info.quality or 9) <= 2 and not keep[info.itemID or 0] then
+            -- 재료 가방에 빈칸이 있으면 재료는 버리지 말고 옮기면 돼요
+            local reag = reagRoom > 0 and info and info.hyperlink and ns.BagIsReagent and ns.BagIsReagent(info.hyperlink)
+            if info and info.hyperlink and not reag and not info.hasNoValue and (info.quality or 9) <= 2 and not keep[info.itemID or 0] then
                 local quest = false
                 if QuestInfo then
                     local ok, a, qid = pcall(QuestInfo, bag, slot)
@@ -1446,3 +1456,72 @@ aqEv:SetScript("OnEvent", function(_, ev, unit)
     C_Timer.After(0.2, AQ.Update)
 end)
 ns.AmmoUpdate = AQ.Update
+
+
+-- 재료 → 재료 가방 자동 이동 (일반 가방이 거의 · 꽉 찼을 때)
+do
+    local REAG = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
+    local Pick = CC.PickupContainerItem or _G.PickupContainerItem
+    local moving = false
+    function ns.BagIsReagent(link)
+        if not (link and GetItemInfo) then return false end
+        local r = { pcall(GetItemInfo, link) }
+        return r[1] and r[18] and true or false   -- 17번째 값 = 제작 재료
+    end
+    local function FreeReagSlots()
+        local t = {}
+        if not (REAG and NumSlots) then return t end
+        for slot = 1, (NumSlots(REAG) or 0) do
+            local info = CC.GetContainerItemInfo and CC.GetContainerItemInfo(REAG, slot)
+            if not info then t[#t + 1] = slot end
+        end
+        return t
+    end
+    function ns.BagReagRoom() return #FreeReagSlots() end
+    -- 옮길 게 있으면 시작하고 true (한 칸씩 0.15초 간격 · 전투 중엔 안 함)
+    function ns.BagReagMove()
+        if moving then return true end   -- 옮기는 중엔 경고 · 버리기 창 안 띄워요
+        if InCombatLockdown() or not (REAG and Pick) then return false end
+        if CursorHasItem and CursorHasItem() then return false end
+        local room = FreeReagSlots()
+        if #room == 0 then return false end
+        local jobs = {}
+        for bag = 0, (NUM_BAG_SLOTS or 4) do
+            local _, family = NumFree(bag)
+            if family == nil or family == 0 then
+                for slot = 1, (NumSlots(bag) or 0) do
+                    local info = CC.GetContainerItemInfo and CC.GetContainerItemInfo(bag, slot)
+                    if info and info.hyperlink and not info.isLocked and ns.BagIsReagent(info.hyperlink) then
+                        jobs[#jobs + 1] = { bag, slot, info.hyperlink }
+                        if #jobs >= #room then break end
+                    end
+                end
+            end
+            if #jobs >= #room then break end
+        end
+        if #jobs == 0 then return false end
+        moving = true
+        local i = 0
+        local function Step()
+            i = i + 1
+            local j, to = jobs[i], room[i]
+            if not j or InCombatLockdown() then
+                moving = false
+                local n = i - 1
+                if n > 0 and ns.PillToast then
+                    ns.PillToast((ns.L("재료 %d개를 재료 가방으로 옮겨서 %d칸 생겼어요")):format(n, n), "hb_bag")
+                end
+                C_Timer.After(0.3, function() if ns.UpdateBags then ns.UpdateBags() end end)
+                return
+            end
+            if not (CursorHasItem and CursorHasItem()) then
+                pcall(Pick, j[1], j[2])
+                if CursorHasItem and CursorHasItem() then pcall(Pick, REAG, to) end
+                if CursorHasItem and CursorHasItem() and ClearCursor then ClearCursor() end
+            end
+            C_Timer.After(0.15, Step)
+        end
+        Step()
+        return true
+    end
+end

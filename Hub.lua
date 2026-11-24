@@ -1014,6 +1014,9 @@ local MODULES = {
             { sec = 2, t = "toggle", label = "지도 미리 불러오기", hint = "접속 · 리로드 후 처음 M이 멈추지 않게 (로딩 화면 동안 몰래 한 번 열어 둬요)",
               get = function() return MapDB().preload ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.preload = v and true or false end end },
+            { sec = 3, t = "toggle", label = "확인 안 된 출구도 (대략)", hint = "길목 자료가 없는 지역(와우 포에버 새 지역 등)은 경계로 짐작해서 연하게 \"?\"로",
+              get = function() return MapDB().exitGuess ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.exitGuess = v and true or false; if LeelMapExits then LeelMapExits.Refresh() end end end },
             { sec = 3, t = "toggle", label = "길드원 위치 보기", hl = "guild", hint = "르엘 UI 쓰는 길드원이 지도 · 미니맵에 토끼 점으로",
               get = function() return MapDB().gShow ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.gShow = v and true or false end end },
@@ -1505,6 +1508,23 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_AH", builtin = true, cat = "util",
+        title = "경매장 시세", sub = "가방 툴팁에 경매 가격", icon = "hb_scale",
+        desc = "경매장에서 본 가격을 기억해서 가방 · 은행 · 우편 템 툴팁 아래에 보여줘요.\n경매장에서 찾기만 해도 쌓이고, 경매장 창 위 '시세 훑기'를 누르면 전체를 한 번에 (15분에 한 번).",
+        onoff = { get = function() return ns.AH and ns.AH.DB() and ns.AH.DB().tip end,
+                  set = function(v) if ns.AH and ns.AH.DB() then ns.AH.DB().tip = v and true or false end end },
+        items = {
+            { t = "toggle", label = "7일 평균", hint = "날마다 본 최저가의 평균 (이틀 이상 본 템만)",
+              get = function() return ns.AH and ns.AH.DB() and ns.AH.DB().avg end,
+              set = function(v) ns.AH.DB().avg = v and true or false end },
+            { t = "toggle", label = "상점과 비교", hint = "어디에 파는 게 이득인지 한 줄 (수수료 5% 뺀 값 · 가방에 든 만큼 · Shift = 1개)",
+              get = function() return ns.AH and ns.AH.DB() and ns.AH.DB().cmp ~= false end,
+              set = function(v) ns.AH.DB().cmp = v and true or false end },
+            { t = "button", label = function() return "시세 비우기 (" .. ((ns.AH and ns.AH.Count()) or 0) .. "개)" end,
+              run = function() if ns.AH then ns.AH.Clear() end end },
+        },
+    },
+    {
         key = "LeelUI_Bags", builtin = true, cat = "util",
         title = "르엘 가방", sub = "통합 가방, 남은 칸", icon = "hb_bag",
         desc = "가방 5개를 분홍 창 하나로. 창 머리를 끌면 옮겨져요.",
@@ -1527,6 +1547,9 @@ local MODULES = {
               get = function() return ns.BagsDB().warn end,
               set = function(v) ns.BagsDB().warn = v end },
             { t = "header", label = "꽉 찼을 때" },
+            { t = "toggle", label = "재료는 재료 가방으로 자동 이동", hint = "일반 가방이 거의 · 꽉 차면 재료를 재료 가방 빈칸으로 (전투 밖 · 알림 한 줄)",
+              get = function() return ns.BagsDB().autoReag ~= false end,
+              set = function(v) ns.BagsDB().autoReag = v and true or false end },
             { t = "toggle", label = "버릴 템 고르기 창", hint = "제일 싼 템 3개 + 각각 버리기 버튼 (전투가 끝나면 떠요)",
               get = function() return ns.BagsDB().full ~= false end,
               set = function(v) ns.BagsDB().full = v; if not v and ns.HideBagFull then ns.HideBagFull() end end },
@@ -1609,7 +1632,7 @@ local MOD_CAT = {
     ForgLeveling = "quest", LeelUI_QTracker = "none", LeelUI_Quest = "quest", LeelUI_QItem = "quest", LeelSpot = "quest",
     LeelMap = "map", LeelUI_Minimap = "map",
     LeelUI_Party = "party", LeelUI_LFG = "party", LeelMark = "party", LeelUI_TotemSet = "party", LeelUI_Roll = "party",
-    LeelUI_Bags = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
+    LeelUI_Bags = "item", LeelUI_AH = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
     LeelUI_Profile = "start", LeelUI_Err = "start", _news = "start",
 }
 local MOD_ORDER = {}
@@ -1617,7 +1640,7 @@ do
     local order = { "_news", "LeelUI_Profile", "LeelUI_Err", "LeelUI", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font", "LeelUI_RankUp", "LeelUI_ABar",
         "ForgLeveling", "LeelUI_QTracker", "LeelUI_Quest", "LeelUI_QItem", "LeelSpot",
         "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelUI_LFG", "LeelMark", "LeelUI_TotemSet", "LeelUI_Roll",
-        "LeelUI_Bags", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
+        "LeelUI_Bags", "LeelUI_AH", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
     for i, k in ipairs(order) do MOD_ORDER[k] = i end
 end
 for i, m in ipairs(MODULES) do m.cat = MOD_CAT[m.key] or m.cat or "item"; m.ord = MOD_ORDER[m.key] or (100 + i) end
@@ -1679,6 +1702,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.52", "경매장 시세 · 재료 가방 자동 이동 · 지도 출구 길목", "가방 툴팁에 경매 최저가 + 상점과 비교 한 줄 (경매가 이득 / 상점에 팔아요 · 수수료 뺀 값) · 경매장 검색 칸 옆 시세 훑기 (모으는 중 % · 저장됨 표시) · 가방이 차면 재료를 재료 가방으로 알아서 옮기고 재료는 버리라고 안 해요 · 지도 출구 화살표를 실제 길목 자리로 (클래식 54곳) · 자료 없는 곳은 연한 ?" },
     { "1.3.51", "모던: 비행 중 내리기 구슬", "모던 모드에서 와이번 · 그리폰 · 박쥐를 타면 가운데 레벨 원 위에 그 동물 아이콘 구슬 · 누르면 다음 비행 지점에서 내려요 (허브 > 액션바 \"비행 중 내리기 구슬\")" },
     { "1.3.50", "오류 알리기 · 지도 첫 M 멈춤 고침 · 파티 찾기 칸 · 토끼 초상화", "애드온 오류가 나면 토끼 알림 → 캡처용 카드 · 코드 복사 (허브 > 시작 > 오류 알리기 · /르엘오류) · 리로드 후 처음 M 지도 멈춤을 로딩 화면 동안 미리 불러오기 · 파티 찾기 설정을 파티·전투 새 칸으로 + 미리 보기 · Leel HUD 내 초상화를 르엘 토끼로 · 허브 새 로고 · 멈춤 찾기 /르엘측정" },
     { "1.3.49", "음성 채팅 칩 · 파티 찾기 위치 · Leel Quest 파티 같이 · 오류 고침", "채팅 머리줄에 말하는 사람 칩 · 음성 소리 · 마이크 단추 르엘 모양 · 파티 찾기 신청자 지역 + 같은 곳 · 던전 안 · 입구 · 멀리 · Leel Quest 파티원과 같은 퀘만 길 (얼굴로 고르기) · 단축바 주문 레벨 바꾸기 · 숨긴 기본 파티 창 오류" },
