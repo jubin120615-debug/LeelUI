@@ -474,3 +474,6 @@ E["재료 %d개를 재료 가방으로 옮겨서 %d칸 생겼어요"] = "Moved %
 E["확인 안 된 출구도 (대략)"] = "Unconfirmed exits too (approx.)"; E["아직 아무도 안 넘어가 본 출구를 지역 경계로 짐작해서 (절벽 · 산이 있는 곳은 틀릴 수 있어요)"] = "Guesses untraveled exits from zone borders (can be wrong near cliffs · mountains)"
 E["대략적인 자리 (아직 확인 안 된 길) · 한 번 넘어가 보면 실제 길 자리로 옮겨져요"] = "Approximate spot (unconfirmed path) · moves to the real path once you cross it"
 E["길목 자료가 없는 지역(와우 포에버 새 지역 등)은 경계로 짐작해서 연하게 \"?\"로"] = "Zones without path data (new WoW Forever zones etc.) get guessed exits from borders, shown faint with \"?\""
+-- 새 소식 1.3.52
+E["경매장 시세 · 재료 가방 자동 이동 · 지도 출구 길목"] = "Auction prices · auto-move reagents · map exit paths"
+E["가방 툴팁에 경매 최저가 + 상점과 비교 한 줄 (경매가 이득 / 상점에 팔아요 · 수수료 뺀 값) · 경매장 검색 칸 옆 시세 훑기 (모으는 중 % · 저장됨 표시) · 가방이 차면 재료를 재료 가방으로 알아서 옮기고 재료는 버리라고 안 해요 · 지도 출구 화살표를 실제 길목 자리로 (클래식 54곳) · 자료 없는 곳은 연한 ?"] = "Bag tooltips show auction min + a vendor comparison line (Auction pays more / Sell to vendor · after cut) · Scan prices next to the auction search box (collecting % · saved notice) · when bags fill, reagents move to the reagent bag and aren't suggested for deletion · map exit arrows at real paths (54 classic spots) · faint ? where there's no data"
