@@ -185,6 +185,7 @@ local MODERN = AHC and AHC.ReplicateItems and true or false   -- 와우 포에�
 -- 검색 칸 안 오른쪽 글 + 칸 아래 금색 막대 (A안)
 --   kind: run = 노랑 (모으는 중) · ok = 초록 (3초) · err = 빨강 (4초)
 local msgFS, barBG, barFill, msgTimer
+function A.CD() return (C_AuctionHouse and C_AuctionHouse.SendBrowseQuery) and 120 or 900 end   -- 다시 훑기까지 (초)
 local function Status(t, kind)
     if not msgFS then return end
     if msgTimer then msgTimer:Cancel(); msgTimer = nil end
@@ -203,7 +204,7 @@ local function Bar(p)
     barBG:Show()
     barFill:SetWidth(math.max(1, (barBG:GetWidth() or 100) * math.min(1, p)))
 end
--- 찾기만 해도 저장 → 잠깐 모아서 "✓ 시세 N개 저장됨"
+-- 찾기만 해도 저장 → 잠깐 모아서 "시세 N개 저장됨"
 local flashN, flashT = 0, nil
 local function Flash(n)
     if not n or n <= 0 then return end
@@ -211,7 +212,7 @@ local function Flash(n)
     if flashT then return end
     flashT = C_Timer.NewTimer(0.4, function()
         flashT = nil
-        if not scan then Status((L("✓ 시세 %d개 저장됨")):format(flashN), "ok") end
+        if not scan then Status((L("시세 %d개 저장됨")):format(flashN), "ok") end
         flashN = 0
     end)
 end
@@ -233,7 +234,7 @@ end
 
 -- 찾기 결과 → 기억
 local function OnBrowse()
-    if scan then return end
+    if scan and not scan.browse then return end
     local book = Book(); if not book then return end
     if MODERN and AHC.GetBrowseResults then
         local ok, res = pcall(AHC.GetBrowseResults)
@@ -244,7 +245,23 @@ local function OnBrowse()
             if id and r.minPrice and r.minPrice > 0 then Put(book, id, r.minPrice, r.totalQuantity, false); k = k + 1 end
         end
         A.browseSeen = A.browseSeen or 0
-        if #res > A.browseSeen then Flash(#res - A.browseSeen) end   -- 새로 더 나온 만큼만
+        if scan and scan.browse then
+            -- 전체 훑기 (빈 검색): 끝까지 더 불러오기
+            scan.n = #res
+            Status((L("경매장에서 받는 중… %d개")):format(#res), "run")
+            Bar(math.min(0.95, #res / 3000))
+            local full = AHC.HasFullBrowseResults and AHC.HasFullBrowseResults()
+            if full then A.BrowseDone() else
+                if not scan.more then
+                    scan.more = true
+                    C_Timer.After(0.3, function()
+                        if scan and scan.browse then scan.more = nil; scan.last = GetTime(); pcall(AHC.RequestMoreBrowseResults) end
+                    end)
+                end
+            end
+        else
+            if #res > A.browseSeen then Flash(#res - A.browseSeen) end   -- 새로 더 나온 만큼만
+        end
         A.browseSeen = #res
     elseif GetNumAuctionItems then
         local n = GetNumAuctionItems("list") or 0
@@ -301,7 +318,7 @@ runner:SetScript("OnUpdate", function()
         for id, s in pairs(scan.seen) do Put(book, id, s[1], s[2], true); k = k + 1 end
         local d = DB(); if d then d.lastAll = time() end
         scan = nil; runner:Hide()
-        Bar(nil); Status((L("✓ 시세 %d개 저장 · 다음은 15분 뒤")):format(k), "ok")
+        Bar(nil); Status((L("시세 %d개 저장")):format(k), "ok")
         ns.Print((L("경매장 시세 %d개를 저장했어요.")):format(k))
     end
 end)
@@ -309,15 +326,25 @@ end)
 function A.ScanAll()
     if scan then return end
     local d = DB()
-    local left = d and d.lastAll and (900 - (time() - d.lastAll)) or 0
+    local CD = A.CD()
+    local left = d and d.lastAll and (CD - (time() - d.lastAll)) or 0
     if left > 0 then Status((L("%d분 뒤에 다시 훑을 수 있어요")):format(math.ceil(left / 60)), "err") return end
-    if MODERN then
-        scan = { i = 1, total = 0, book = Book(), seen = {}, wait = true }
-        Status(L("경매장에 묻는 중…"), "run"); Bar(0)
-        local ok = pcall(AHC.ReplicateItems)
-        if not ok then scan = nil; Bar(nil); Status(L("지금은 전체 훑기를 할 수 없어요 · 잠시 뒤에 다시"), "err") end
-        -- 20초 안에 답이 없으면 알려줘요
-        C_Timer.After(20, function() if scan and scan.wait then scan = nil; Bar(nil); Status(L("경매장이 답이 없어요 · 잠시 뒤에 다시"), "err") end end)
+    if MODERN and AHC.SendBrowseQuery then
+        -- 와우 포에버: 전체 목록 받기(ReplicateItems)가 막혀 있어요 → 빈 검색으로 모든 템 최저가를 끝까지 넘겨 받기
+        scan = { browse = true, t0 = GetTime(), last = GetTime() }
+        A.browseSeen = 0
+        Status(L("경매장에 묻는 중…"), "run"); Bar(0.02)
+        local q = { searchString = "", sorts = { { sortOrder = (Enum.AuctionHouseSortOrder and Enum.AuctionHouseSortOrder.Price) or 0, reverseSort = false } },
+                    filters = {}, itemClassFilters = {} }
+        local ok = pcall(AHC.SendBrowseQuery, q)
+        if not ok then scan = nil; Bar(nil); Status(L("지금은 전체 훑기를 할 수 없어요 · 잠시 뒤에 다시"), "err") return end
+        -- 10초 동안 새 결과가 없으면 거기까지 받은 걸로 끝
+        local function Watch()
+            if not (scan and scan.browse) then return end
+            if GetTime() - (scan.last or 0) > 10 then A.BrowseDone() return end
+            C_Timer.After(1, Watch)
+        end
+        C_Timer.After(1, Watch)
         return
     end
     if not (QueryAuctionItems and CanSendAuctionQuery) then ns.Print(L("이 게임에선 전체 훑기를 쓸 수 없어요 · 찾기만 해도 시세가 쌓여요.")) return end
@@ -336,6 +363,17 @@ local function OnAllReady()
     if scan.total == 0 then scan = nil; Bar(nil); Status(L("결과가 없어요"), "err") return true end
     runner:Show()
     return true
+end
+A.AllReady = OnAllReady
+function A.BrowseDone()
+    if not (scan and scan.browse) then return end
+    local n = scan.n or 0
+    scan = nil
+    local d = DB(); if d then d.lastAll = time() end
+    Bar(nil)
+    if n == 0 then Status(L("결과가 없어요"), "err") return end
+    Status((L("시세 %d개 저장")):format(n), "ok")
+    ns.Print((L("경매장 시세 %d개를 저장했어요.")):format(n))
 end
 
 -- A안: 검색 칸 오른쪽 끝에 같은 높이 아이콘 · 칸 안 오른쪽에 상태 글 · 칸 아래 금색 진행 막대
@@ -382,12 +420,12 @@ local function MakeButton()
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
         GameTooltip:AddLine(L("시세 훑기"), 1, 0.82, 0)
-        GameTooltip:AddLine(L("경매장 전체 시세 모으기 · 15분에 한 번"), 1, 1, 1)
+        GameTooltip:AddLine(L(A.CD() < 900 and "경매장 전체 시세 모으기 · 2분에 한 번" or "경매장 전체 시세 모으기 · 15분에 한 번"), 1, 1, 1)
         local d = DB()
         local line = (L("시세 %d개")):format(A.Count())
         if d and d.lastAll then line = Ago(d.lastAll) .. " · " .. line end
         GameTooltip:AddLine(line, 0.7, 0.68, 0.74)
-        local left = d and d.lastAll and (900 - (time() - d.lastAll)) or 0
+        local left = d and d.lastAll and (A.CD() - (time() - d.lastAll)) or 0
         if left > 0 then GameTooltip:AddLine((L("%d분 뒤에 다시 훑을 수 있어요")):format(math.ceil(left / 60)), 0.94, 0.6, 0.4) end
         GameTooltip:Show()
     end)
@@ -399,8 +437,9 @@ end
 function A.PaintBtn()
     if not btn then return end
     local d = DB()
-    local left = d and d.lastAll and (900 - (time() - d.lastAll)) or 0
-    if left > 0 and not scan then btn.cd:SetCooldown(GetTime() - (900 - left), 900) else btn.cd:Clear() end
+    local CD = A.CD()
+    local left = d and d.lastAll and (CD - (time() - d.lastAll)) or 0
+    if left > 0 and not scan then btn.cd:SetCooldown(GetTime() - (CD - left), CD) else btn.cd:Clear() end
 end
 
 local ev = CreateFrame("Frame")

@@ -465,7 +465,7 @@ E["15분에 한 번 · 모은 값은 가방 툴팁에 나와요"] = "Once per 15
 E["경매장 시세를 비웠어요."] = "Auction prices cleared."
 E["게임 툴팁에 이미 \"판매 가격\"이 있어서 기본은 꺼짐"] = "Off by default since the game tooltip already shows \"Sell Price\""
 E["경매장 전체 시세 모으기 · 15분에 한 번"] = "Collect all auction prices · once per 15 min"; E["시세 %d개"] = "%d prices"; E["%d분 뒤에 다시 훑을 수 있어요"] = "Can scan again in %d min"
-E["✓ 시세 %d개 저장됨"] = "✓ %d prices saved"; E["시세 모으는 중 %d%%"] = "Collecting prices %d%%"; E["✓ 시세 %d개 저장 · 다음은 15분 뒤"] = "✓ %d prices saved · next in 15 min"
+E["시세 %d개 저장됨"] = "%d prices saved"; E["시세 모으는 중 %d%%"] = "Collecting prices %d%%"; E["시세 %d개 저장 · 다음은 15분 뒤"] = "%d prices saved · next in 15 min"
 E["경매장이 답이 없어요 · 잠시 뒤에 다시"] = "No reply from the auction house · try again shortly"
 E["상점과 비교"] = "Compare with vendor"; E["어디에 파는 게 이득인지 한 줄 (수수료 5% 뺀 값 · 가방에 든 만큼 · Shift = 1개)"] = "One line on where it's better to sell (after 5% cut · for what's in your bag · Shift = 1)"
 E["경매가 이득"] = "Auction pays more"; E["상점에 팔아요"] = "Sell to vendor"; E["경매"] = E["경매"] or "Auction"; E["(수수료 뺀)"] = "(after cut)"; E["상점"] = E["상점"] or "Vendor"; E["1개"] = "each"
@@ -477,3 +477,8 @@ E["길목 자료가 없는 지역(와우 포에버 새 지역 등)은 경계로 
 -- 새 소식 1.3.52
 E["경매장 시세 · 재료 가방 자동 이동 · 지도 출구 길목"] = "Auction prices · auto-move reagents · map exit paths"
 E["가방 툴팁에 경매 최저가 + 상점과 비교 한 줄 (경매가 이득 / 상점에 팔아요 · 수수료 뺀 값) · 경매장 검색 칸 옆 시세 훑기 (모으는 중 % · 저장됨 표시) · 가방이 차면 재료를 재료 가방으로 알아서 옮기고 재료는 버리라고 안 해요 · 지도 출구 화살표를 실제 길목 자리로 (클래식 54곳) · 자료 없는 곳은 연한 ?"] = "Bag tooltips show auction min + a vendor comparison line (Auction pays more / Sell to vendor · after cut) · Scan prices next to the auction search box (collecting % · saved notice) · when bags fill, reagents move to the reagent bag and aren't suggested for deletion · map exit arrows at real paths (54 classic spots) · faint ? where there's no data"
+E["경매장에서 받는 중… %d개"] = "Receiving from the auction house… %d"; E["경매장에 묻는 중… %d초"] = "Asking the auction house… %ds"
+E["경매장 전체 시세 모으기 · 2분에 한 번"] = "Collect all auction prices · once per 2 min"; E["시세 %d개 저장"] = "%d prices saved"
+-- 새 소식 1.3.53
+E["경매장 전체 시세 훑기 고침"] = "Full auction price scan fixed"
+E["와우 포에버에서 시세 훑기가 \"답이 없어요\"로 끝나던 것 → 빈 검색으로 모든 템 최저가를 끝까지 받아요 (받는 중 개수 표시 · 2분에 한 번) · 글 앞 네모 기호 없앰"] = "Price scan no longer ends with \"No reply\" on WoW Forever → an empty search pages through every item's lowest price (count shown while receiving · once per 2 min) · removed the box symbol before messages"
