@@ -349,10 +349,11 @@ end
 -- 이 템을 대상에게 쓰면 그 몹 이름을 기억 (다음부터 바로 표시)
 ----------------------------------------------------------------------
 local function LearnUse(spellID)
-    if not spellID then return end
+    if not spellID or ns.IsSecret(spellID) then return end
     if DB().learn == false then return end
-    local name = UnitExists("target") and UnitCanAttack("player", "target") and UnitName("target")
-    if type(name) ~= "string" then return end
+    local ok, name = pcall(function() return UnitExists("target") and UnitCanAttack("player", "target") and UnitName("target") end)
+    -- 던전 · 전투 중엔 몹 이름이 숨겨진 값일 수 있어요 (표의 열쇠로 못 써요) → 그땐 안 배워요
+    if not ok or ns.IsSecret(name) or type(name) ~= "string" then return end
     for _, it in ipairs(items) do
         local _, sid = ItemSpell(it.id)
         if sid == spellID then

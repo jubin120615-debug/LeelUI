@@ -1161,6 +1161,11 @@ RANGE_ITEMS = { { 5, 8149 }, { 15, 1251 }, { 20, 21519 }, { 30, 1180 } }
 local function ItemInRange(id, unit)
     local f = (C_Item and C_Item.IsItemInRange) or IsItemInRange
     if not f then return nil end
+    -- 전투 중 아군 대상엔 게임이 막아요 (pcall로도 '차단' 알림이 떠요) → 적일 때만
+    if InCombatLockdown() then
+        local okA, atk = pcall(UnitCanAttack, "player", unit)
+        if not (okA and atk == true) then return nil end
+    end
     local ok, v = pcall(function()
         local x = f(id, unit)
         if issecretvalue and issecretvalue(x) then return nil end

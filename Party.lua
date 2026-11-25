@@ -538,12 +538,23 @@ local function CreateMember(parent, i, unit, preview)
     f.lead:SetRotation(math.rad(18))
     f.lead:Hide()
 
-    -- 내가 건 버프 (오른쪽 위), 해제할 디버프 (오른쪽 아래)
+    -- 내가 건 버프 (왼쪽 아래) · 해제할 디버프는 오른쪽 위 해제 칸이 대신 보여 줘요 (게임 디버프 칸은 안 보이게 · 있는지 확인용)
     if not preview then
-    f.buffs = AuraBox(f, "leelMine", "HELPFUL|PLAYER", 3, BSIZE, "mm_squircle", "TOPRIGHT", -PAD + 2, -PAD + 2)
-    f.debuffs = AuraBox(f, "leelDispel", "HARMFUL|RAID", 2, DSIZE, "mm_squircle", "BOTTOMLEFT", PAD, PAD + 4)
+    f.buffs = AuraBox(f, "leelMine", "HELPFUL|PLAYER", 3, BSIZE, "mm_squircle", "BOTTOMLEFT", PAD, PAD + 4)
+    f.debuffs = AuraBox(f, "leelDispel", "HARMFUL|RAID", 2, DSIZE, "mm_squircle", "TOPRIGHT", -PAD + 2, -PAD + 2)
+    if f.debuffs then f.debuffs:SetAlpha(0) end
     end
+    -- 빈 칸 물들이기: 체력 끝부터 칸 오른쪽 끝까지 디버프 색 (글씨 층 아래)
+    local df = CreateFrame("Frame", nil, f); df:SetAllPoints(); df:SetFrameLevel(lv + 2); df:Hide()
+    f.dspFill = df:CreateTexture(nil, "ARTWORK")
+    f.dspFill:SetTexture(ns.WHITE); f.dspFill:AddMaskTexture(f.mask)
+    f.dspFill:SetPoint("TOPLEFT", f.hp:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+    f.dspFill:SetPoint("BOTTOMRIGHT", f.hp, "BOTTOMRIGHT", 0, 0)
+    local fag = df:CreateAnimationGroup(); fag:SetLooping("BOUNCE")
+    local fa = fag:CreateAnimation("Alpha"); fa:SetFromAlpha(0.45); fa:SetToAlpha(1); fa:SetDuration(0.6); fa:SetSmoothing("IN_OUT")
+    f.dspFillF, f.dspFillAg = df, fag
     if Modern() then ns.PartyModernSkin(f) end
+    if ns.PartyMakeSlots then ns.PartyMakeSlots(f) end
     return f
 end
 
@@ -694,6 +705,8 @@ local function PaintRim(f)
         f.rim:SetVertexColor(1, 1, 1, 0.14)
     elseif f.aggroOn then
         f.rim:SetVertexColor(1, 0.35, 0.35, 1)
+    elseif f.dspCol then
+        f.rim:SetVertexColor(f.dspCol[1], f.dspCol[2], f.dspCol[3], 1)   -- 해제할 디버프: 테도 그 색 (풀피면 물들일 칸이 없어서)
     elseif f.selOn then
         f.rim:SetVertexColor(1, 0.953, 0.965, 1)
     elseif f.blackOn then
@@ -739,25 +752,179 @@ local function UpdateRange(f)
     f:SetAlpha((inRange or not checked) and 1 or 0.42)
 end
 
--- 해제할 디버프 표시 켜기/끄기 (col = 색, nil = 끄기)
+-- 해제할 디버프 (C안): 체력 빈 칸이 디버프 색으로 맥박 + 오른쪽 위 해제 칸(클릭 = 그 사람한테 해제)
+--   옛 D안(왼쪽 세로 줄 + 아이콘 링)은 안 써요
+local SLOT_DEF = {   -- 칸마다 후보(위가 먼저): { 주문 ID, 풀 수 있는 종류 }
+    PRIEST  = { { { 988, { Magic = true } }, { 527, { Magic = true } } },
+                { { 552, { Disease = true } }, { 528, { Disease = true } } } },
+    DRUID   = { { { 2782, { Curse = true } } },
+                { { 2893, { Poison = true } }, { 8946, { Poison = true } } } },
+    SHAMAN  = { { { 526, { Poison = true } } },
+                { { 2870, { Disease = true } } } },
+    PALADIN = { { { 4987, { Magic = true, Poison = true, Disease = true } }, { 1152, { Poison = true, Disease = true } } } },
+    MAGE    = { { { 475, { Curse = true } } } },
+}
+local TORDER = { "Magic", "Curse", "Poison", "Disease" }
+local SS = 24
+local mySlots = {}          -- [i] = { name, icon, types }
+local slotMembers = {}
+
+local function SpellNI(id)
+    local n, ic
+    if C_Spell and C_Spell.GetSpellName then
+        local ok, a = pcall(C_Spell.GetSpellName, id); if ok then n = a end
+        local ok2, b = pcall(C_Spell.GetSpellTexture, id); if ok2 then ic = b end
+    end
+    if not n and GetSpellInfo then local ok, a, _, c = pcall(GetSpellInfo, id); if ok then n, ic = a, c end end
+    return n, ic
+end
+local function Known(id, n)
+    if IsPlayerSpell then local ok, r = pcall(IsPlayerSpell, id); if ok and r then return true end end
+    if IsSpellKnown then local ok, r = pcall(IsSpellKnown, id); if ok and r then return true end end
+    if n and C_Spell and C_Spell.GetSpellInfo then local ok, r = pcall(C_Spell.GetSpellInfo, n); if ok and r then return true end end
+    return false
+end
+local function ReadSlots()
+    mySlots = {}
+    local _, cls = UnitClass("player")
+    for _, cands in ipairs(SLOT_DEF[cls or ""] or {}) do
+        for _, c in ipairs(cands) do
+            local n, ic = SpellNI(c[1])
+            if n and Known(c[1], n) then mySlots[#mySlots + 1] = { name = n, icon = ic, types = c[2] }; break end
+        end
+    end
+end
+ns.PartyDispelSlots = function() return mySlots end
+
+local function ClickOn() return not (ns.db and ns.db.partyDispelClick == false) end
+
+-- 칸 자리: 타일 = 오른쪽 위 안 · 모던 = 줄 오른쪽 밖 (따라가기 배지 옆)
+--   클릭 단추도 칸에 직접 붙여요 (그림 칸에 붙이면 전투 중에 그림을 못 옮겨서) · 전투 밖에서만
+local function PlaceSlots(f)
+    if not f.slots or InCombatLockdown() then return end
+    local n = math.max(1, #mySlots)
+    for i, v in ipairs(f.slots) do
+        for _, r in ipairs({ v, v.btn }) do
+            r:ClearAllPoints()
+            if f.modern then
+                local FW = (f.unit ~= "player") and 36 or 0
+                r:SetPoint("LEFT", f, "TOPRIGHT", 8 + FW + (i - 1) * (SS + 4), -29)
+            else
+                r:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD + 2 - (n - i) * (SS + 4), -PAD + 2)
+            end
+        end
+    end
+end
+
+-- 클릭 단추: 주문 넣기 · 보이기 (전투 밖에서만 · 전투 중엔 그대로)
+local function ArmSlots(f, all)
+    if not f.slots or InCombatLockdown() then return end
+    for i, v in ipairs(f.slots) do
+        local b = v.btn
+        if b then
+            local d = mySlots[i]
+            b:SetAttribute("spell", d and d.name or nil)
+            b:SetShown(ClickOn() and d ~= nil and (all or v:IsShown()))
+        end
+    end
+end
+ns.PartyArmSlots = function(all)
+    if InCombatLockdown() then return end
+    for _, f in ipairs(slotMembers) do PlaceSlots(f); ArmSlots(f, all) end
+end
+
+function ns.PartyMakeSlots(f)
+    f.slots = {}
+    local down = GetCVarBool and GetCVarBool("ActionButtonUseKeyDown")
+    for i = 1, 2 do
+        local v = CreateFrame("Frame", nil, f.top); v:SetSize(SS, SS); v:SetFrameLevel(f.top:GetFrameLevel() + 3)
+        v.glow = v:CreateTexture(nil, "BACKGROUND", nil, -2); v.glow:SetTexture(ns.MEDIA .. "circle"); v.glow:SetBlendMode("ADD")
+        v.glow:SetPoint("TOPLEFT", -9, 9); v.glow:SetPoint("BOTTOMRIGHT", 9, -9)
+        v.rim = v:CreateTexture(nil, "BACKGROUND", nil, 0); v.rim:SetTexture(ns.MEDIA .. "mm_squircle")
+        v.rim:SetPoint("TOPLEFT", -2.5, 2.5); v.rim:SetPoint("BOTTOMRIGHT", 2.5, -2.5)
+        local blk = v:CreateTexture(nil, "BACKGROUND", nil, 1); blk:SetTexture(ns.MEDIA .. "mm_squircle"); blk:SetVertexColor(0.07, 0.05, 0.05, 1)
+        blk:SetPoint("TOPLEFT", -1, 1); blk:SetPoint("BOTTOMRIGHT", 1, -1)
+        v.icon = v:CreateTexture(nil, "ARTWORK"); v.icon:SetAllPoints(); v.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local m = v:CreateMaskTexture(); m:SetTexture(ns.MEDIA .. "mm_squircle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); m:SetAllPoints(v.icon)
+        v.icon:AddMaskTexture(m)
+        v.q = v:CreateFontString(nil, "OVERLAY"); v.q:SetFont(ns.FONT, 14, "OUTLINE"); v.q:SetPoint("CENTER", 0, 0); v.q:SetText("?"); v.q:Hide()
+        local ag = v.glow:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+        local a = ag:CreateAnimation("Alpha"); a:SetFromAlpha(0.25); a:SetToAlpha(0.9); a:SetDuration(0.55); a:SetSmoothing("IN_OUT")
+        v:SetScript("OnShow", function() ag:Play() end); v:SetScript("OnHide", function() ag:Stop() end)
+        v:Hide()
+        f.slots[i] = v
+        if not f.preview then
+            local b = CreateFrame("Button", nil, f, "SecureActionButtonTemplate")
+            b:SetSize(SS, SS); b:SetFrameLevel(f.top:GetFrameLevel() + 8)
+            b:SetAttribute("unit", f.unit)
+            b:SetAttribute("*type1", "spell")
+            b:SetAttribute("*type2", "togglemenu")
+            b:RegisterForClicks(down and "AnyDown" or "AnyUp")
+            b:SetScript("OnEnter", function(self)
+                local d = mySlots[i]
+                if not d then return end
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                ns.TAdd(GameTooltip, ns.L("클릭: ") .. d.name, 1, 0.84, 0.88)
+                if not v:IsShown() then ns.TAdd(GameTooltip, "지금은 풀 게 없어요 (눌러도 시전돼요)", 0.95, 0.6, 0.6) end
+                GameTooltip:Show()
+            end)
+            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            b:Hide()
+            v.btn = b
+        end
+    end
+    slotMembers[#slotMembers + 1] = f
+    PlaceSlots(f); ArmSlots(f)
+end
+
+-- 해제 칸 칠하기 · set = { 종류 = true } · anyCol = 종류 모름(분홍 ?) · secret = 숨긴 참거짓
+local function PaintSlots(f, set, anyOn, secret, isSecret)
+    if not f.slots then return end
+    local defs = mySlots
+    if #defs == 0 and f.preview then   -- 미리 보기: 해제 못 하는 직업이면 종류 아이콘 하나로
+        local t = set and next(set)
+        defs = { { icon = t and DISPEL_ICON[t], types = set or {} } }
+    end
+    for i, v in ipairs(f.slots) do
+        local d = defs[i]
+        local col, show = nil, false
+        if d then
+            if anyOn then col, show = DISPEL_ANY, true
+            elseif set then
+                for _, t in ipairs(TORDER) do if set[t] and d.types[t] then col, show = DISPEL[t], true; break end end
+            end
+        end
+        if show then
+            v.icon:SetTexture(d.icon); v.icon:SetDesaturated(anyOn and true or false)
+            v.rim:SetVertexColor(col[1], col[2], col[3], 1); v.glow:SetVertexColor(col[1], col[2], col[3], 0.7)
+            v.q:SetShown(anyOn and true or false)
+            v:Show()
+            if isSecret and v.SetAlphaFromBoolean then pcall(v.SetAlphaFromBoolean, v, secret, 1, 0) else v:SetAlpha(1) end
+        else
+            v:Hide()
+        end
+    end
+    ArmSlots(f)
+end
+
+-- 해제할 디버프 표시 켜기/끄기 (col = 색, nil = 끄기) · 빈 칸 물들이기 + 테 색
 local function ShowDispel(f, col)
+    if f.dspFrame then f.dspFrame:Hide() end
     if col then
-        f.dspBar:SetVertexColor(col[1], col[2], col[3], 1)
-        f.dspRing:SetVertexColor(col[1], col[2], col[3], 1)
-        f.dspGlow:SetVertexColor(col[1], col[2], col[3], 0.55)
-        if not f.dspFrame:IsShown() then f.dspFrame:Show(); f.dspAg:Play(); f.dspGag:Play() end
+        f.dspFill:SetVertexColor(col[1], col[2], col[3], 0.6)
+        if not f.dspFillF:IsShown() then f.dspFillF:Show(); f.dspFillAg:Play() end
     else
-        f.dspAg:Stop(); f.dspGag:Stop(); f.dspFrame:Hide()
+        f.dspFillAg:Stop(); f.dspFillF:Hide()
     end
     f.dspCol = col
 end
 
--- 내가 풀 수 있는 디버프가 있나 · 있으면 그 종류
+-- 내가 풀 수 있는 디버프가 있나 · 있으면 그 종류들
 --   1) 게임이 디버프 종류를 알려 주면 그 색
 --   2) 숨겨진 값이면 "있다"만 (분홍)
 --   3) 그것도 못 읽으면 디버프 칸에 뭔가 떠 있나로
 local function DispelOf(unit, box)
-    local found, typ = false, nil
+    local found, typ, set = false, nil, nil
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         for i = 1, 8 do
             local ok, a = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL|RAID")
@@ -765,7 +932,10 @@ local function DispelOf(unit, box)
             found = true
             local okD, dn = pcall(function() return a.dispelName end)
             if not okD then dn = nil end
-            if dn and not ns.IsSecret(dn) and DISPEL[dn] then typ = dn; break end
+            if dn and not ns.IsSecret(dn) and DISPEL[dn] then
+                typ = typ or dn
+                set = set or {}; set[dn] = true
+            end
         end
     end
     local secretShown, hasSecret = nil, false
@@ -783,23 +953,26 @@ local function DispelOf(unit, box)
             end
         end
     end
-    if found then return true, typ, false, nil end
-    return false, typ, hasSecret, secretShown   -- 숨긴 값은 비교 · 참거짓 검사 없이 그대로 넘겨요
+    if found then return true, typ, false, nil, set end
+    return false, typ, hasSecret, secretShown, set   -- 숨긴 값은 비교 · 참거짓 검사 없이 그대로 넘겨요
 end
 
 local function UpdateDispel(f)
     if ns.party and ns.party.preview then return end
-    if not UnitExists(f.unit) or f.gone or (ns.db and ns.db.partyDispelFx == false) then ShowDispel(f, nil); PaintRim(f) return end
-    local found, typ, hasSecret, secret = DispelOf(f.unit, f.debuffs)
+    if not UnitExists(f.unit) or f.gone or (ns.db and ns.db.partyDispelFx == false) then ShowDispel(f, nil); PaintSlots(f, nil); PaintRim(f) return end
+    local found, typ, hasSecret, secret, set = DispelOf(f.unit, f.debuffs)
     if hasSecret then
         ShowDispel(f, DISPEL_ANY)
-        if not (f.dspFrame.SetAlphaFromBoolean and pcall(f.dspFrame.SetAlphaFromBoolean, f.dspFrame, secret, 1, 0)) then ShowDispel(f, nil) end
+        if not (f.dspFillF.SetAlphaFromBoolean and pcall(f.dspFillF.SetAlphaFromBoolean, f.dspFillF, secret, 1, 0)) then ShowDispel(f, nil) end
+        PaintSlots(f, nil, true, secret, true)
     else
-        f.dspFrame:SetAlpha(1)
+        f.dspFillF:SetAlpha(1)
         ShowDispel(f, found and (DISPEL[typ] or DISPEL_ANY) or nil)
+        if found and not set then PaintSlots(f, nil, true) else PaintSlots(f, set) end
     end
     PaintRim(f)
 end
+
 
 local function UpdateAuras(f)
     if f.debuffs then pcall(f.debuffs.UpdateAllAuras, f.debuffs) end
@@ -1047,24 +1220,7 @@ local function Fake(f, d)
     local box = ns.party
     local typ = box and box.dispelTest and d[9]
     ShowDispel(f, typ and DISPEL[typ] or nil)
-    if not f.fakeDeb then
-        local fd = f.top:CreateTexture(nil, "OVERLAY", nil, 3)
-        fd:SetSize(DSIZE, DSIZE); fd:SetPoint("BOTTOMRIGHT", -PAD + 2, PAD + 4)
-        fd:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        local fm = f.top:CreateMaskTexture()
-        fm:SetTexture(ns.MEDIA .. "mm_squircle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); fm:SetAllPoints(fd)
-        fd:AddMaskTexture(fm)
-        f.fakeDeb = fd
-        f.fakeDebTxt = OFont(f.top, 11)
-        f.fakeDebTxt:SetPoint("RIGHT", fd, "LEFT", -8, 0)
-    end
-    if typ then
-        f.fakeDeb:SetTexture(DISPEL_ICON[typ]); f.fakeDeb:Show()
-        f.fakeDebTxt:SetText(({ Magic = "마법", Curse = "저주", Poison = "독", Disease = "질병" })[typ])
-        local c = DISPEL[typ]; f.fakeDebTxt:SetTextColor(c[1] * 0.5 + 0.5, c[2] * 0.5 + 0.5, c[3] * 0.5 + 0.5); f.fakeDebTxt:Show()
-    else
-        f.fakeDeb:Hide(); f.fakeDebTxt:Hide()
-    end
+    PaintSlots(f, typ and { [typ] = true } or nil)
     PaintRim(f)
     f.lead:SetShown(lead)
     f:SetAlpha(1)
@@ -1161,7 +1317,7 @@ function ns:SetPartyPreview(on)
         box.preview = false
         box.dispelTest = false
         box.mover:Hide()
-        for _, f in ipairs(members) do if f.fakeDeb then f.fakeDeb:Hide(); f.fakeDebTxt:Hide() end end
+        for _, f in ipairs(members) do PaintSlots(f, nil) end
         ns:RunOutOfCombat("partyPreview", function()
             RegisterStateDriver(box, "visibility", "[group:raid] hide; show")
             for _, f in ipairs(members) do if f ~= ns.partyMe then RegisterUnitWatch(f) end end
@@ -1265,6 +1421,19 @@ function ns:CreateParty()
         if event == "PLAYER_ENTERING_WORLD" and ns.db.partyHideBlizzard ~= false then HideBlizzardParty() end
     end)
 
+    -- 해제 칸: 배운 해제 주문 읽기 · 전투 들어갈 때 클릭 단추 전부 켜기 (전투 중엔 못 바꿔서) · 끝나면 다시 맞추기
+    local sev = CreateFrame("Frame")
+    for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED" }) do
+        pcall(sev.RegisterEvent, sev, e)
+    end
+    sev:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_DISABLED" then ns.PartyArmSlots(true) return end
+        if event ~= "PLAYER_REGEN_ENABLED" then ReadSlots() end
+        ns.PartyArmSlots(false)
+        if not box.preview then for _, f in ipairs(members) do if UnitExists(f.unit) then UpdateDispel(f) end end end
+    end)
+    ReadSlots(); ns.PartyArmSlots(false)
+
     -- 사거리: 0.3초마다
     local t = 0
     box:HookScript("OnUpdate", function(_, el)
@@ -1296,7 +1465,27 @@ SlashCmdList.LEELPARTYDBG = function(msg)
         end
         return
     end
+    if msg == "클릭시험" then
+        -- 해제 칸을 20초 동안 전부 켜요 (디버프 없어도) · 눌러서 해제 주문이 나가는지 확인용
+        if InCombatLockdown() then print(ns.L("|cfff2b3c2[르엘 파티]|r 전투가 끝나고 해 주세요.")) return end
+        if #mySlots == 0 then print(ns.L("|cfff2b3c2[르엘 파티]|r 해제 칸: 배운 해제 주문이 없어요")) return end
+        local n = 0
+        for _, f in ipairs(ns.partyMembers or {}) do
+            if f:IsVisible() and UnitExists(f.unit) then PaintSlots(f, nil, true); n = n + 1 end
+        end
+        print(ns.L("|cfff2b3c2[르엘 파티]|r 클릭 시험: 보이는 파티 칸 %d개의 해제 칸을 20초 동안 켰어요. 눌러 보세요 (디버프 없어도 시전돼요)."):format(n))
+        C_Timer.After(20, function()
+            for _, f in ipairs(ns.partyMembers or {}) do if UnitExists(f.unit) then UpdateDispel(f) end end
+        end)
+        return
+    end
     if msg == "해제검사" then
+        local sl = mySlots
+        if #sl == 0 then print(ns.L("|cfff2b3c2[르엘 파티]|r 해제 칸: 배운 해제 주문이 없어요"))
+        else for i, d in ipairs(sl) do
+            local ts = {}; for _, t in ipairs(TORDER) do if d.types[t] then ts[#ts + 1] = t end end
+            print(("|cfff2b3c2[르엘 파티]|r " .. ns.L("해제 칸 %d: %s (%s)")):format(i, tostring(d.name), table.concat(ts, ",")))
+        end end
         for i, f in ipairs(ns.partyMembers or {}) do
             if UnitExists(f.unit) then
                 local found, typ, hasSecret = DispelOf(f.unit, f.debuffs)

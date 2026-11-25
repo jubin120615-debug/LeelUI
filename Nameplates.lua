@@ -333,7 +333,7 @@ local function BlizzRaid(f, on)
         rf.leelOn = true
     elseif rf.leelOn then
         rf.leelOn = nil
-        pcall(rf.SetIgnoreParentAlpha, rf, false)
+        pcall(rf.SetIgnoreParentAlpha, rf, false); pcall(rf.SetAlpha, rf, 0)   -- 우리 그림으로 그릴 땐 게임 징은 숨겨요 (두 개 겹쳐 보이지 않게)
     end
 end
 local function UpdateRaid(f, unit)
@@ -346,9 +346,17 @@ local function UpdateRaid(f, unit)
         SetRaidTargetIconTexture(f.raid, i)
         return true, (i >= 1 and i <= 8) and i or nil
     end)
+    -- 게임이 징을 숨겨도 Leel Mark 가 찍은 징이면 무슨 징인지 알아요 → 우리 그림으로 (크기를 바꿀 수 있게)
+    local mem = (not ok) and ns.MarkMemory and ns.MarkMemory(unit)
+    if mem then
+        SetRaidTargetIconTexture(f.raid, mem); f.raid:Show()
+        BlizzRaid(f, false)
+        if ns.MarkOrderPaint then ns.MarkOrderPaint(f, unit, mem, false) end
+        return
+    end
     f.raid:SetShown(ok and shown or false)
     BlizzRaid(f, not ok)
-    if ns.MarkOrderPaint then ns.MarkOrderPaint(f, unit, ok and shown and idx or nil) end
+    if ns.MarkOrderPaint then ns.MarkOrderPaint(f, unit, ok and shown and idx or nil, not ok) end
 end
 
 -- 허브: 레벨 · 등급 알약 보이기 · 이름 글씨 크기
@@ -596,6 +604,12 @@ end
 -- 죽은 몹: 이름표는 숨김 (주울 게 있으면 Leel Spot이 반짝 상자를 대신 띄움)
 local function UpdateDead(f, unit)
     local dead = (ns.db.npHideDead ~= false) and Try(UnitIsDead, unit) and true or false
+    -- 징 순서용: 숨기기 설정과 상관없이 죽었는지 따로
+    local reallyDead = Try(UnitIsDead, unit) and true or false
+    if f.reallyDead ~= reallyDead then
+        f.reallyDead = reallyDead
+        if f.markN and ns.NPMarkScanOnly then C_Timer.After(0, ns.NPMarkScanOnly) end   -- 징 몹이 죽으면 바로 다음 몹으로
+    end
     if f.dead == dead then return end
     f.dead = dead
     f:SetAlpha(dead and 0 or 1)
@@ -1120,7 +1134,7 @@ local function OnAdded(unit)
     end
     local f = plate.leel or Build(plate)
     f.unit = unit
-    f.dead = nil
+    f.dead = nil; f.reallyDead = nil
     active[unit] = f
     SetBlizzAlpha(plate, 0)
     f:Show()
@@ -1360,7 +1374,7 @@ end
 
 function ns:RefreshDeadPlates()
     for u, f in pairs(active) do
-        f.dead = nil
+        f.dead = nil; f.reallyDead = nil
         UpdateDead(f, u)
         if not f.dead then UpdateBorder(f, u) end
     end
@@ -1397,19 +1411,24 @@ function ns:EnableNameplates()
     end
 
     local questPending = false
+    ns.NPMarkScanOnly = function() if ns.MarkOrderScan then ns.MarkOrderScan(active) end end
+    ns.NPMarkRescan = function()
+        for u, f in pairs(active) do UpdateRaid(f, u) end
+        if ns.MarkOrderScan then ns.MarkOrderScan(active) end
+    end
     ev:SetScript("OnEvent", function(_, event, unit)
         if event == "NAME_PLATE_UNIT_ADDED" then
             OnAdded(unit)
         elseif event == "NAME_PLATE_UNIT_REMOVED" then
             OnRemoved(unit)
+            if ns.MarkOrderScan then C_Timer.After(0, function() ns.MarkOrderScan(active) end) end
         elseif event == "PLAYER_SOFT_INTERACT_CHANGED" then
             for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
                 local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
                 if u and not Try(UnitCanAttack, "player", u) then SetFriendlyBars(plate, FriendlyForced(u)) end
             end
         elseif event == "RAID_TARGET_UPDATE" then
-            for u, f in pairs(active) do UpdateRaid(f, u) end
-            if ns.MarkOrderScan then ns.MarkOrderScan(active) end
+            ns.NPMarkRescan()
         elseif event == "PLAYER_TARGET_CHANGED" then
             for u, f in pairs(active) do UpdateBorder(f, u); UpdateCombo(f, u) end
         elseif event == "UNIT_POWER_FREQUENT" then
@@ -1557,50 +1576,146 @@ do
         end
     end)
 
-    function ns.MarkOrderPaint(f, unit, idx)
+    -- A안: "지금 칠 몹" = 남은 잡는 순서 중 가장 앞 징이 2배로 커지고 금색 고리가 맥박 · 나머지 징은 작고 흐리게 (글씨 없이)
+    --   던전 · 전투 중엔 게임이 징 번호를 숨겨요 → Leel Mark 가 찍은 기억(몹 GUID)으로 대신 · 그림은 게임 징 칸을 빌려 와서
+    local function MarkOf(unit)
+        local api = _G.LeelMarkAPI
+        if not (api and api.MarkOf) then return end
+        local ok, g = pcall(UnitGUID, unit)
+        if ok and type(g) == "string" and not (issecretvalue and issecretvalue(g)) then
+            local m = api.MarkOf(g)
+            if m then return m end
+        end
+        if api.MarkOfPlate then return api.MarkOfPlate(unit) end
+    end
+    ns.MarkMemory = MarkOf
+    local function Icon(f)   -- 지금 보이는 징 그림 (게임 칸을 빌려 왔으면 그것)
+        if f.raid:IsShown() then return f.raid end
+        local plate = f:GetParent()
+        local uf = plate and plate.UnitFrame
+        local rf = uf and (uf.RaidTargetFrame or uf.raidTargetFrame)
+        if rf and rf.leelOn then return rf, true end
+    end
+    local function Ring(f)
+        if f.curRing then return f.curRing end
+        local r = CreateFrame("Frame", nil, f); r:SetSize(54, 54); r:SetFrameLevel(f:GetFrameLevel() + 5)
+        r.glow = r:CreateTexture(nil, "BACKGROUND"); r.glow:SetTexture(ns.MEDIA .. "soft_glow"); r.glow:SetBlendMode("ADD")
+        r.glow:SetPoint("CENTER"); r.glow:SetSize(76, 76); r.glow:SetVertexColor(1, 0.80, 0.35, 1)
+        r.ring = r:CreateTexture(nil, "ARTWORK"); r.ring:SetTexture(ns.MEDIA .. "ring"); r.ring:SetAllPoints(); r.ring:SetVertexColor(1, 0.82, 0.38, 1)
+        local ag = r:CreateAnimationGroup(); ag:SetLooping("BOUNCE")
+        local sc = ag:CreateAnimation("Scale"); sc:SetDuration(0.55); sc:SetSmoothing("IN_OUT")
+        if sc.SetScaleFrom then sc:SetScaleFrom(0.92, 0.92); sc:SetScaleTo(1.1, 1.1) else sc:SetFromScale(0.92, 0.92); sc:SetToScale(1.1, 1.1) end
+        local al = ag:CreateAnimation("Alpha"); al:SetFromAlpha(0.55); al:SetToAlpha(1); al:SetDuration(0.55); al:SetSmoothing("IN_OUT")
+        r:SetScript("OnShow", function() ag:Play() end); r:SetScript("OnHide", function() ag:Stop() end)
+        r:Hide()
+        f.curRing = r
+        return r
+    end
+    local BASE = 24
+    local function Big(f, mode)   -- mode: "cur" | "dim" | nil(보통)
+        local ic, blz = Icon(f)
+        local sz = (mode == "cur" and BASE * 2) or (mode == "dim" and BASE * 0.75) or BASE
+        local al = (mode == "dim") and 0.55 or 1
+        if not blz then f.raid:SetSize(sz, sz); f.raid:SetAlpha(al) end   -- 게임 징 칸(빌려 온 것)은 크기를 안 건드려요 (전투 중 막힘) · 고리만
+        local r = f.curRing
+        if mode == "cur" and ic then
+            r = Ring(f)
+            r:ClearAllPoints(); r:SetPoint("CENTER", f.raid, "CENTER", 0, 0)
+            local rs = blz and (BASE + 12) or (sz + 14)   -- 게임 징 칸을 빌려 쓰면 징은 그대로 크기라 고리를 딱 맞게
+            r:SetSize(rs, rs)
+            r.glow:SetSize(rs * 1.4, rs * 1.4)
+            r:Show()
+        elseif r then r:Hide() end
+        f.markMode = mode
+    end
+
+    local scanPend = false
+    function ns.MarkOrderPaint(f, unit, idx, hidden)
+        if not scanPend then   -- 새 이름표 · 징이 바뀌면 한 번 모아서 "지금 칠 몹" 다시 고르기
+            scanPend = true
+            C_Timer.After(0.05, function() scanPend = false; if ns.NPMarkScanOnly then ns.NPMarkScanOnly() end end)
+        end
+        if not idx and hidden then idx = MarkOf(unit) end   -- 게임이 징 번호를 숨길 때만 기억으로 (지워진 징을 다시 살리지 않게)
         local plan = idx and PlanOf()
         local p = plan and plan[idx]
         if f.ordB then f.ordB:Hide(); f.lockT:Hide(); locked[f] = nil end
+        f.unit = unit
         f.markIdx = idx; f.markN = p and p.kind == "kill" and p.n or nil
-        if not p or not f.raid:IsShown() then if f.nextT then f.nextT:Hide(); f.nextT.glow:Hide() end return end
-        local b = Badge(f)
-        if p.kind == "kill" then
-            b.fs:SetText(p.n)
-            b:ClearAllPoints(); b:SetPoint("CENTER", f.raid, "TOPRIGHT", -1, -2); b:Show()
-        else
-            f.unit = unit
+        if not p or not Icon(f) then f.markN = nil; if f.markMode then Big(f, nil) end return end
+        if p.kind ~= "kill" then
+            Badge(f)
             locked[f] = { unit = unit, p = p }
             PaintLock(f, unit, p)
         end
     end
 
-    -- 앞 순서 징이 사라지면 (죽거나 지워지면) 남은 것 중 가장 앞 몹이 "다음!"
-    local lastMin, lastIdx
+    local lastCur, lastCurN
+    local function NowTag(f)
+        local t = f.nowT
+        if not t then
+            t = CreateFrame("Frame", nil, f); t:SetSize(40, 18); t:SetFrameLevel(f:GetFrameLevel() + 8)
+            t.bg = ns.RoundRect(t, 9, { 1, 0.82, 0.35 }, "BACKGROUND", 0, 0); t.bg:SetColor({ 1, 0.82, 0.35 }, 1)
+            t.fs = ns.Font(t, 12, { 0.23, 0.16, 0.06 }); t.fs:SetShadowColor(0, 0, 0, 0); t.fs:SetPoint("CENTER", 0, 0); t.fs:SetText(ns.L("지금!"))
+            t:SetWidth(t.fs:GetStringWidth() + 16)
+            t.glow = f:CreateTexture(nil, "OVERLAY", nil, 6); t.glow:SetTexture(ns.MEDIA .. "soft_glow"); t.glow:SetBlendMode("ADD")
+            t.glow:SetVertexColor(1, 0.80, 0.35, 1)
+            f.nowT = t
+        end
+        t:ClearAllPoints(); t:SetPoint("BOTTOM", f.raid, "TOP", 0, 2)
+        t.glow:ClearAllPoints(); t.glow:SetPoint("CENTER", f.raid); t.glow:SetSize(110, 110)
+        t:Show(); t.glow:Show(); t:SetAlpha(1); t.glow:SetAlpha(1)
+        local el = 0
+        t:SetScript("OnUpdate", function(self, e)
+            el = el + e
+            local pulse = 0.5 + 0.5 * math.abs(math.sin(el * 7))
+            self.glow:SetAlpha(el < 1.2 and pulse or math.max(0, 1 - (el - 1.2) / 0.6))
+            if el > 1.7 then self:SetAlpha(math.max(0, 1 - (el - 1.7) / 0.3)) end
+            if el > 2 then self:Hide(); self.glow:Hide(); self:SetScript("OnUpdate", nil) end
+        end)
+    end
+    -- 남은 것 중 가장 앞 순서 = 지금 칠 몹 (죽어서 징이 사라지면 저절로 다음 몹으로)
     function ns.MarkOrderScan(act)
         local minN, minF
-        local seen = {}
-        for _, f in pairs(act) do
-            if f.markN and f.raid:IsShown() then
-                seen[f.markIdx] = true
+        for u, f in pairs(act) do
+            local dead = f.reallyDead or f.dead
+            if not dead then pcall(function() local d = UnitIsDead(u); if not (issecretvalue and issecretvalue(d)) then dead = d and true or false end end) end
+            if dead then f.markN = nil end
+            if f.markN then
                 if not minN or f.markN < minN then minN, minF = f.markN, f end
             end
         end
-        local fire = lastMin and lastIdx and not seen[lastIdx] and minN and minN > lastMin
-        lastMin, lastIdx = minN, minF and minF.markIdx
-        if not fire or not (UnitAffectingCombat("player") or IsInGroup()) then return end
-        local n = minF.nextT
-        if not n then return end
-        n:ClearAllPoints(); n:SetPoint("RIGHT", minF.raid, "LEFT", -4, 0)
-        n.glow:ClearAllPoints(); n.glow:SetPoint("CENTER", minF.raid); n.glow:SetSize(54, 54)
-        n:Show(); n.glow:Show(); n:SetAlpha(1); n.glow:SetAlpha(1)
-        local t = 0
-        n:SetScript("OnUpdate", function(self, e)
-            t = t + e
-            -- 두 번 콩콩 반짝이고 천천히 사라짐
-            local pulse = 0.55 + 0.45 * math.abs(math.sin(t * 7))
-            self.glow:SetAlpha(t < 0.9 and pulse or math.max(0, 1 - (t - 0.9) / 0.8))
-            if t > 1.8 then self:SetAlpha(math.max(0, 1 - (t - 1.8) / 0.4)) end
-            if t > 2.2 then self:Hide(); self.glow:Hide(); self:SetScript("OnUpdate", nil) end
-        end)
+        for _, f in pairs(act) do
+            if f.markN then Big(f, f == minF and "cur" or "dim")
+            elseif f.markMode then Big(f, nil) end
+        end
+        -- E안: 앞 몹이 죽어 다음 몹으로 넘어가는 순간 2초 "지금!" + 반짝
+        if minF and lastCur and lastCur ~= minF and (not lastCurN or (minN or 0) > lastCurN) then NowTag(minF) end
+        lastCur, lastCurN = minF, minN
+        ns.MarkCurrent = minF and { idx = minF.markIdx, n = minN } or nil   -- Leel Mark 바가 금테로 같이 보여줘요
     end
+    function ns.MarkRefresh()
+        if ns.NPMarkRescan then ns.NPMarkRescan() end
+    end
+end
+
+-- 점검: /르엘징 → 보이는 적 이름표마다 징 · 잡는 순서 · "지금 칠 몹" 표시 상태
+SLASH_LEELNPMARK1 = "/르엘징"
+SlashCmdList.LEELNPMARK = function()
+    local P = function(m) print("|cfff2b3c2[르엘 징]|r " .. m) end
+    local api = _G.LeelMarkAPI
+    P("Leel Mark: " .. (api and "있음" or "없음") .. " · 순서 표시: " .. tostring(not (api and api.OrderOn and not api.OrderOn())))
+    local n = 0
+    for u, f in pairs(active) do
+        n = n + 1
+        local ok, i = pcall(GetRaidTargetIndex, u)
+        local rd = (not ok) and "오류" or (i == nil and "없음") or ((issecretvalue and issecretvalue(i)) and "숨김") or tostring(i)
+        local okG, g = pcall(UnitGUID, u)
+        local gs = (not okG or g == nil) and "없음" or ((issecretvalue and issecretvalue(g)) and "숨김" or "읽음")
+        local mem = (api and api.MarkOf and okG and type(g) == "string" and not (issecretvalue and issecretvalue(g))) and api.MarkOf(g) or nil
+        mem = mem or (api and api.MarkOfPlate and api.MarkOfPlate(u))
+        local nm = ""; pcall(function() local x = UnitName(u); if not (issecretvalue and issecretvalue(x)) then nm = x or "" end end)
+        P(("%s %s · 징 %s · 기억 %s · GUID %s · 순서 %s · 표시 %s · 죽음 %s · 보임 %s"):format(u, nm, rd, tostring(mem), gs,
+            tostring(f.markN), tostring(f.markMode), tostring(f.reallyDead), tostring(f:IsVisible())))
+    end
+    if n == 0 then P("르엘 이름표가 하나도 없어요 (르엘 이름표가 켜져 있어야 해요)") end
 end

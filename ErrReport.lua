@@ -46,8 +46,9 @@ local function Parse(msg, stack)
     return a or "?", file or "?", tonumber(line) or 0, (text and text ~= "" and text) or s
 end
 
-local function Stack()
-    local ok, st = pcall(debugstack, 2, 14, 0)
+local function Stack(raw)
+    local ok, st = true, raw
+    if not raw then ok, st = pcall(debugstack, 2, 14, 0) end
     if not ok or type(st) ~= "string" then return "" end
     local out, n = {}, 0
     for raw in st:gmatch("[^\n]+") do
@@ -116,11 +117,21 @@ end
 -- 기록
 ----------------------------------------------------------------------
 local busy = false
-local function Record(msg)
+-- 같은 글이 쏟아지면(매 순간 막힘 등) 무거운 일(스택 · 위치 · 애드온 세기) 없이 횟수만 · 1초에 20개 넘으면 버려요
+--   (안 그러면 "insecure scripts exceeded execution limit" 으로 게임이 르엘을 멈춰요)
+local fast, fastN, burstT, burstN = {}, 0, 0, 0
+local function Record(msg, rawStack)
     if busy then return end
+    local now = GetTime()
+    local fk = tostring(msg):sub(1, 200)
+    local fe = fast[fk]
+    if fe and now - fe.at < 5 then fe.e.n = (fe.e.n or 1) + 1; fe.e.t2 = Now(); return fe.e end
+    if now - burstT > 1 then burstT, burstN = now, 0 end
+    burstN = burstN + 1
+    if burstN > 20 then return nil end
     busy = true
     local ok, e = pcall(function()
-        local stack = Stack()
+        local stack = Stack(rawStack)
         local a, file, line, text = Parse(msg, stack)
         local key = a .. "|" .. file .. "|" .. line .. "|" .. text:sub(1, 60)
         local log = Log()
@@ -141,6 +152,9 @@ local function Record(msg)
     end)
     busy = false
     if ok and e then
+        fastN = fastN + 1
+        if fastN > 60 then wipe(fast); fastN = 0 end
+        fast[fk] = { e = e, at = now }
         if IsLeel(e.addon) then local f = e.file ~= "?" and (e.file .. ":" .. e.line) or e.text:sub(1, 40); ns.lastErr = f end
         return e
     end
@@ -342,6 +356,18 @@ end
 ----------------------------------------------------------------------
 -- 오류 잡기
 ----------------------------------------------------------------------
+local errQ, errQT = {}, false
+local function FlushErr()
+    errQT = false
+    local q = errQ; errQ = {}
+    local toastIt = false
+    for _, it in ipairs(q) do
+        local e = Record(it[1], it[2])
+        if e and (e.n == 1 or (e.n and e.n % 20 == 0)) then toastIt = true end
+    end
+    local cv = GetCVar and GetCVar("scriptErrors")
+    if toastIt and not (BugGrabberOn() or Mode() == "blizz" or cv == "1") then pcall(E.Toast) end
+end
 do
     local okH, orig = pcall(geterrorhandler)
     if okH and orig and seterrorhandler then
@@ -350,11 +376,17 @@ do
             if type(msg) == "string" and msg:find("Blizzard_SharedTalentUtil", 1, true) and msg:find("invalid option in `format'", 1, true) then
                 return
             end
-            local e = Record(msg)
+            -- 오류 처리기는 게임 코드 안에서도 불려요 → 거기서 오래 일하면 "insecure scripts exceeded execution limit"
+            --   그래서 여기선 글만 줄에 넣고, 기록 · 알림은 다음 순간(게임 코드 밖)에 해요
+            if #errQ < 30 then
+                local st
+                if #errQ < 3 then local okS, r = pcall(debugstack, 2, 14, 0); if okS then st = r end end   -- 어디서 났는지는 여기서만 알 수 있어요
+                errQ[#errQ + 1] = { msg, st }
+            end
+            if not errQT then errQT = true; C_Timer.After(0, FlushErr) end
             -- BugSack이 있거나 · "게임 기본 창"이거나 · 빨간 오류 창을 켠 사람은 원래대로
             local cv = GetCVar and GetCVar("scriptErrors")
             if BugGrabberOn() or Mode() == "blizz" or cv == "1" then return orig(msg, ...) end
-            if e and e.n == 1 or (e and e.n and e.n % 20 == 0) then pcall(E.Toast) end
         end)
     end
     -- 그래도 "애드온 오류가 많아요" 기본 창이 뜨면 닫기 (토끼 알림 쓰는 동안)
@@ -370,8 +402,13 @@ do
         if event == "PLAYER_ENTERING_WORLD" then enteredAt = GetTime(); Log()
         elseif event == "PLAYER_REGEN_ENABLED" then
             if pending then pending = false; C_Timer.After(0.5, function() pcall(E.Toast) end) end
-        elseif type(who) == "string" and (who:find("^Leel") or who == "ForgLeveling") then
-            ns.lastErr = "차단:" .. tostring(what or "?")
+        else
+            -- 게임이 막은 동작 (클릭이 안 먹히는 원인) · 오류 창이 안 떠서 기록에도 남겨요 · 다른 애드온 것도
+            local addon = type(who) == "string" and who or "?"
+            if addon:find("^Leel") or addon == "ForgLeveling" then ns.lastErr = "차단:" .. tostring(what or "?") end
+            local e = Record(("Interface/AddOns/%s/차단.lua:0: 게임이 막은 동작 (%s) %s"):format(addon,
+                event == "ADDON_ACTION_FORBIDDEN" and "금지" or "전투 중 차단", tostring(what or "?")))
+            if e and (e.n == 1) then pcall(E.Toast) end
         end
     end)
 end

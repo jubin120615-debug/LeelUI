@@ -1809,6 +1809,16 @@ local function TacAuraInit(debuff, sz)
         tm:SetPoint("BOTTOM", 0, 0)
         local cnt = ov:CreateFontString(nil, "OVERLAY"); cnt:SetFont(ns.NUM or ns.FONT, fs, "OUTLINE"); cnt:SetPoint("TOPRIGHT", -1, -1)
         pcall(btn.SetApplicationCount, btn, cnt)
+        -- 이 칸은 게임이 채워 줘서 우클릭으로 버프를 못 꺼요 → 끄는 방법 알려 주기 (어둠의 형상 · 변신 등)
+        if not debuff then
+            pcall(btn.HookScript, btn, "OnMouseUp", function(_, b)
+                if b ~= "RightButton" then return end
+                local now = GetTime()
+                if (ns.buffHintT or 0) > now - 3 then return end
+                ns.buffHintT = now
+                print("|cfff2b3c2[LeelUI]|r " .. ns.L("이 버프 줄은 우클릭으로 버프를 못 꺼요. 끄려면 채팅에 /cancelaura 버프이름 (예: /cancelaura 어둠의 형상) · 또는 허브 > 액션바에서 '버프 / 디버프 줄 보이기'를 끄면 게임 기본 버프 창이 돌아와 우클릭으로 꺼져요."))
+            end)
+        end
     end
 end
 

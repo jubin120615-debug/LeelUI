@@ -1085,6 +1085,9 @@ local MODULES = {
             { t = "toggle", label = "토끼 추천", hint = "더 좋은 템 = 입찰 추천 · 못 쓰거나 다른 특성용 = 차비 추천",
               get = function() return ns.RollDB and ns.RollDB().rec end,
               set = function(v) ns.RollDB().rec = v and true or false; if ns.RollApply then ns.RollApply() end end },
+            { t = "toggle", label = "파티원 착용 보기", hint = "펼친 카드 아래 · 같은 부위에 파티원이 지금 낀 템 · 템레벨 · 이 템과 차이",
+              get = function() return ns.RollDB and ns.RollDB().gear ~= false end,
+              set = function(v) ns.RollDB().gear = v and true or false; if ns.RollGearChanged then ns.RollGearChanged() end end },
             { t = "choice", label = "내 역할", hint = "장비 비교와 같이 써요 · 곰 탱을 할 땐 탱커로",
               options = function()
                   local auto = "자동"
@@ -1189,13 +1192,20 @@ local MODULES = {
               options = { { "없음", "none" }, { "%", "pct" }, { "숫자", "num" }, { "잃은 만큼", "deficit" } },
               get = function() return ns.db.partyHp or "pct" end,
               set = function(v) ns.db.partyHp = v; PartyCells() end },
-            { t = "toggle", label = "버프 · 디버프 보이기", hint = "내가 건 버프 (오른쪽 위) · 해제할 디버프 (오른쪽 아래)",
+            { t = "toggle", label = "버프 · 디버프 보이기", hint = "내가 건 버프 (왼쪽 아래) · 해제할 디버프 (오른쪽 위 해제 칸)",
               get = function() return ns.db.partyAuras ~= false end,
               set = function(v) ns.db.partyAuras = v and true or false; PartyCells() end },
             { t = "header", label = "알림" },
-            { t = "toggle", label = "해제할 디버프 알림", hint = "내가 풀 수 있는 디버프: 왼쪽 세로 줄 + 아이콘 링 맥박 (종류별 색)",
+            { t = "toggle", label = "해제할 디버프 알림", hint = "내가 풀 수 있는 디버프: 체력 빈 칸이 그 색으로 맥박 + 오른쪽 위 해제 칸 (종류별 색)",
               get = function() return ns.db.partyDispelFx ~= false end,
               set = function(v) ns.db.partyDispelFx = v and true or false; PartyCells() end },
+            { t = "toggle", label = "해제 칸 클릭 = 바로 해제", hint = "켜진 해제 칸을 누르면 그 사람한테 내 해제 주문 · 전투 중엔 빈 칸도 눌리니 조심",
+              get = function() return ns.db.partyDispelClick ~= false end,
+              set = function(v)
+                  ns.db.partyDispelClick = v and true or false
+                  if InCombatLockdown() then print(ns.L("|cfff2b3c2[르엘 파티]|r 전투가 끝나면 적용돼요.")) end
+                  if ns.PartyArmSlots then ns.PartyArmSlots(false) end
+              end },
         },
     },
     {
@@ -1702,6 +1712,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.54", "징 새로 · 파티 해제 칸 · 주사위 파티원 템", "Leel Mark: 키 하나 (전투 밖 = 대상 둘레 무리 전부 · 전투 중 = 마우스 몹에 다음 징) · 이름표에 지금 칠 몹 징이 크게 + 금 고리 · 잡으면 다음 몹에 \"지금!\" · 바는 칠 순서 줄 (전투 중 접힘) · 르엘 쓰는 파티원끼리 대상 징 나누기 · 파티 칸: 오른쪽 위 해제 칸을 누르면 그 사람한테 바로 해제 · 주사위 카드에 파티원이 지금 낀 템 · 템레벨 비교 · 오류 · 차단 기록과 여러 던전 오류 고침" },
     { "1.3.53", "경매장 전체 시세 훑기 고침", "와우 포에버에서 시세 훑기가 \"답이 없어요\"로 끝나던 것 → 빈 검색으로 모든 템 최저가를 끝까지 받아요 (받는 중 개수 표시 · 2분에 한 번) · 글 앞 네모 기호 없앰" },
     { "1.3.52", "경매장 시세 · 재료 가방 자동 이동 · 지도 출구 길목", "가방 툴팁에 경매 최저가 + 상점과 비교 한 줄 (경매가 이득 / 상점에 팔아요 · 수수료 뺀 값) · 경매장 검색 칸 옆 시세 훑기 (모으는 중 % · 저장됨 표시) · 가방이 차면 재료를 재료 가방으로 알아서 옮기고 재료는 버리라고 안 해요 · 지도 출구 화살표를 실제 길목 자리로 (클래식 54곳) · 자료 없는 곳은 연한 ?" },
     { "1.3.51", "모던: 비행 중 내리기 구슬", "모던 모드에서 와이번 · 그리폰 · 박쥐를 타면 가운데 레벨 원 위에 그 동물 아이콘 구슬 · 누르면 다음 비행 지점에서 내려요 (허브 > 액션바 \"비행 중 내리기 구슬\")" },

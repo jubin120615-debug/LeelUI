@@ -1012,6 +1012,330 @@ local function SortedRolls(e)
     return list
 end
 
+----------------------------------------------------------------------
+-- 파티원 지금 낀 템 (A안): 펼친 카드 아래 · 같은 부위 템 아이콘 · 템레벨 · 이 템과 차이
+--   르엘UI 쓰는 파티원 = 템이 나오면 서로 메시지로 (어디 있든) · 안 쓰는 사람 = 게임 '살펴보기' (28m 안 · 한 명씩)
+----------------------------------------------------------------------
+local GEAR_PREFIX = "LeelGear"
+local SLOTS_OF = {
+    INVTYPE_HEAD = { 1 }, INVTYPE_NECK = { 2 }, INVTYPE_SHOULDER = { 3 }, INVTYPE_CHEST = { 5 }, INVTYPE_ROBE = { 5 },
+    INVTYPE_WAIST = { 6 }, INVTYPE_LEGS = { 7 }, INVTYPE_FEET = { 8 }, INVTYPE_WRIST = { 9 }, INVTYPE_HAND = { 10 },
+    INVTYPE_FINGER = { 11, 12 }, INVTYPE_TRINKET = { 13, 14 }, INVTYPE_CLOAK = { 15 },
+    INVTYPE_WEAPON = { 16, 17 }, INVTYPE_2HWEAPON = { 16 }, INVTYPE_WEAPONMAINHAND = { 16 },
+    INVTYPE_WEAPONOFFHAND = { 17 }, INVTYPE_SHIELD = { 17 }, INVTYPE_HOLDABLE = { 17 },
+    INVTYPE_RANGED = { 18 }, INVTYPE_RANGEDRIGHT = { 18 }, INVTYPE_THROWN = { 18 }, INVTYPE_RELIC = { 18 },
+}
+local SLOT_KO = { [1] = "머리", [2] = "목", [3] = "어깨", [5] = "가슴", [6] = "허리", [7] = "다리", [8] = "발", [9] = "손목",
+    [10] = "손", [11] = "반지", [12] = "반지", [13] = "장신구", [14] = "장신구", [15] = "등", [16] = "무기", [17] = "보조 손", [18] = "원거리" }
+local gearOf = {}      -- [이름] = { t = 읽은 시각, [칸] = 링크 or "item:ID" or false(빈칸) }
+local gearIlvl = {}    -- [칸 값] = 템레벨 (메시지로 받은 것)
+local inspQ, inspBusy = {}, nil
+local inspFail = {}    -- [이름] = 못 읽은 시각 (멀리 있음 · 5초 동안 다시 안 해요)
+
+local function GearOn() return DB().gear ~= false end
+local function ItemLoc(link)
+    if not (link and GetItemInfoInstant) then return end
+    local ok, _, _, _, loc, icon, classID, subID = pcall(GetItemInfoInstant, link)
+    if ok then return loc, icon, classID, subID end
+end
+local function ILvl(link)
+    if not link then return end
+    if gearIlvl[link] then return gearIlvl[link] end
+    local f = (C_Item and C_Item.GetDetailedItemLevelInfo) or _G.GetDetailedItemLevelInfo
+    if f then local ok, v = pcall(f, link); if ok and tonumber(v) and v > 0 then return v end end
+    local ok, _, _, _, lv = pcall(GetItemInfo, link)
+    if ok and tonumber(lv) and lv > 0 then return lv end
+end
+local function GroupUnits()
+    local u = {}
+    if IsInRaid and IsInRaid() then for i = 1, 40 do u[#u + 1] = "raid" .. i end
+    else for i = 1, 4 do u[#u + 1] = "party" .. i end end
+    return u
+end
+local function UnitByName(n)
+    for _, u in ipairs(GroupUnits()) do
+        if UnitExists(u) then local ok, un = pcall(UnitName, u); if ok and un and not ns.IsSecret(un) and Short(un) == n then return u end end
+    end
+end
+-- 이 직업 · 레벨이 끼울 수 있나 (방어구 종류 · 무기 숙련) · 못 끼면 이유
+local function CanUse(cls, lvl, link)
+    local loc, _, classID, subID = ItemLoc(link)
+    if classID == 2 then
+        if not (WEAPON_OK[cls] and WEAPON_OK[cls][subID]) then return false, "못 씀" end
+    elseif classID == 4 then
+        if subID == 6 then if not SHIELD_OK[cls] then return false, "못 씀" end
+        elseif ARMOR_SLOT[loc] and subID and subID >= 1 and subID <= 4 then
+            local mx = MAIN_ARMOR[cls] or 1
+            if mx >= 3 and (lvl or 60) < 40 then mx = mx - 1 end
+            if subID > mx then return false, "못 낌 · " .. (ARMOR_NAME[mx] or "") end
+        end
+    end
+    return true
+end
+
+-- 내 칸 보내기: 템이 나오면 그 부위 내 템 (르엘UI 쓰는 파티원이 받아요)
+local function GearChannel()
+    if IsInGroup and LE_PARTY_CATEGORY_INSTANCE and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then return "INSTANCE_CHAT" end
+    if IsInRaid and IsInRaid() then return "RAID" end
+    if IsInGroup and IsInGroup() then return "PARTY" end
+end
+local function GearSend(link)
+    if not GearOn() then return end
+    local ch = GearChannel()
+    local slots = SLOTS_OF[ItemLoc(link) or ""]
+    if not (ch and slots and C_ChatInfo and C_ChatInfo.SendAddonMessage) then return end
+    local parts = {}
+    for _, sl in ipairs(slots) do
+        local l = GetInventoryItemLink("player", sl)
+        parts[#parts + 1] = sl .. ":" .. (ItemID(l) or 0) .. ":" .. (l and math.floor(ILvl(l) or 0) or 0)
+    end
+    pcall(C_ChatInfo.SendAddonMessage, GEAR_PREFIX, "E|" .. table.concat(parts, "|"), ch)
+end
+
+local function GearChanged() if ns.RollGearChanged then ns.RollGearChanged() end end
+
+-- 살펴보기 줄: 한 명씩 · 전투 중엔 쉬어요 · 게임 살펴보기 창이 열려 있으면 안 건드려요
+local function InspectNext()
+    if inspBusy or #inspQ == 0 or InCombatLockdown() then return end
+    if InspectFrame and InspectFrame:IsShown() then C_Timer.After(3, InspectNext) return end
+    local n = table.remove(inspQ, 1)
+    local u = UnitByName(n)
+    if not u then return InspectNext() end
+    local ok1, can = pcall(CanInspect, u)
+    local ok2, near = pcall(CheckInteractDistance, u, 1)
+    if not (ok1 and can and ok2 and near) then
+        inspFail[n] = GetTime(); GearChanged()
+        return InspectNext()
+    end
+    local okG, guid = pcall(UnitGUID, u)
+    if not okG or not guid or ns.IsSecret(guid) then return InspectNext() end
+    inspBusy = { n = n, u = u, guid = guid }
+    pcall(NotifyInspect, u)
+    local my = inspBusy
+    C_Timer.After(2.5, function() if inspBusy == my then inspBusy = nil; inspFail[n] = GetTime(); GearChanged(); InspectNext() end end)
+end
+local function QueueInspect(n, force)
+    if not GearOn() or not n then return end
+    local g = gearOf[n]
+    if g and not force and (GetTime() - (g.t or 0)) < 600 then return end
+    if not force and inspFail[n] and GetTime() - inspFail[n] < 5 then return end
+    for _, x in ipairs(inspQ) do if x == n then return end end
+    if inspBusy and inspBusy.n == n then return end
+    inspQ[#inspQ + 1] = n
+    InspectNext()
+end
+local function QueueAll(force)
+    for _, u in ipairs(GroupUnits()) do
+        if UnitExists(u) and not UnitIsUnit(u, "player") then
+            local ok, n = pcall(UnitName, u)
+            if ok and n and not ns.IsSecret(n) then QueueInspect(Short(n), force) end
+        end
+    end
+end
+ns.RollGearQueueAll = QueueAll
+
+do
+    local gev = CreateFrame("Frame")
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then pcall(C_ChatInfo.RegisterAddonMessagePrefix, GEAR_PREFIX) end
+    for _, e in ipairs({ "CHAT_MSG_ADDON", "INSPECT_READY", "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED" }) do
+        pcall(gev.RegisterEvent, gev, e)
+    end
+    local OK_CH = { PARTY = true, RAID = true, INSTANCE_CHAT = true }
+    -- 펼친 카드가 있으면 5초마다 다시 (멀리 있던 사람이 가까이 오면 채워요)
+    local acc = 0
+    gev:SetScript("OnUpdate", function(_, el)
+        acc = acc + el
+        if acc < 5 then return end
+        acc = 0
+        for _, f in ipairs(active) do if f.e and not f.isPill and f.gTitle and f.gTitle:IsShown() then GearChanged() break end end
+    end)
+    gev:SetScript("OnEvent", function(_, ev, a1, a2, a3, a4)
+        if ev == "CHAT_MSG_ADDON" then
+            if a1 ~= GEAR_PREFIX or not OK_CH[a3] or type(a2) ~= "string" or #a2 > 120 then return end
+            local who = Short(a4)
+            if who == "" or who == Short(UnitName("player")) then return end
+            if a2:sub(1, 2) ~= "E|" then return end
+            local g = gearOf[who] or {}
+            local got = false
+            for sl, id, lv in a2:gmatch("(%d+):(%d+):(%d+)") do
+                sl, id, lv = tonumber(sl), tonumber(id), tonumber(lv)
+                if sl and sl >= 1 and sl <= 19 and id and id < 10000000 and lv and lv < 2000 then
+                    if id == 0 then g[sl] = false
+                    else local k = "item:" .. id; g[sl] = k; if lv > 0 then gearIlvl[k] = lv end end
+                    got = true
+                end
+            end
+            if got then g.t = GetTime(); g.msg = GetTime(); gearOf[who] = g; GearChanged() end
+        elseif ev == "INSPECT_READY" then
+            local b = inspBusy
+            if not (b and a1 == b.guid) then return end
+            inspBusy = nil
+            local g = gearOf[b.n] or {}
+            for sl = 1, 18 do
+                local ok, l = pcall(GetInventoryItemLink, b.u, sl)
+                if ok and not ns.IsSecret(l) then g[sl] = l or false end
+            end
+            g.t = GetTime(); gearOf[b.n] = g
+            if ClearInspectPlayer and not (InspectFrame and InspectFrame:IsShown()) then pcall(ClearInspectPlayer) end
+            GearChanged()
+            C_Timer.After(1.5, InspectNext)
+        elseif ev == "PLAYER_REGEN_ENABLED" then
+            C_Timer.After(2, InspectNext)
+        else
+            C_Timer.After(4, function() QueueAll(false) end)   -- 파티가 바뀌면 미리 읽어 둬요
+        end
+    end)
+end
+
+-- 카드 하나의 줄 자료: { name, cls, link, il, diff, state("up"|"dn"|"eq"|"no"|"far"|"wait"), why, me }
+local function GearRows(e)
+    if not (GearOn() and e.link) then return end
+    local slots = SLOTS_OF[ItemLoc(e.link) or ""]
+    if not slots then return end
+    local il = ILvl(e.link)
+    local out = {}
+    local function cur(getter)
+        local best, bestIl, any = nil, nil, false
+        for _, sl in ipairs(slots) do
+            local v = getter(sl)
+            if v == nil then return nil, nil, true end
+            any = true
+            local l = v or nil
+            local x = l and (ILvl(l) or 0) or 0
+            if bestIl == nil or x < bestIl then best, bestIl = l, x end    -- 두 칸이면 낮은 쪽과 비교
+        end
+        return best, bestIl, false
+    end
+    local function add(name, cls, lvl, getter, me, unit)
+        local r = { name = name, cls = cls, me = me }
+        local can, why = CanUse(cls, lvl, e.link)
+        if not can then r.state, r.why = "no", why
+        else
+            local l, x, unk = cur(getter)
+            if unk then
+                local okN, nr = false, false
+                if unit and not InCombatLockdown() then okN, nr = pcall(CheckInteractDistance, unit, 1) end   -- 전투 중엔 게임이 막아요
+                local near = okN and nr
+                local failed = inspFail[name] and GetTime() - inspFail[name] < 5
+                r.state = (near and not failed and not InCombatLockdown()) and "wait" or "far"
+            else
+                r.link, r.il = l, x
+                if il and x then r.diff = il - x; r.state = r.diff > 0 and "up" or (r.diff < 0 and "dn" or "eq")
+                else r.state = "eq" end
+            end
+        end
+        out[#out + 1] = r
+    end
+    if e.test then
+        local fake = { { "도적토끼", "ROGUE", -8 }, { "루루", "DRUID", -3 }, { "방패곰", "WARRIOR", 3 }, { "빛의망치", "MAGE", 0 } }
+        for _, d in ipairs(fake) do
+            local fl = GetInventoryItemLink("player", slots[1])
+            add(d[1], d[2], 60, function() return fl or false end, false)
+            local r = out[#out]
+            if r.state ~= "no" and il then r.il = math.max(1, il + d[3]); r.diff = il - r.il; r.state = r.diff > 0 and "up" or (r.diff < 0 and "dn" or "eq") end
+        end
+    else
+        for _, u in ipairs(GroupUnits()) do
+            if UnitExists(u) and not UnitIsUnit(u, "player") then
+                local ok, n = pcall(UnitName, u)
+                if ok and n and not ns.IsSecret(n) then
+                    local sn = Short(n)
+                    local _, cls = UnitClass(u)
+                    local g = gearOf[sn]
+                    if not g then QueueInspect(sn) end
+                    add(sn, cls, UnitLevel(u), function(sl) if not g then return nil end return g[sl] end, false, u)
+                end
+            end
+        end
+    end
+    local _, mycls = UnitClass("player")
+    add(Short(UnitName("player")), mycls, UnitLevel("player"), function(sl) return GetInventoryItemLink("player", sl) or false end, true)
+    local RK = { up = 1, eq = 2, dn = 3, wait = 4, far = 5, no = 6 }
+    table.sort(out, function(a, b)
+        if a.me ~= b.me then return b.me end
+        if RK[a.state] ~= RK[b.state] then return RK[a.state] < RK[b.state] end
+        return (a.diff or 0) > (b.diff or 0)
+    end)
+    local mine
+    if #out > 7 then mine = out[#out]; for i = #out - 1, 7, -1 do table.remove(out, i) end end   -- 공격대: 위 6명 + 나
+    return out, SLOT_KO[slots[1]] or ""
+end
+
+local GROW_H = 17
+local function GearRow(f, i)
+    f.gRows = f.gRows or {}
+    local r = f.gRows[i]
+    if r then return r end
+    r = CreateFrame("Frame", nil, f); r:SetHeight(GROW_H)
+    r.hl = ns.RoundRect(r, 7, { 1, 1, 1 }, "BACKGROUND", 1, 0)
+    r.name = ns.Font(r, 10.5); r.name:SetPoint("LEFT", 5, 0); r.name:SetWidth(64); r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
+    r.ib = r:CreateTexture(nil, "ARTWORK"); r.ib:SetTexture(ns.MEDIA .. "circle"); r.ib:SetSize(15, 15); r.ib:SetPoint("LEFT", 72, 0)
+    r.ic = r:CreateTexture(nil, "ARTWORK", nil, 1); r.ic:SetSize(13, 13); r.ic:SetPoint("CENTER", r.ib); r.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local m = r:CreateMaskTexture(); m:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); m:SetAllPoints(r.ic); r.ic:AddMaskTexture(m)
+    r.il = r:CreateFontString(nil, "OVERLAY"); r.il:SetFont(ns.NUM or ns.FONT, 12, ""); r.il:SetPoint("LEFT", r.ib, "RIGHT", 4, 0); r.il:SetWidth(22); r.il:SetJustifyH("RIGHT")
+    r.d = ns.Font(r, 10.5); r.d:SetPoint("RIGHT", -5, 0); r.d:SetJustifyH("RIGHT")
+    r:EnableMouse(true)
+    r:SetScript("OnEnter", function(s2)
+        if not s2.link then return end
+        GameTooltip:SetOwner(s2, "ANCHOR_LEFT"); pcall(GameTooltip.SetHyperlink, GameTooltip, s2.link); GameTooltip:Show()
+    end)
+    r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.gRows[i] = r
+    return r
+end
+-- 펼친 카드에 줄 그리기 · y = 위에서부터 자리 · 쓴 높이를 돌려줘요
+local function PaintGear(f, e, y)
+    if f.gRows then for _, r in ipairs(f.gRows) do r:Hide() end end
+    if f.gTitle then f.gTitle:Hide(); f.gLine:Hide() end
+    local rows, slotName = GearRows(e)
+    if not rows or #rows == 0 then return 0 end
+    if not f.gTitle then
+        f.gLine = f:CreateTexture(nil, "BORDER"); f.gLine:SetTexture(ns.WHITE); f.gLine:SetHeight(1); f.gLine:SetVertexColor(1, 1, 1, 0.12)
+        f.gTitle = ns.Font(f, 10, { 0.73, 0.65, 0.63 })
+    end
+    f.gLine:ClearAllPoints(); f.gLine:SetPoint("TOPLEFT", PADX, -y); f.gLine:SetPoint("TOPRIGHT", -PADX, -y); f.gLine:Show()
+    f.gTitle:ClearAllPoints(); f.gTitle:SetPoint("TOPLEFT", PADX + 2, -(y + 4))
+    f.gTitle:SetText(ns.L("파티원 지금 ") .. "|cffff8fa3" .. ns.L(slotName) .. "|r"); f.gTitle:Show()
+    local yy = y + 18
+    local first = true
+    for i, d in ipairs(rows) do
+        local r = GearRow(f, i)
+        r:ClearAllPoints(); r:SetPoint("TOPLEFT", f, "TOPLEFT", PADX, -yy); r:SetPoint("RIGHT", f, "RIGHT", -PADX, 0)
+        local cc = d.me and PINK or ClassColorOf(d.name)
+        if d.cls and not d.me and RAID_CLASS_COLORS and RAID_CLASS_COLORS[d.cls] then local c = RAID_CLASS_COLORS[d.cls]; cc = { c.r, c.g, c.b } end
+        r.name:SetText(d.me and ns.L("나") or d.name); r.name:SetTextColor(cc[1], cc[2], cc[3])
+        local top = first and d.state == "up" and not d.me
+        if top then first = false end
+        if d.state == "up" and not d.me then first = false end
+        r.hl:SetColor(top and { 0.31, 0.78, 0.43 } or PINK, top and 0.16 or (d.me and 0.12 or 0))
+        r.link = d.link
+        local dim = d.state == "no" or d.state == "far" or d.state == "wait"
+        r:SetAlpha(d.state == "no" and 0.55 or 1)
+        if d.link then
+            local _, icon = ItemLoc(d.link)
+            local _, _, q = GetItemInfo(d.link)
+            local qc = QColor(q)
+            r.ic:SetTexture(icon); r.ic:Show(); r.ib:SetVertexColor(qc[1], qc[2], qc[3], 1)
+        else
+            r.ic:Hide(); r.ib:SetVertexColor(0.23, 0.17, 0.16, 1)
+        end
+        r.il:SetText(d.il and d.il > 0 and math.floor(d.il) or (d.state ~= "no" and d.state ~= "far" and d.state ~= "wait" and "-" or ""))
+        local txt, col
+        if d.state == "up" then txt, col = "▲ +" .. math.floor(d.diff), { 0.56, 0.91, 0.63 }
+        elseif d.state == "dn" then txt, col = "▼ " .. math.floor(d.diff), { 1, 0.60, 0.66 }
+        elseif d.state == "eq" then txt, col = (d.link and "= 같음" or "빈칸"), { 0.73, 0.65, 0.63 }
+        elseif d.state == "no" then txt, col = d.why or "못 씀", { 0.54, 0.48, 0.46 }
+        elseif d.state == "wait" then txt, col = "살펴보는 중…", { 0.54, 0.48, 0.46 }
+        else txt, col = "? 멀리 있음", { 0.95, 0.6, 0.6 } end
+        if d.state == "eq" and not d.link then r.il:SetText("") end
+        r.d:SetText(ns.L(txt)); r.d:SetTextColor(col[1], col[2], col[3])
+        r:Show()
+        yy = yy + GROW_H + 1
+        if dim then end
+    end
+    return yy - y + 2
+end
+
 local function Paint(f)
     local e = f.e
     if not e then return end
@@ -1055,6 +1379,8 @@ local function Paint(f)
     f.need:SetShown(not pill); f.greed:SetShown(not pill); f.pass:SetShown(not pill)
     f.mine:Hide(); f.hint:Hide(); f.chev:Hide(); if f.chip then f.chip:Hide() end; if f.clk then f.clk:Hide() end
     if f.rows then for _, r in ipairs(f.rows) do r:Hide() end end
+    if f.gRows then for _, r in ipairs(f.gRows) do r:Hide() end end
+    if f.gTitle then f.gTitle:Hide(); f.gLine:Hide() end
     f.ptxt:SetShown(pill)
     if f.ptl and not pill then f.ptl:Hide(); f.ptlFill:Hide() end
     if not pill then
@@ -1076,6 +1402,7 @@ local function Paint(f)
         -- 이름이 한 줄이면 단추를 위로 당겨 빈칸 없애기
         local block = math.max(isz, (f.name:GetStringHeight() or 14) + 2 + ((e.why and e.why ~= "") and (f.why:GetStringHeight() or 12) or 0))
         local segY = PADX + off + block + 6
+        segY = segY + PaintGear(f, e, segY + 2)
         -- 내 장비가 아니면: 입찰은 작고 흐리게 · "차비로 양보"를 넓게
         local inner = W - PADX * 2 - 3 - 30
         if e.notMine then
@@ -1270,6 +1597,18 @@ local function Refresh(e)
     local f = e and CardFor(e)
     if f then Paint(f); Relayout() end
 end
+-- 파티원 템을 새로 알게 되면 펼친 카드만 다시 그리기 (잠깐 모아서)
+local gearPend = false
+ns.RollGearChanged = function()
+    if gearPend then return end
+    gearPend = true
+    C_Timer.After(0.2, function()
+        gearPend = false
+        local any = false
+        for _, f in ipairs(active) do if f.e and not f.isPill then Paint(f); any = true end end
+        if any then Relayout() end
+    end)
+end
 
 -- 기록장 (접속을 끊어도 남아요)
 local function LogDB() ns.db.rollLog = ns.db.rollLog or {}; return ns.db.rollLog end
@@ -1302,15 +1641,48 @@ local function HideCardLater(e, sec)
     end)
 end
 
+-- 더 이른 마감이 오면 그걸로 (결과를 기다리던 긴 대기 중에 "획득" 글이 오면 10초 뒤 닫혀요)
 local function FinishLater(e, sec)
-    if e.finishing then return end
-    e.finishing = true
+    local at = GetTime() + sec
+    if e.finished or (e.finishAt and e.finishAt <= at) then return end
+    e.finishAt = at
     C_Timer.After(sec, function()
+        if e.finished or e.finishAt ~= at then return end
+        e.finished = true
         SaveLog(e)
         local f = CardFor(e)
         if f then Free(f) end
         entries[e.id] = nil
     end)
+end
+
+-- 결과 글이 기록을 저장한 뒤에 오면 (다른 사람이 늦게 고를 때) 저장된 기록에 이어 붙여요
+local function PatchLog(link, winner, n, allPassed, who, t, roll)
+    local id = ItemID(link)
+    if not id then return end
+    local now = time()
+    for _, it in ipairs(LogDB()) do
+        if now - (it.at or 0) > 300 then break end
+        if ItemID(it.link) == id and not it.win and not it.all then
+            if who then
+                local row
+                for _, y in ipairs(it.rolls) do if y.name == who then row = y end end
+                if not row then row = { name = who, c = Hex(ClassColorOf(who)) }; it.rolls[#it.rolls + 1] = row end
+                row.t = t or row.t; row.n = roll or row.n
+            end
+            if winner then
+                it.win = winner
+                if n then
+                    local row
+                    for _, y in ipairs(it.rolls) do if y.name == winner then row = y end end
+                    if row then row.n = row.n or n end
+                end
+            end
+            if allPassed then it.all = true end
+            if ns.RollLogPaint then ns.RollLogPaint() end
+            return true
+        end
+    end
 end
 
 function ns.RollClickCard(f)
@@ -1437,7 +1809,8 @@ local function OnStart(id, ms)
     local link = GetLootRollItemLink and GetLootRollItemLink(id)
     local total = tonumber(ms) or (GetLootRollTimeLeft and GetLootRollTimeLeft(id)) or 60000
     Open({ id = id, link = link, texture = tex, name = name, count = count, quality = quality, bop = bop,
-           canNeed = canNeed, canGreed = canGreed, total = total })
+           canNeed = canNeed, canGreed = canGreed, total = total, rollEnd = GetTime() + total / 1000 })
+    pcall(GearSend, link)
 end
 
 local TYPE_OF = { [0] = "pass", [1] = "need", [2] = "greed", [3] = "greed" }
@@ -1788,7 +2161,7 @@ local function OnLootMsg(msg)
             hit = true
             if m.kind ~= "got" and m.kind ~= "gotself" then RollDbg(m.kind, msg) end
             if m.kind == "rolled" then
-                local e = FindEntry(a[2]); if not e then return end
+                local e = FindEntry(a[2]); if not e then PatchLog(a[2], nil, nil, nil, Short(a[3]), m.t, tonumber(a[1])) return end
                 local who = Short(a[3])
                 e.rolls[who] = { t = m.t, n = tonumber(a[1]) }
                 Refresh(e)
@@ -1808,8 +2181,13 @@ local function OnLootMsg(msg)
             elseif m.kind == "youwon" or m.kind == "won" or m.kind == "youwon2" or m.kind == "won2" then
                 -- won = (이름, 템) · youwon = (템) · won2 = (이름, 숫자, 템) · youwon2 = (숫자, 템)
                 local link = (m.kind == "youwon" and a[1]) or (m.kind == "won" and a[2]) or (m.kind == "youwon2" and a[2]) or a[3]
-                local e = FindEntry(link); if not e then return end
                 local mine = (m.kind == "youwon" or m.kind == "youwon2")
+                local e = FindEntry(link)
+                if not e then
+                    local n0 = (m.kind == "youwon2" and tonumber(a[1])) or (m.kind == "won2" and tonumber(a[2]))
+                    PatchLog(link, mine and Short(UnitName("player")) or Short(a[1]), n0)
+                    return
+                end
                 e.winner = mine and e.me or Short(a[1])
                 local n = (m.kind == "youwon2" and tonumber(a[1])) or (m.kind == "won2" and tonumber(a[2]))
                 if n then local r = e.rolls[e.winner] or {}; r.n = r.n or n; r.t = r.t or e.mine or "need"; e.rolls[e.winner] = r end
@@ -1827,7 +2205,7 @@ local function OnLootMsg(msg)
                 Refresh(e)
                 FinishLater(e, 10)
             elseif m.kind == "allpass" then
-                local e = FindEntry(a[1]); if not e then return end
+                local e = FindEntry(a[1]); if not e then PatchLog(a[1], nil, nil, true) return end
                 e.allPassed = true; e.done = true
                 Refresh(e)
                 FinishLater(e, 2.5)
@@ -1992,7 +2370,12 @@ ev:SetScript("OnEvent", function(_, event, a1, a2)
             Refresh(e)
             -- 보드가 열려 있으면 결과(획득 글)를 조금 기다렸다가 닫기
             if not (CardFor(e) and BoardOn(e)) then HideCardLater(e, 1) end
-            FinishLater(e, (CardFor(e) and BoardOn(e)) and 5 or 3)
+            -- 결과(누가 먹었는지)가 아직이면 굴림 시간이 끝날 때까지 기다렸다가 기록 (내가 먼저 고르면 창은 일찍 닫혀요)
+            local wait = (CardFor(e) and BoardOn(e)) and 5 or 3
+            if not (e.winner or e.allPassed) then
+                wait = math.max(wait, math.min(120, ((e.rollEnd or (GetTime() + 60)) - GetTime()) + 6))
+            end
+            FinishLater(e, wait)
         end
     elseif event == "CANCEL_ALL_LOOT_ROLLS" then
         for _, e in pairs(entries) do if not e.test then e.done = true; FinishLater(e, 2) end end
