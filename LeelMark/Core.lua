@@ -318,12 +318,28 @@ local function ShareSend(msg)
 end
 -- u 에 m 을 찍었어요: u 가 내 대상이면 파티에 알려요
 local function ShareIfTarget(u, m)
+    -- 몹 GUID 를 읽을 수 있으면(필드) 그 몹 그대로 알려요 → 대상이 아니어도 (마우스 몹 · 자동 징)
+    --   와우 포에버는 필드에서도 남의 징 번호를 숨길 때가 있어서, 파티원 이름표가 이걸로 "지금 칠 몹"을 알아요
+    local g = GUIDOf(u)
+    if g then ShareSend("G|" .. m .. "|" .. g) return end
     local tu, tt = PlateTok(u), PlateTok("target")
     if u == "target" or (tu and tt and tu == tt) then ShareSend("T|" .. m) end
 end
 local function ShareRecv(sender, msg)
     local who = Short and Short(sender) or (sender:match("^([^%-]+)") or sender)
     if msg == "C" then wipe(assigned); wipe(byTok)
+    elseif msg:sub(1, 2) == "G|" then
+        local m, g = msg:match("^G|(%d)|(.+)$")
+        m = tonumber(m or "")
+        if not m or m < 1 or m > 8 or not g then return end
+        for k, v in pairs(assigned) do if v == m then assigned[k] = nil end end
+        for k, v in pairs(byTok) do if v == m then byTok[k] = nil end end
+        assigned[g] = m
+        -- 지금 보이는 이름표 중 그 몹이 있으면 이름표 자리로도
+        for _, plate in ipairs(C_NamePlate.GetNamePlates() or {}) do
+            local t = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
+            if t and GUIDOf(t) == g then byTok[t] = m end
+        end
     else
         local m = tonumber(msg:match("^T|(%d)$") or "")
         if not m or m < 1 or m > 8 then return end
@@ -1130,7 +1146,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, ...)
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, msg, chan, sender = arg1, select(1, ...)
         if prefix == SHARE then
-            if type(msg) ~= "string" or #msg > 8 or type(sender) ~= "string" then return end
+            if type(msg) ~= "string" or #msg > 90 or type(sender) ~= "string" then return end
             if not (chan == "PARTY" or chan == "RAID" or chan == "INSTANCE_CHAT") then return end
             local me = UnitName("player")
             if (sender:match("^([^%-]+)") or sender) == me then return end

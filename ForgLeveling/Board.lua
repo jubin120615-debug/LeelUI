@@ -1277,12 +1277,23 @@ local RefreshBoard, RefreshTracker
 --   파티 애드온 채널로 조용히 주고받아요 (채팅창엔 안 보여요)
 ----------------------------------------------------------------------
 do
-    local PQ = { cache = {}, at = 0, remote = {}, members = {} }
+    local PQ = { cache = {}, at = 0, remote = {}, members = {}, self = {} }
+    -- 내가 보낸 메시지가 나한테도 돌아와요: 이 번호로 "나"를 알아봐요 (이름이 숨겨져도)
+    local TOKEN = tostring(math.random(100000, 999999)) .. tostring(math.floor((GetTime() or 0) * 10) % 1000)
     ns.PQ = PQ
     local PREFIX = "LeelQP"
     local function Short(n) return type(n) == "string" and (n:gsub("%-.*$", "")) or nil end
     local function Secret(v) return issecretvalue and issecretvalue(v) end
+    -- 파티원 이름 (게임이 이름을 숨기면 nil)
+    local function UName(unit)
+        local ok, n = pcall(UnitName, unit)
+        if not ok or n == nil or Secret(n) then return nil end
+        return Short(n)
+    end
     local function OnQuest(unit, e)
+        -- 상대도 르엘 UI면 받은 목록이 제일 정확해요 (멀리 있어도 돼요)
+        local rq0 = PQ.remote[UName(unit) or ""]
+        if rq0 and e.id then return rq0.q[e.id] ~= nil end
         if C_QuestLog and C_QuestLog.IsUnitOnQuest and e.id then
             local ok, r = pcall(C_QuestLog.IsUnitOnQuest, unit, e.id)
             if ok and r ~= nil then return r and true or false end
@@ -1292,28 +1303,41 @@ do
             if e.id and GetQuestLogIndexByID then local ok, r = pcall(GetQuestLogIndexByID, e.id); if ok and r and r > 0 then idx = r end end
             if idx then local ok, r = pcall(IsUnitOnQuest, idx, unit); if ok and r ~= nil then return r == 1 or r == true end end
         end
-        local rq = PQ.remote[Short(UnitName(unit)) or ""]
-        return (rq and e.id and rq.q[e.id] ~= nil) or false
+        return false
     end
     function PQ.Build(force)
         local now = GetTime()
         if not force and now - PQ.at < 1 then return end
         PQ.at = now; PQ.cache = {}; PQ.members = {}
         if not (IsInGroup and IsInGroup()) or (IsInRaid and IsInRaid()) then return end
+        local seen = {}
+        local function Add(m, has)
+            PQ.members[#PQ.members + 1] = m
+            seen[m.name] = true
+            for _, e in ipairs(log) do
+                if e.id and not e.failed and has(e) then
+                    PQ.cache[e.id] = PQ.cache[e.id] or {}
+                    table.insert(PQ.cache[e.id], m)
+                    if e.done then m.done = m.done + 1 else m.todo = m.todo + 1 end
+                end
+            end
+        end
         for i = 1, 4 do
             local un = "party" .. i
-            local nm = UnitExists(un) and UnitName(un)
-            if nm and not Secret(nm) then
-                local _, cls = UnitClass(un)
-                local m = { unit = un, name = Short(nm), cls = cls, todo = 0, done = 0 }
-                PQ.members[#PQ.members + 1] = m
-                for _, e in ipairs(log) do
-                    if e.id and not e.failed and OnQuest(un, e) then
-                        PQ.cache[e.id] = PQ.cache[e.id] or {}
-                        table.insert(PQ.cache[e.id], m)
-                        if e.done then m.done = m.done + 1 else m.todo = m.todo + 1 end
-                    end
-                end
+            local nm = UnitExists(un) and UName(un)
+            if nm then
+                local okC, _, cls = pcall(UnitClass, un)
+                if not okC or Secret(cls) then cls = nil end
+                local r = PQ.remote[nm]
+                Add({ unit = un, name = nm, cls = cls or (r and r.cls), todo = 0, done = 0 }, function(e) return OnQuest(un, e) end)
+            end
+        end
+        -- 게임이 이름을 숨겨도, 진행도를 보내 준 파티원(르엘 UI)은 보여요 (실제 파티 인원까지만)
+        local n = 0
+        for i = 1, 4 do if UnitExists("party" .. i) then n = n + 1 end end
+        for who, r in pairs(PQ.remote) do
+            if not seen[who] and not PQ.self[who] and #PQ.members < n and r.cls ~= nil then
+                Add({ name = who, cls = r.cls, todo = 0, done = 0 }, function(e) return r.q[e.id] ~= nil end)
             end
         end
     end
@@ -1383,6 +1407,8 @@ do
         end
         msgs[#msgs + 1] = cur
         local ch = Chan()
+        local _, myCls = UnitClass("player")
+        if type(myCls) == "string" and not Secret(myCls) then pcall(C_ChatInfo.SendAddonMessage, PREFIX, "C|" .. myCls .. "|" .. TOKEN, ch) end
         for i, m in ipairs(msgs) do pcall(C_ChatInfo.SendAddonMessage, PREFIX, (i == 1 and "N" or "A") .. "|" .. m, ch) end
     end
     local pend
@@ -1406,12 +1432,20 @@ do
         if ev == "CHAT_MSG_ADDON" then
             if a1 ~= PREFIX or type(a2) ~= "string" then return end
             local who = Short(a4)
-            if not who or who == Short(UnitName("player")) then return end
+            if not who or PQ.self[who] then return end
+            local okMe, me = pcall(UName, "player")
+            if okMe and me and who == me then return end
             local kind, data = a2:match("^(%a)|(.*)$")
             if not kind then return end
             local r = PQ.remote[who]
+            if kind == "C" then   -- 직업 · 번호 (번호가 내 것이면 나예요)
+                local cls, tok = data:match("^(%u+)|?(%d*)$")
+                if tok and tok == TOKEN then PQ.self[who] = true; PQ.remote[who] = nil; Repaint(); return end
+                r = r or { q = {} }; PQ.remote[who] = r
+                r.cls = cls; Repaint(); return
+            end
             local old = r and r.q or {}
-            if kind == "N" or not r then r = { q = {} }; PQ.remote[who] = r end
+            if kind == "N" or not r then r = { q = {}, cls = r and r.cls }; PQ.remote[who] = r end
             for t in data:gmatch("[^;]+") do
                 local id, d, rest = t:match("^(%d+):(%d)(.*)$")
                 if id then
@@ -1427,9 +1461,18 @@ do
             end
             Repaint()
         elseif ev == "GROUP_ROSTER_UPDATE" then
-            local keep = {}
-            for i = 1, 4 do local nm = Short(UnitExists("party" .. i) and UnitName("party" .. i)); if nm then keep[nm] = true end end
-            for nm in pairs(PQ.remote) do if not keep[nm] then PQ.remote[nm] = nil end end
+            -- 파티를 나간 사람 지우기 (이름이 숨겨지면 못 가려서 그대로 둬요)
+            if not (IsInGroup and IsInGroup()) then wipe(PQ.remote)
+            else
+                local keep, blind = {}, false
+                for i = 1, 4 do
+                    if UnitExists("party" .. i) then
+                        local nm = UName("party" .. i)
+                        if nm then keep[nm] = true else blind = true end
+                    end
+                end
+                if not blind then for nm in pairs(PQ.remote) do if not keep[nm] then PQ.remote[nm] = nil end end end
+            end
             PQ.SoonSend(); Repaint()
         else
             C_Timer.After(0.3, Repaint)
@@ -4026,6 +4069,7 @@ local function FaceRing(parent)
         local c = ns.PQ.ClassCol(m.cls)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         local cname = m.unit and UnitClass(m.unit)
+        if cname and issecretvalue and issecretvalue(cname) then cname = nil end
         ns.T.Set(GameTooltip, m.name .. (cname and ("  |cff9a8a86" .. cname .. "|r") or ""), c[1], c[2], c[3])
         local p, list = ns.PQ.Ratio(m, e.id)
         if p == nil then
@@ -4235,6 +4279,45 @@ local function MakeTracker()
         ns.T.Add(GameTooltip, "머리를 끌면 옮기기 · 오른쪽 클릭: 고르기 판", 0.75, 0.75, 0.75); GameTooltip:Show()
     end)
     mini:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- 자동 퀘스트 스위치 (A안: "자동" 글자 + 허브와 같은 분홍 스위치 · 르엘 UI "퀘스트 자동" 전체 스위치)
+    local L0 = _G.LeelUI
+    if L0 and L0.QuestDB then
+        local auto = CreateFrame("Button", nil, head); auto:SetSize(62, 18); auto:SetPoint("RIGHT", mini, "LEFT", -8, 0)
+        auto.track = CreateFrame("Frame", nil, auto); auto.track:SetSize(30, 16); auto.track:SetPoint("RIGHT", 0, 0)
+        auto.tr = RR(auto.track, 8, P.acc, "BACKGROUND", 0, 0)
+        auto.knob = auto.track:CreateTexture(nil, "ARTWORK"); auto.knob:SetTexture(MEDIA .. "circle"); auto.knob:SetSize(12, 12)
+        auto.fs = Font(auto, 12, P.tx); auto.fs:SetPoint("RIGHT", auto.track, "LEFT", -5, 0); auto.fs:SetText(ns.T("자동"))
+        auto.fs:SetShadowColor(0, 0, 0, 1)
+        auto:SetWidth((auto.fs:GetStringWidth() or 24) + 36)
+        function auto.Paint()
+            local on = L0.QuestDB().on
+            auto.knob:ClearAllPoints()
+            if on then
+                auto.knob:SetPoint("RIGHT", -2, 0); auto.knob:SetVertexColor(1, 1, 1, 1)
+                auto.tr:SetColor(P.acc, 1)   -- 켜짐 = 분홍
+                auto.fs:SetTextColor(P.tx[1], P.tx[2], P.tx[3])
+            else
+                auto.knob:SetPoint("LEFT", 2, 0); auto.knob:SetVertexColor(0.75, 0.7, 0.69, 1)
+                auto.tr:SetColor({ 0.36, 0.34, 0.33 }, 1)   -- 꺼짐 = 회색
+                auto.fs:SetTextColor(0.56, 0.5, 0.48)
+            end
+        end
+        auto:SetScript("OnClick", function(self)
+            local d = L0.QuestDB(); d.on = not d.on
+            self.Paint()
+            Print(d.on and "자동 퀘스트 켰어요 (말 걸면 받고 · 완료까지)" or "자동 퀘스트 껐어요 (직접 받고 완료해요)")
+            if GameTooltip:GetOwner() == self then self:GetScript("OnEnter")(self) end
+        end)
+        auto:SetScript("OnEnter", function(self)
+            local on = L0.QuestDB().on
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, on and "자동 퀘스트 켜짐" or "자동 퀘스트 꺼짐")
+            ns.T.Add(GameTooltip, "클릭: 켜기 · 끄기 (말 걸면 받기 · 완료)", 0.8, 0.8, 0.8)
+            ns.T.Add(GameTooltip, "자세한 설정: 허브 > 퀘스트 자동", 0.6, 0.6, 0.6); GameTooltip:Show()
+        end)
+        auto:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        auto.Paint()
+        trk.autoBtn = auto
+    end
     local line = trk:CreateTexture(nil, "ARTWORK"); line:SetTexture(WHITE)
     line:SetPoint("TOPLEFT", head, "BOTTOMLEFT", 0, -2); line:SetPoint("TOPRIGHT", head, "BOTTOMRIGHT", 0, -2); line:SetHeight(1)
     line:SetVertexColor(P.acc[1], P.acc[2], P.acc[3], 0.35)
@@ -4724,6 +4807,7 @@ end
 
 RefreshTracker = function()
     if not trk then return end
+    if trk.autoBtn then pcall(trk.autoBtn.Paint) end   -- 허브에서 바꿔도 알약이 따라가요
     -- 반납 상자가 다 비면(그 NPC 반납을 다 했으면) "반납 끝!" 띠 2초
     do
         local nowNpc = {}

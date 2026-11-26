@@ -796,9 +796,10 @@ local function UpdatePower(f)
     local hasMana = (pType ~= MANA) and Try(function()
         return UnitPowerMax("player", MANA) > 0
     end)
-    f.manaLine:SetShown(hasMana)
-    f.manaLabel:SetShown(hasMana)
-    f.manaText:SetShown(hasMana)
+    -- 숨기기/보이기 대신 투명도로 (전투 중 드루이드 변신 때 게임이 Show/Hide 를 막아요 · 투명도는 괜찮아요)
+    if not InCombatLockdown() then f.manaLine:Show(); f.manaLabel:Show(); f.manaText:Show() end
+    local a = hasMana and 1 or 0
+    f.manaLine:SetAlpha(a); f.manaLabel:SetAlpha(a); f.manaText:SetAlpha(a)
     if hasMana then
         local m = UnitPower("player", MANA)
         ns.SetBar(f.manaLine, m, UnitPowerMax("player", MANA))

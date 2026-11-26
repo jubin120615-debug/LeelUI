@@ -88,9 +88,22 @@ end
 
 local G = C_GossipInfo or {}
 
+-- 자동이 켜져 있는데 안 받은 이유를 채팅창에 한 줄 (5초에 한 번)
+local whyAt = 0
+local function Why(msg)
+    if not DB().on or GetTime() - whyAt < 5 then return end
+    whyAt = GetTime()
+    print("|cfff2b3c2[르엘 퀘스트 자동]|r " .. (ns.T and ns.T(msg) or msg))
+end
+local function PauseWhy()
+    if not DB().on then return end
+    local k = DB().pauseKey or "shift"
+    Why((k == "ctrl" and "Ctrl" or k == "alt" and "Alt" or "Shift") .. " 키를 누르고 있어서 이번엔 쉬었어요")
+end
+
 -- 대화창: 받을 퀘 / 끝난 퀘 고르기
 local function OnGossip()
-    if Paused() then return end
+    if Paused() then PauseWhy() return end
     local d = DB()
     -- 끝난 퀘스트 먼저
     if d.complete then
@@ -107,6 +120,7 @@ local function OnGossip()
                     G.SelectAvailableQuest(q.questID) return
                 end
             end
+            if #(G.GetAvailableQuests() or {}) > 0 then Why("회색 퀘(경험치 적음)라 안 받았어요 · 허브 > 퀘스트 자동에서 바꿀 수 있어요") end
         end
     end
     -- 퀘스트가 하나도 없고 대화가 하나뿐이면 넘기기 (기본 꺼짐)
@@ -122,7 +136,7 @@ end
 
 -- 옛날식 퀘스트 인사창 (퀘스트가 여러 개인 NPC)
 local function OnGreeting()
-    if Paused() then return end
+    if Paused() then PauseWhy() return end
     local d = DB()
     if d.complete then
         for i = 1, (GetNumActiveQuests() or 0) do
@@ -141,21 +155,24 @@ end
 -- 받기는 여기서, '퀘스트 받음' 알림은 진짜로 받아졌을 때(QUEST_ACCEPTED) 한 번만
 local lastDetail, lastDetailAt = nil, 0
 local function OnDetail()
-    if Paused() or not DB().accept then return end
+    if Paused() then PauseWhy() return end
+    if not DB().accept then Why("\"자동 수락\"이 꺼져 있어요 · 허브 > 퀘스트 자동") return end
     local d = DB()
     -- 파티원이 나눈 퀘 (퀘 준 쪽이 플레이어)
-    if d.shared == false and UnitIsPlayer and UnitExists("questnpc") and UnitIsPlayer("questnpc") then return end
+    if d.shared == false and UnitIsPlayer and UnitExists("questnpc") and UnitIsPlayer("questnpc") then Why("파티원이 나눈 퀘는 직접 받게 해 두었어요") return end
     -- 정예 · 파티 퀘 (권장 인원 2명 이상)
-    if d.skipGroup and GetSuggestedGroupNum and (GetSuggestedGroupNum() or 0) > 1 then return end
+    if d.skipGroup and GetSuggestedGroupNum and (GetSuggestedGroupNum() or 0) > 1 then Why("정예 · 파티 퀘는 직접 받게 해 두었어요") return end
     local title = GetTitleText and GetTitleText()
     -- 같은 퀘 창이 연달아 다시 열리면 (다른 자동 수락 애드온, 대화창 되돌아옴) 한 번만 받기
     if title and title == lastDetail and GetTime() - lastDetailAt < 3 then return end
     lastDetail, lastDetailAt = title, GetTime()
+    local ok, err
     if QuestGetAutoAccept and QuestGetAutoAccept() then
-        if AcknowledgeAutoAcceptQuest then AcknowledgeAutoAcceptQuest() end
+        if AcknowledgeAutoAcceptQuest then ok, err = pcall(AcknowledgeAutoAcceptQuest) else ok = true end
     else
-        AcceptQuest()
+        ok, err = pcall(AcceptQuest)
     end
+    if not ok then Why("게임이 자동 받기를 막았어요: " .. tostring(err)) end
 end
 
 local toasted = {}

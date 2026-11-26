@@ -17,9 +17,11 @@ local function Pretty(n) return ns.StashPretty and ns.StashPretty(n) or n end
 ----------------------------------------------------------------------
 -- 기록
 ----------------------------------------------------------------------
-local function RecordGold()
+local function RecordGold(atLogout)
     local r = Me(); if not r then return end
     local g = GetMoney and GetMoney() or 0
+    -- 나가는 순간엔 게임이 0을 줄 때가 있어요 → 그땐 앞서 적은 값을 지켜요 (돈이 진짜 0이 되면 그 전에 이미 적혀요)
+    if atLogout and g == 0 and (r.gold or 0) > 0 then return end
     r.gold = g
     r.gh = r.gh or {}
     local d = Today()
@@ -65,7 +67,8 @@ for _, e in ipairs({ "PLAYER_LOGIN", "PLAYER_MONEY", "PLAYER_LOGOUT", "MAIL_INBO
 ev:SetScript("OnEvent", function(_, e)
     if not ns.db then return end
     if e == "PLAYER_LOGIN" then C_Timer.After(3, RecordGold)
-    elseif e == "PLAYER_MONEY" or e == "PLAYER_LOGOUT" then pcall(RecordGold)
+    elseif e == "PLAYER_MONEY" then pcall(RecordGold)
+    elseif e == "PLAYER_LOGOUT" then pcall(RecordGold, true)
     elseif e == "MAIL_INBOX_UPDATE" or e == "MAIL_SHOW" then C_Timer.After(0.3, function() pcall(RecordMail) end) end
 end)
 
@@ -171,7 +174,7 @@ local function Show(owner)
         for d, v in pairs(c.r.gh or {}) do if d < today and (not bd or d > bd) then bd, best = d, v end end
         yest = yest + (best or g)
     end
-    T.total:SetText(Money(total, true))
+    T.total:SetText(Money(total))
     local dlt = total - yest
     if math.abs(dlt) >= 10000 then
         T.delta:SetText(L("어제보다") .. "\n" .. (dlt > 0 and "+" or "-") .. math.floor(math.abs(dlt) / 10000) .. (ns.EnOn and ns.EnOn() and "g" or "금"))
@@ -189,9 +192,14 @@ local function Show(owner)
         local cr, cg, cb = ClassHex(c.r.cls)
         r.name:SetText(Pretty(c.name) .. (c.name == myName and " |cffa99692·|r" or "") .. (c.other and ("  |cff8f7f7b" .. L(c.fac == "Alliance" and "얼라" or "호드") .. "|r") or ""))
         r.name:SetTextColor(cr, cg, cb)
-        local w = math.max(1, 120 * (c.r.gold or 0) / maxg)
-        r.bar:SetWidth(w); r.bar:SetColorTexture(cr, cg, cb, 1)
-        r.gold:SetText(Money(c.r.gold or 0, true))
+        if c.r.gold then
+            local w = math.max(1, 120 * c.r.gold / maxg)
+            r.bar:SetWidth(w); r.bar:SetColorTexture(cr, cg, cb, 1); r.bar:Show()
+            r.gold:SetText(Money(c.r.gold))
+        else   -- 이 기능이 생긴 뒤로 아직 그 캐릭으로 안 들어왔어요
+            r.bar:Hide()
+            r.gold:SetText("|cff8f7f7b" .. L("한 번 접속하면 보여요") .. "|r")
+        end
         r:Show()
         y = y - 22
     end

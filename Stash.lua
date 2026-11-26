@@ -80,7 +80,7 @@ local function CatOf(id, quality)
         if subID == 5 then return "cloth" elseif subID == 7 then return "metal" elseif subID == 9 then return "herb"
         elseif subID == 6 then return "leather" elseif subID == 8 then return "cook" elseif subID == 4 then return "gem"
         elseif subID == 12 then return "ench" elseif subID == 10 then return "elem" end
-        return "trade"
+        return "elem"   -- 그 밖의 직업 재료 (진주 · 실 · 염료 …) = "원소 · 기타 직업 재료"
     elseif classID == 3 then return "gem"
     elseif (classID == 2 or classID == 4) and quality == 2 and loc and loc ~= "" and loc ~= "INVTYPE_NON_EQUIP_IGNORE" then return "green"
     end
