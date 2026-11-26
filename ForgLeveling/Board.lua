@@ -3827,6 +3827,23 @@ end
 -- 따라가기 창 (르엘 UI 퀘스트 목록 "르엘 퀘스트 판" 자리 = ForgLevelingFrame)
 ----------------------------------------------------------------------
 local trk
+
+-- 퀘스트 템 바로 쓰기 단추(게임 보호 단추)가 목록 줄에 붙어 있어서, 전투 중엔 목록 창 높이를 못 바꿔요
+--   → 전투 중엔 높이를 기억만 했다가 전투가 끝나면 맞춰요
+ns.TrkH = function(h)
+    if not trk then return end
+    if InCombatLockdown() then
+        trk.pendH = h
+        if not trk.pendEv then
+            trk.pendEv = CreateFrame("Frame")
+            trk.pendEv:RegisterEvent("PLAYER_REGEN_ENABLED")
+            trk.pendEv:SetScript("OnEvent", function() if trk.pendH then local x = trk.pendH; trk.pendH = nil; trk:SetHeight(x) end end)
+        end
+        return
+    end
+    trk.pendH = nil
+    trk:SetHeight(h)
+end
 local NearTurnins, Toast, NearToast   -- 아래에서 채워요
 local MAXQ = 8                 -- 한 번에 보이는 퀘 수 (손잡이로 길이를 정하면 그만큼)
 local YEL = { 0.945, 0.851, 0.541 }
@@ -4806,19 +4823,19 @@ RefreshTracker = function()
         end
         trk.count:SetText("")
         trk.grip:Hide()
-        if DB.trkFold then trk.hint:Hide(); trk.pick:Hide(); trk:SetHeight(30 + bandH) return end
+        if DB.trkFold then trk.hint:Hide(); trk.pick:Hide(); ns.TrkH(30 + bandH) return end
         trk.hint:SetText(ns.T("%s\n여기서 할 퀘 %d개 · 완료 %d개"):format(MapName(m) or ZoneText(), here, done))
         trk.hint:ClearAllPoints(); trk.hint:SetPoint("TOPLEFT", trk.head, "BOTTOMLEFT", 0, -10 - nearH); trk.hint:SetPoint("RIGHT", 0, 0)
         trk.hint:Show()
         trk.pick:ClearAllPoints(); trk.pick:SetPoint("TOPLEFT", trk.hint, "BOTTOMLEFT", 0, -8); trk.pick:Show()
-        trk:SetHeight(110 + nearH)
+        ns.TrkH(110 + nearH)
         trk.contentH = 110 + nearH
         return
     end
     trk.hint:Hide(); trk.pick:Hide()
     local doneN = math.max(0, total - #route)
     trk.count:SetText(("%d / %d"):format(doneN + 1, total))
-    if DB.trkFold then trk:SetHeight(30 + bandH); trk.grip:Hide() return end
+    if DB.trkFold then ns.TrkH(30 + bandH); trk.grip:Hide() return end
 
     trk.offset = 0
     local y = -38 - nearH
@@ -5011,9 +5028,9 @@ RefreshTracker = function()
     trk.contentH = -y + 4
     -- 길이를 직접 정했으면 창 높이 = 정한 길이 (손잡이도 그 끝에), 아니면 내용만큼
     if DB.trkH then
-        trk:SetHeight(math.max(-y + 4, DB.trkH))
+        ns.TrkH(math.max(-y + 4, DB.trkH))
     else
-        trk:SetHeight(-y + 4)
+        ns.TrkH(-y + 4)
     end
     trk.grip:ClearAllPoints(); trk.grip:SetPoint("BOTTOMRIGHT", trk, "BOTTOMRIGHT", 4, -4); trk.grip:Show()
 end
@@ -5166,7 +5183,7 @@ do
                 y = y - 18
             end
         end
-        trk:SetHeight(math.max(-y + 4, DB.trkH or 0))
+        ns.TrkH(math.max(-y + 4, DB.trkH or 0))
     end
 end
 
@@ -5219,7 +5236,13 @@ do
                 b.link = link
                 b:SetAttribute("item", link)
                 b.icon:SetTexture(icon)
-                b:ClearAllPoints(); b:SetPoint("RIGHT", r, "TOPLEFT", -8, -10)
+                -- 줄에 직접 붙이면 그 줄 · 목록 창까지 게임 보호를 받아서 전투 중에 못 숨기고 못 늘려요
+                --   → 화면 기준 자리로 붙여요 (전투 밖에서 줄 자리를 보고 맞춰요)
+                local left, top = r:GetLeft(), r:GetTop()
+                if left and top then
+                    local k = r:GetEffectiveScale() / UIParent:GetEffectiveScale()
+                    b:ClearAllPoints(); b:SetPoint("RIGHT", UIParent, "BOTTOMLEFT", (left - 8) * k, (top - 10) * k)
+                end
                 b:Show()
                 if r.e.index and GetQuestLogSpecialItemCooldown then
                     local ok, st, du, en = pcall(GetQuestLogSpecialItemCooldown, r.e.index)
@@ -5238,6 +5261,14 @@ do
     local ev2 = CreateFrame("Frame")
     ev2:RegisterEvent("PLAYER_REGEN_ENABLED")
     ev2:SetScript("OnEvent", function() Sync() end)
+    -- 목록 창을 옮기거나 줄이 바뀌면 단추도 따라가게 (전투 밖 · 0.5초마다)
+    local acc = 0
+    ev2:SetScript("OnUpdate", function(_, el)
+        acc = acc + el
+        if acc < 0.5 then return end
+        acc = 0
+        if trk and trk:IsShown() and not InCombatLockdown() then Sync() end
+    end)
 end
 
 ----------------------------------------------------------------------

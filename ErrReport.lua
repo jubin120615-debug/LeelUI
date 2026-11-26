@@ -472,18 +472,40 @@ do
                 hits[#hits + 1] = { ms = math.floor(el * 1000 + 0.5), top = top, map = GetTime() - mapAt < el + 0.5 }
             end
             last = now
-            if GetTime() - t0 > 120 then Stop(true) end
+            if GetTime() - t0 > (mf.limit or 120) then Stop(true) end
         end)
-        P("측정 시작 (2분) · 지금 M으로 지도를 여러 번 열었다 닫아 보세요 · 끝내려면 /르엘측정 한 번 더")
+        if not mf.boot then P("측정 시작 (2분) · 지금 M으로 지도를 여러 번 열었다 닫아 보세요 · 끝내려면 /르엘측정 한 번 더") end
     end
+    -- 리로드 · 접속 순간 멈춤: 준비만 해 두면 다음 접속 때 처음부터 20초 재고 · 불러올 때 오래 걸린 애드온도
+    local bev = CreateFrame("Frame")
+    bev:RegisterEvent("PLAYER_LOGIN")
+    bev:SetScript("OnEvent", function()
+        if not (ns.db and ns.db.profBoot) or GetCVar("scriptProfile") ~= "1" then return end
+        ns.db.profBoot = nil
+        mf = mf or CreateFrame("Frame"); mf.boot = true; mf.limit = 20
+        Start()
+        C_Timer.After(20.5, function()
+            -- 불러올 때부터 지금까지 일한 시간 (애드온별 합계)
+            UpdateAddOnCPUUsage()
+            local tot = {}
+            for i = 1, #names do tot[#tot + 1] = { names[i], math.floor((GetAddOnCPUUsage(names[i]) or 0) + 0.5) } end
+            table.sort(tot, function(a, b) return a[2] > b[2] end)
+            local parts = {}
+            for k = 1, math.min(6, #tot) do parts[k] = ("%s %dms"):format(tot[k][1], tot[k][2]) end
+            ns.Print(L("접속 후 20초 동안 일한 시간 (많은 순서):") .. " " .. table.concat(parts, " · "))
+            mf.boot, mf.limit = nil, nil
+        end)
+    end)
     SLASH_LEELPROF1 = "/르엘측정"; SLASH_LEELPROF2 = "/leelprof"
     SlashCmdList.LEELPROF = function()
         if hits then Stop(true) return end
         if GetCVar("scriptProfile") ~= "1" then
             SetCVar("scriptProfile", "1")
-            P("측정 준비 완료 · /reload 한 다음 /르엘측정 을 다시 쳐 주세요 (측정 중엔 게임이 조금 느려요)")
+            if ns.db then ns.db.profBoot = true end
+            P("측정 준비 완료 · /reload 하면 접속 순간부터 20초를 저절로 재서 채팅에 보여줘요 (지도 등 다른 멈춤은 그 뒤 /르엘측정)")
             return
         end
+        if ns.db then ns.db.profBoot = true end   -- 다음 /reload 때도 접속 순간부터 재요
         Start()
     end
 end

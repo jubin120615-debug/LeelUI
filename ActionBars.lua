@@ -4144,3 +4144,39 @@ do
     tev:RegisterEvent("PLAYER_CONTROL_LOST"); tev:RegisterEvent("PLAYER_CONTROL_GAINED"); tev:RegisterEvent("PLAYER_ENTERING_WORLD")
     tev:SetScript("OnEvent", function() C_Timer.After(0.3, Update); C_Timer.After(1.5, Update) end)
 end
+
+
+----------------------------------------------------------------------
+-- 게임 가방 바 숨기기 (허브 > 르엘 가방 · 액션바와 상관없이 늘)
+--   단추는 그대로 두고 투명 + 마우스 끄기 (B 키 · 가방 열기는 그대로) · 게임이 다시 보이게 해도 곧바로 0
+----------------------------------------------------------------------
+do
+    local hooked = {}
+    local function Targets()
+        local t = {}
+        for _, n in ipairs(BAGS) do local f = _G[n]; if f then t[#t + 1] = f end end
+        for _, n in ipairs({ "BagsBar", "MicroButtonAndBagsBar" }) do local f = _G[n]; if f and n == "BagsBar" then t[#t + 1] = f end end
+        return t
+    end
+    local function On() return ns.db and ns.db.hideBagBar == true end
+    function ns.ApplyHideBagBar()
+        local on = On()
+        -- 끌 때: 르엘 액션바를 쓰면 원래 거기서 숨겨 두니 그대로 둬요
+        if not on and ns.ABarDB and ns.ABarDB().on then return end
+        for _, f in ipairs(Targets()) do
+            if not hooked[f] then
+                hooked[f] = true
+                hooksecurefunc(f, "SetAlpha", function(self, a)
+                    if On() and a and a > 0 and not self.leelBagSet then self.leelBagSet = true; self:SetAlpha(0); self.leelBagSet = nil end
+                end)
+            end
+            f.leelBagSet = true
+            pcall(f.SetAlpha, f, on and 0 or 1)
+            f.leelBagSet = nil
+            if not InCombatLockdown() then pcall(f.EnableMouse, f, not on) end
+        end
+    end
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_ENTERING_WORLD"); ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ev:SetScript("OnEvent", function() if On() then C_Timer.After(0.5, ns.ApplyHideBagBar) end end)
+end

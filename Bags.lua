@@ -440,6 +440,7 @@ local function UpdateButtonRaw(b, bag, slot)
         b.leelDim:Hide()
     end
     b:SetAlpha((match or info) and 1 or 0.5)
+    if ns.StashMark then pcall(ns.StashMark, b, bag, slot, info) end   -- 창고 부캐로 보낼 템 = 봉투
 end
 
 -- 칸 칠하다 오류가 나면 그 칸만 옛 색으로 남지 않게: 오류는 기록하고 기본 모양으로 되돌림

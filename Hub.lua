@@ -161,6 +161,15 @@ local MODULES = {
               mover = function() return ns.HudPartMover and ns.HudPartMover("player") end,
               get = function() return ns.db.partScale and ns.db.partScale.player or 100 end,
               more = "내 창만 크게 · 작게 (HUD 전체 크기에 곱해요).\n이동 모드에서 내 창 테두리를 누르면 위에 크기 줄이 떠요. 휠로도 돼요." },
+            { t = "toggle", label = "전투 밖에서 흐리게", hint = "전투 · 대상 · 체력 줄었을 때 · 마우스 올리면 다시 또렷",
+              get = function() return ns.db.hudFade == true end,
+              set = function(v) ns.db.hudFade = v and true or false; if ns.HudFadeUpdate then ns.HudFadeUpdate(true) end end,
+              more = "전투 밖에서 할 일이 없을 땐 내 창(과 펫 창)을 흐리게 해요.\n전투 중 · 대상을 잡았을 때 · 체력이나 마나가 덜 찼을 때 · 마우스를 올렸을 때는 또렷하게." },
+            { t = "slider", label = "흐릴 때 투명도", min = 0, max = 80, step = 5, fmt = "%d%%", noPeek = true,
+              dimIf = function() return ns.db.hudFade ~= true end, dimWhy = "전투 밖에서 흐리게를 켜면",
+              get = function() return tonumber(ns.db.hudFadeA) or 25 end,
+              set = function(v) ns.db.hudFadeA = v; if ns.HudFadeUpdate then ns.HudFadeUpdate(true) end end,
+              more = "흐릴 때 얼마나 보일지 · 0% = 완전히 숨김 (마우스를 올리면 보여요)." },
             { t = "sub", label = "초상화" },
             { t = "toggle", label = "초상화 사용", hint = "왼쪽 얼굴 그림", hl = "por",
               get = function() return not (ns.db.hudText and ns.db.hudText.player and ns.db.hudText.player.porOff) end,
@@ -1011,6 +1020,13 @@ local MODULES = {
             { sec = 3, t = "toggle", label = "지역 출구 화살표", hl = "exits", hint = "옆 지역으로 넘어가는 곳에 분홍 동그라미 화살표 (클릭하면 그 지역 지도로)",
               get = function() return MapDB().exits ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.exits = v and true or false; if LeelMapExits then LeelMapExits.Refresh() end end end },
+            { sec = 2, t = "toggle", label = "던전 경로 지도", hint = "던전 안에서 M · 경로 선 · 우두머리 순서 번호 · 다음 우두머리 · 한국어 메모",
+              get = function() return MapDB().droute ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.droute = v and true or false end end },
+            { sec = 2, t = "toggle", label = "OpenMap 던전 지도 끄기", hint = "OpenMap 이 던전 지도를 따로 띄우지 않게 (르엘 경로 지도만)",
+              get = function() return MapDB().omDungeonOff ~= false end,
+              set = function(v) if LeelMapDB then LeelMapDB.omDungeonOff = v and true or false; if _G.LeelMap_ApplyOpenMapDungeons then _G.LeelMap_ApplyOpenMapDungeons() end end end },
+            { sec = 2, t = "button", label = "던전 경로 지도 미리 보기 (죽음의 폐광)", run = function() if _G.LeelMap_DungeonPreview then _G.LeelMap_DungeonPreview("deadmines") end end },
             { sec = 2, t = "toggle", label = "지도 미리 불러오기", hint = "접속 · 리로드 후 처음 M이 멈추지 않게 (로딩 화면 동안 몰래 한 번 열어 둬요)",
               get = function() return MapDB().preload ~= false end,
               set = function(v) if LeelMapDB then LeelMapDB.preload = v and true or false end end },
@@ -1448,6 +1464,19 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_Veil", builtin = true, cat = "start",
+        title = "준비 화면", sub = "접속 · 리로드 멈춤을 한 번에", icon = "hb_bolt",
+        desc = "접속 · /reload 직후 잠깐 화면을 덮고, 지도 미리 읽기 같은 무거운 일을 그 뒤에서 몰아서 해요.\n기다리는 동안 르엘UI 팁을 한 장씩 · ESC · 클릭으로 바로 걷기 · 전투 중엔 안 덮어요.",
+        onoff = { get = function() return ns.db.veil ~= false end, set = function(v) ns.db.veil = v and true or false end },
+        items = {
+            { t = "button", label = "미리 보기", run = function() if ns.VeilTest then ns.VeilTest() end end },
+            { t = "button", label = function() local s = ns.db.veilLast; local st = ns.db.veilStall
+                  if not s then return "지난 준비 시간 · 아직 없음" end
+                  return "지난 준비 시간 " .. string.format("%.1f", s) .. "초" .. (st and (" · 게임 멈춤 " .. string.format("%.1f", st.len or 0) .. "초") or "") end, run = function() end },
+            { t = "button", label = "팁 다시 처음부터", run = function() ns.db.veilSeen = {} end },
+        },
+    },
+    {
         key = "LeelUI_Profile", builtin = true, always = true, cat = "util",
         title = "설정 나누기", sub = "내보내기 · 가져오기", icon = "hb_apps",
         desc = "르엘 UI · 지도 · 징 · 반짝 상자 설정을 글자 한 줄로.\n친구에게 보내거나 다른 컴퓨터·캐릭터로 옮길 때 써요. (/르엘설정)",
@@ -1518,6 +1547,50 @@ local MODULES = {
         },
     },
     {
+        key = "LeelUI_Stash", builtin = true, cat = "util",
+        title = "창고 부캐", sub = "재료를 창고 캐릭에게 한 번에", icon = "hb_gift",
+        desc = "창고 캐릭을 정해 두면 재료 · 판매용 템을 우편함에서 단추 하나로 보내요.\n창고 캐릭은 우편함에서 모두 받기 · 은행 열면 재료 넣기 · 다른 캐릭 툴팁에 개수.",
+        onoff = { get = function() return ns.StashDB and ns.StashDB().on end,
+                  set = function(v) ns.StashDB().on = v and true or false; if ns.UpdateBags then pcall(ns.UpdateBags) end end },
+        items = {
+            { t = "header", label = "처음 쓰기 (한 걸음씩 · 저절로 체크)" },
+            { t = "button", label = function() return ns.StashStep and ns.StashStep(1) or "" end, run = function() end },
+            { t = "button", label = function() return ns.StashStep and ns.StashStep(2) or "" end, run = function() end },
+            { t = "button", label = function() return ns.StashStep and ns.StashStep(3) or "" end, run = function() end },
+            { t = "button", label = function() return ns.StashStep and ns.StashStep(4) or "" end, run = function() end },
+            { t = "button", label = function() return ns.StashStep and ns.StashStep(5) or "" end, run = function() end },
+            { t = "button", label = "말풍선 안내 다시 보기", run = function() ns.StashDB().tips = {} end },
+            { t = "header", label = "창고 캐릭" },
+            { t = "choice", label = "창고 캐릭", hint = "같은 서버 · 진영 · 한 번 접속한 캐릭 (목록에 없으면 그 캐릭으로 한 번 접속)",
+              options = function() return ns.StashTargets and ns.StashTargets() or {} end,
+              get = function() return ns.StashDB().target or "" end,
+              set = function(v) ns.StashDB().target = (v ~= "" and v) or nil; if ns.UpdateBags then pcall(ns.UpdateBags) end end },
+            { t = "input", label = "창고 캐릭 직접 쓰기", hint = "목록에 없을 때 · 캐릭 고르기 화면에 보이는 이름 그대로", button = "정하기", ph = "예: 슈엘 경매장",
+              run = function(t) t = (t or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", "-"); if t ~= "" then ns.StashDB().target = t; if ns.UpdateBags then pcall(ns.UpdateBags) end; return true end end },
+            { t = "header", label = "보낼 종류" },
+            { t = "toggle", label = "천", get = function() return ns.StashDB().cats.cloth end, set = function(v) ns.StashDB().cats.cloth = v and true or false end },
+            { t = "toggle", label = "광석 · 주괴 · 돌", get = function() return ns.StashDB().cats.metal end, set = function(v) ns.StashDB().cats.metal = v and true or false end },
+            { t = "toggle", label = "약초", get = function() return ns.StashDB().cats.herb end, set = function(v) ns.StashDB().cats.herb = v and true or false end },
+            { t = "toggle", label = "가죽", get = function() return ns.StashDB().cats.leather end, set = function(v) ns.StashDB().cats.leather = v and true or false end },
+            { t = "toggle", label = "요리 재료", get = function() return ns.StashDB().cats.cook end, set = function(v) ns.StashDB().cats.cook = v and true or false end },
+            { t = "toggle", label = "보석", get = function() return ns.StashDB().cats.gem end, set = function(v) ns.StashDB().cats.gem = v and true or false end },
+            { t = "toggle", label = "마법부여 재료", get = function() return ns.StashDB().cats.ench end, set = function(v) ns.StashDB().cats.ench = v and true or false end },
+            { t = "toggle", label = "원소 · 기타 직업 재료", get = function() return ns.StashDB().cats.elem end, set = function(v) ns.StashDB().cats.elem = v and true or false end },
+            { t = "toggle", label = "녹색 장비 (판매용)", hint = "귀속 안 된 녹색 무기 · 방어구",
+              get = function() return ns.StashDB().cats.green end, set = function(v) ns.StashDB().cats.green = v and true or false end },
+            { t = "toggle", label = "회색 템", hint = "보통은 상점에 파는 게 나아요",
+              get = function() return ns.StashDB().cats.grey end, set = function(v) ns.StashDB().cats.grey = v and true or false end },
+            { t = "header", label = "템별 규칙" },
+            { t = "button", label = function()
+                  local a, n, k = 0, 0, 0
+                  if ns.StashRuleCount then a, n, k = ns.StashRuleCount() end
+                  return "규칙 모두 지우기 (늘 보내기 " .. a .. " · 안 보내기 " .. n .. " · 남기기 " .. k .. ")" end,
+              run = function() local s = ns.StashDB(); s.always, s.never, s.keep = {}, {}, {}; if ns.UpdateBags then pcall(ns.UpdateBags) end end },
+            { t = "toggle", label = "툴팁에 내 다른 캐릭 개수", hint = "\"창고 루루 240 · 방패곰 6\" · 가방 · 은행 (그 캐릭이 은행을 한 번 열어야)",
+              get = function() return ns.StashDB().tip end, set = function(v) ns.StashDB().tip = v and true or false end },
+        },
+    },
+    {
         key = "LeelUI_AH", builtin = true, cat = "util",
         title = "경매장 시세", sub = "가방 툴팁에 경매 가격", icon = "hb_scale",
         desc = "경매장에서 본 가격을 기억해서 가방 · 은행 · 우편 템 툴팁 아래에 보여줘요.\n경매장에서 찾기만 해도 쌓이고, 경매장 창 위 '시세 훑기'를 누르면 전체를 한 번에 (15분에 한 번).",
@@ -1532,6 +1605,24 @@ local MODULES = {
               set = function(v) ns.AH.DB().cmp = v and true or false end },
             { t = "button", label = function() return "시세 비우기 (" .. ((ns.AH and ns.AH.Count()) or 0) .. "개)" end,
               run = function() if ns.AH then ns.AH.Clear() end end },
+            { t = "header", label = "일괄 등록 (경매장 오른쪽 날개)" },
+            { t = "toggle", label = "일괄 등록 날개", hint = "경매장을 열면 오른쪽에 팔 수 있는 템 목록 · 다음 올리기 단추 (스페이스로도)",
+              get = function() return ns.AHPostDB and ns.AHPostDB().on end, set = function(v) ns.AHPostDB().on = v and true or false end },
+            { t = "toggle", label = "최저가보다 1동 싸게", hint = "끄면 최저가와 같게",
+              get = function() return ns.AHPostDB and ns.AHPostDB().undercut end, set = function(v) ns.AHPostDB().undercut = v and true or false end },
+            { t = "toggle", label = "덤핑 막기", hint = "7일 평균의 40%보다 싸면 그 템은 빼요 (누가 헐값에 올린 걸 따라가지 않게)",
+              get = function() return ns.AHPostDB and ns.AHPostDB().dump end, set = function(v) ns.AHPostDB().dump = v and true or false end },
+            { t = "toggle", label = "상점보다 싸면 빼기", hint = "경매 수수료 빼고도 상점 판매가 더 나으면",
+              get = function() return ns.AHPostDB and ns.AHPostDB().vendor end, set = function(v) ns.AHPostDB().vendor = v and true or false end },
+            { t = "toggle", label = "내가 이미 최저면 건너뛰기", hint = "내 경매끼리 가격을 깎지 않아요",
+              get = function() return ns.AHPostDB and ns.AHPostDB().mine end, set = function(v) ns.AHPostDB().mine = v and true or false end },
+            { t = "toggle", label = "시세가 없으면 평균가로", hint = "끄면 그 템은 이번엔 빼요",
+              get = function() return ns.AHPostDB and ns.AHPostDB().noMarket == "avg" end, set = function(v) ns.AHPostDB().noMarket = v and "avg" or "skip" end },
+            { t = "toggle", label = "회색 템도", hint = "보통은 상점이 나아요",
+              get = function() return ns.AHPostDB and ns.AHPostDB().grey end, set = function(v) ns.AHPostDB().grey = v and true or false end },
+            { t = "seg", label = "올리는 기간", options = { { (ns.AHDurName and ns.AHDurName(1)) or "12시간", 1 }, { (ns.AHDurName and ns.AHDurName(2)) or "24시간", 2 }, { (ns.AHDurName and ns.AHDurName(3)) or "48시간", 3 } },
+              get = function() return ns.AHPostDB and ns.AHPostDB().dur or 1 end, set = function(v) ns.AHPostDB().dur = v end },
+            { t = "button", label = "늘 빼기 비우기", run = function() if ns.AHPostDB then ns.AHPostDB().skip = {} end end },
         },
     },
     {
@@ -1552,6 +1643,9 @@ local MODULES = {
             { t = "button", label = "크기 처음으로", run = function()
                   local d = ns.BagsDB(); d.cols, d.scale = nil, nil
                   if ns.BagsApplySize then ns.BagsApplySize() end end },
+            { t = "toggle", label = "게임 가방 바 숨기기", hint = "화면 오른쪽 아래 가방 단추 줄 · 늘 숨김 (B 키 · 가방 열기는 그대로)",
+              get = function() return ns.db.hideBagBar == true end,
+              set = function(v) ns.db.hideBagBar = v and true or false; if ns.ApplyHideBagBar then ns.ApplyHideBagBar() end end },
             { t = "header", label = "남은 칸" },
             { t = "toggle", label = "거의 찼을 때 알림", hint = "남은 칸 3개 이하가 되는 순간 한 번",
               get = function() return ns.BagsDB().warn end,
@@ -1628,6 +1722,7 @@ table.insert(MODULES, 1, { key = "_news", builtin = true, always = true, news = 
 
 -- 대분류 (알약). 애드온이 하나도 없는 분류는 안 보여요
 -- 하는 일 기준 5개. "설정 나누기"는 목록 대신 아래 줄 단추로 (cat = "none")
+ns.HubModules = MODULES   -- 준비 화면 팁이 읽어요
 local CATS = {
     { key = "view",  label = "화면",        icon = "hb_c_view" },
     { key = "quest", label = "퀘스트",      icon = "hb_guide" },
@@ -1642,15 +1737,15 @@ local MOD_CAT = {
     ForgLeveling = "quest", LeelUI_QTracker = "none", LeelUI_Quest = "quest", LeelUI_QItem = "quest", LeelSpot = "quest",
     LeelMap = "map", LeelUI_Minimap = "map",
     LeelUI_Party = "party", LeelUI_LFG = "party", LeelMark = "party", LeelUI_TotemSet = "party", LeelUI_Roll = "party",
-    LeelUI_Bags = "item", LeelUI_AH = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
-    LeelUI_Profile = "start", LeelUI_Err = "start", _news = "start",
+    LeelUI_Bags = "item", LeelUI_Stash = "item", LeelUI_AH = "item", LeelUI_LootWin = "item", LeelUI_Loot = "item", LeelUI_Shop = "item", LeelUI_Gear = "item",
+    LeelUI_Profile = "start", LeelUI_Err = "start", LeelUI_Veil = "start", _news = "start",
 }
 local MOD_ORDER = {}
 do
-    local order = { "_news", "LeelUI_Profile", "LeelUI_Err", "LeelUI", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font", "LeelUI_RankUp", "LeelUI_ABar",
+    local order = { "_news", "LeelUI_Profile", "LeelUI_Err", "LeelUI_Veil", "LeelUI", "LeelUI_Cast", "LeelUI_Plates", "LeelUI_Tip", "LeelUI_Mouse", "LeelUI_Chat", "LeelUI_Font", "LeelUI_RankUp", "LeelUI_ABar",
         "ForgLeveling", "LeelUI_QTracker", "LeelUI_Quest", "LeelUI_QItem", "LeelSpot",
         "LeelMap", "LeelUI_Minimap", "LeelUI_Party", "LeelUI_LFG", "LeelMark", "LeelUI_TotemSet", "LeelUI_Roll",
-        "LeelUI_Bags", "LeelUI_AH", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
+        "LeelUI_Bags", "LeelUI_Stash", "LeelUI_AH", "LeelUI_LootWin", "LeelUI_Loot", "LeelUI_Shop", "LeelUI_Gear", "LeelUI_Profile" }
     for i, k in ipairs(order) do MOD_ORDER[k] = i end
 end
 for i, m in ipairs(MODULES) do m.cat = MOD_CAT[m.key] or m.cat or "item"; m.ord = MOD_ORDER[m.key] or (100 + i) end
@@ -1712,6 +1807,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.55", "창고 부캐 · 던전 경로 지도 · 경매장 일괄 등록 · 준비 화면", "창고 부캐: 재료를 창고 캐릭에게 우편함 단추 하나로 (허브 > 창고 부캐) · 르엘 지도 던전 경로: 던전 안 M · 입구 클릭 → 지금 갈 길 · 우두머리 순서 · 다음 꼬리표 · 한국어 메모 · 경매장 일괄 등록: 최저가 −1동 · 스페이스로 하나씩 · 가방 골드에 마우스 = 내 캐릭 골드 · 우편 · 접속 · 리로드 준비 화면 + 팁 · HUD 흐려짐 · 가방 바 숨기기 · 전투 중 차단 오류 고침" },
     { "1.3.54", "징 새로 · 파티 해제 칸 · 주사위 파티원 템", "Leel Mark: 키 하나 (전투 밖 = 대상 둘레 무리 전부 · 전투 중 = 마우스 몹에 다음 징) · 이름표에 지금 칠 몹 징이 크게 + 금 고리 · 잡으면 다음 몹에 \"지금!\" · 바는 칠 순서 줄 (전투 중 접힘) · 르엘 쓰는 파티원끼리 대상 징 나누기 · 파티 칸: 오른쪽 위 해제 칸을 누르면 그 사람한테 바로 해제 · 주사위 카드에 파티원이 지금 낀 템 · 템레벨 비교 · 오류 · 차단 기록과 여러 던전 오류 고침" },
     { "1.3.53", "경매장 전체 시세 훑기 고침", "와우 포에버에서 시세 훑기가 \"답이 없어요\"로 끝나던 것 → 빈 검색으로 모든 템 최저가를 끝까지 받아요 (받는 중 개수 표시 · 2분에 한 번) · 글 앞 네모 기호 없앰" },
     { "1.3.52", "경매장 시세 · 재료 가방 자동 이동 · 지도 출구 길목", "가방 툴팁에 경매 최저가 + 상점과 비교 한 줄 (경매가 이득 / 상점에 팔아요 · 수수료 뺀 값) · 경매장 검색 칸 옆 시세 훑기 (모으는 중 % · 저장됨 표시) · 가방이 차면 재료를 재료 가방으로 알아서 옮기고 재료는 버리라고 안 해요 · 지도 출구 화살표를 실제 길목 자리로 (클래식 54곳) · 자료 없는 곳은 연한 ?" },
@@ -3409,6 +3505,7 @@ ShowPane = function()
             lastBtn = nil
             local r = InputRow(pane)
             r.name:SetText(it.label); r.hint:SetText(it.hint or "")
+            r.box.ph:SetText(it.ph or "예: Cafe24DongdongRegular.ttf")
             r.btn:SetLabel(it.button or "추가"); r.btn:SetHeight(24)
             local function Go()
                 local text = r.box:GetText()

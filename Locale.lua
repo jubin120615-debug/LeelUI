@@ -99,6 +99,26 @@ function ns.TAdd(t, s, ...) return t:AddLine(ns.L(s), ...) end
 function ns.TSet(t, s, ...) return t:SetText(ns.L(s), ...) end
 function ns.TDbl(t, a, b, ...) return t:AddDoubleLine(ns.L(a), ns.L(b), ...) end
 
+-- 한국어가 아닌 게임(영어 등)의 기본 글꼴엔 한글이 없어서 네모(□)로 보여요
+--   → 아직 번역 안 된 한글이 남으면 그 글자만 르엘에 든 한글 글꼴로 바꿔 그려요 (영어로 돌아오면 원래 글꼴)
+local KFONT = "Interface\\AddOns\\LeelUI\\media\\fonts\\NanumGothic.ttf"
+local function OurFont(f) return f and (f:find("LeelUI[\\/]media[\\/]fonts") ~= nil) end
+local function KoFix(fs, t)
+    if GameKo() or type(t) ~= "string" then return end
+    if t:find(HANGUL) then
+        local ok, f, sz, fl = pcall(fs.GetFont, fs)
+        if ok and f and not OurFont(f) then
+            fs.leelKoOrig = fs.leelKoOrig or f
+            pcall(fs.SetFont, fs, KFONT, sz or 12, fl or "")
+        end
+    elseif fs.leelKoOrig then
+        local ok, _, sz, fl = pcall(fs.GetFont, fs)
+        if ok then pcall(fs.SetFont, fs, fs.leelKoOrig, sz or 12, fl or "") end
+        fs.leelKoOrig = nil
+    end
+end
+ns.KoFix = KoFix
+
 -- ns.Font 로 만든 글자는 저절로 번역
 local function Wrap(fs)
     if not fs or fs.leelL then return fs end
@@ -106,10 +126,12 @@ local function Wrap(fs)
     local st, sft = fs.SetText, fs.SetFormattedText
     fs.SetText = function(self, t, ...)
         if type(t) == "string" and EnOn() then t = ns.L(t) end
+        pcall(KoFix, self, t)
         return st(self, t, ...)
     end
     fs.SetFormattedText = function(self, f, ...)
         if type(f) == "string" and EnOn() then f = ns.L(f) end
+        pcall(KoFix, self, f)
         return sft(self, f, ...)
     end
     return fs

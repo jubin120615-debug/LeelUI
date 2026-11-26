@@ -2987,3 +2987,53 @@ do
         Paint()
     end)
 end
+
+
+----------------------------------------------------------------------
+-- 내 창 전투 밖에서 흐리게 (허브 > Leel HUD > 내 창 · 처음엔 꺼짐)
+--   또렷할 때: 전투 중 · 대상 있음 · 체력 / 마나 · 기력이 덜 참 (분노는 있을 때) · 마우스를 올림
+--   흐리게만 바꿔요 (게임 보호 창이라 숨기거나 옮기진 않아요)
+----------------------------------------------------------------------
+do
+    local cur, want = 1, 1
+    local function Frames()
+        local t = {}
+        local p = _G.LeelUI_player; if p then t[#t + 1] = p end
+        local pet = ns.hudFrames and ns.hudFrames.pet; if pet then t[#t + 1] = pet end
+        return t
+    end
+    local function Busy()
+        if InCombatLockdown() or UnitAffectingCombat("player") then return true end
+        if UnitExists("target") then return true end
+        local ok, r = pcall(function()
+            if UnitHealth("player") < UnitHealthMax("player") then return true end
+            local pt = UnitPowerType("player")
+            local pw, pm = UnitPower("player", pt), UnitPowerMax("player", pt)
+            if pt == 1 or pt == 6 then return pw > 0 end      -- 분노 · 룬마력: 있으면
+            return pm > 0 and pw < pm
+        end)
+        if ok and r then return true end
+        for _, f in ipairs(Frames()) do if f:IsMouseOver() then return true end end
+        return false
+    end
+    local fr = CreateFrame("Frame")
+    local acc = 0
+    fr:SetScript("OnUpdate", function(_, el)
+        acc = acc + el
+        if acc >= 0.2 then
+            acc = 0
+            if ns.db and ns.db.hudFade == true and not ns.db.hudOff then
+                want = Busy() and 1 or ((tonumber(ns.db.hudFadeA) or 25) / 100)
+            else want = 1 end
+        end
+        if cur ~= want then
+            local step = el * 3
+            if cur < want then cur = math.min(want, cur + step) else cur = math.max(want, cur - step) end
+            for _, f in ipairs(Frames()) do pcall(f.SetAlpha, f, cur) end
+        end
+    end)
+    function ns.HudFadeUpdate(now)
+        acc = 1
+        if now then want = 1 end
+    end
+end

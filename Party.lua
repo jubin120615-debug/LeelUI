@@ -1172,8 +1172,17 @@ local function HideBlizzardParty()
         hooksecurefunc(pf, "UpdatePartyFrames", function(self)
             if not (ns.db and ns.db.partyHideBlizzard ~= false) then return end
             if self.PartyMemberFramePool and self.PartyMemberFramePool.EnumerateActive then
-                for m in self.PartyMemberFramePool:EnumerateActive() do pcall(m.UnregisterAllEvents, m); pcall(m.Hide, m) end
+                local fight = InCombatLockdown()
+                for m in self.PartyMemberFramePool:EnumerateActive() do
+                    pcall(m.UnregisterAllEvents, m)
+                    if not fight then pcall(m.Hide, m) end   -- 전투 중엔 숨기기가 막혀요 → 전투 끝나고 숨겨요
+                end
+                if fight then hidden.leelLater = true end
             end
+        end)
+        hidden:RegisterEvent("PLAYER_REGEN_ENABLED")
+        hidden:SetScript("OnEvent", function()
+            if hidden.leelLater then hidden.leelLater = nil; HideBlizzardParty() end
         end)
     end
 end

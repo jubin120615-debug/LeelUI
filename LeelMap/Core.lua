@@ -1268,9 +1268,11 @@ Preload = function()
         if sfx == "1" then C_Timer.After(0.3, function() SetCVar("Sound_EnableSFX", "1") end) end
     end)
 end
+_G.LeelMap_Preload = function() Preload() end   -- 르엘UI 준비 화면이 덮개 뒤에서 불러요
 ev:SetScript("OnEvent", function(_, event, arg1)
     if event == "PLAYER_ENTERING_WORLD" then
-        if not preloaded then C_Timer.After(0, Preload) end   -- 로딩 화면이 아직 덮고 있을 때 (멈춤이 안 보이게)
+        -- 르엘UI 준비 화면이 떠 있으면 그쪽이 순서대로 불러요
+        if not preloaded then C_Timer.After(0, function() if not _G.LeelUI_VeilOn then Preload() end end) end
         return
     end
     if event == "ADDON_LOADED" then
