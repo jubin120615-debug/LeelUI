@@ -4290,7 +4290,8 @@ local function MakeTracker()
         auto.fs:SetShadowColor(0, 0, 0, 1)
         auto:SetWidth((auto.fs:GetStringWidth() or 24) + 36)
         function auto.Paint()
-            local on = L0.QuestDB().on
+            local d0 = L0.QuestDB()
+            local on = d0.on and d0.accept
             auto.knob:ClearAllPoints()
             if on then
                 auto.knob:SetPoint("RIGHT", -2, 0); auto.knob:SetVertexColor(1, 1, 1, 1)
@@ -4303,13 +4304,16 @@ local function MakeTracker()
             end
         end
         auto:SetScript("OnClick", function(self)
-            local d = L0.QuestDB(); d.on = not d.on
+            local d = L0.QuestDB()
+            if d.on and d.accept then d.on = false
+            else d.on = true; d.accept = true; d.complete = true end   -- 켤 때는 받기 · 완료도 같이 켜요
             self.Paint()
             Print(d.on and "자동 퀘스트 켰어요 (말 걸면 받고 · 완료까지)" or "자동 퀘스트 껐어요 (직접 받고 완료해요)")
             if GameTooltip:GetOwner() == self then self:GetScript("OnEnter")(self) end
         end)
         auto:SetScript("OnEnter", function(self)
-            local on = L0.QuestDB().on
+            local d0 = L0.QuestDB()
+            local on = d0.on and d0.accept
             GameTooltip:SetOwner(self, "ANCHOR_LEFT"); ns.T.Set(GameTooltip, on and "자동 퀘스트 켜짐" or "자동 퀘스트 꺼짐")
             ns.T.Add(GameTooltip, "클릭: 켜기 · 끄기 (말 걸면 받기 · 완료)", 0.8, 0.8, 0.8)
             ns.T.Add(GameTooltip, "자세한 설정: 허브 > 퀘스트 자동", 0.6, 0.6, 0.6); GameTooltip:Show()

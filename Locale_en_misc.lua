@@ -785,3 +785,5 @@ E["자동 퀘스트 켰어요 (말 걸면 받고 · 완료까지)"] = "Auto ques
 E["자동 퀘스트 껐어요 (직접 받고 완료해요)"] = "Auto quests off (accept and turn in yourself)"
 E["파티 퀘 진행도 · 자동 퀘 스위치 · 징 나누기 고침"] = "Party quest progress · auto quest switch · mark sharing fix"
 E["Leel Quest 머리에 자동 퀘스트 스위치 (분홍 = 켜짐) · 파티원 얼굴 · 진행 고리가 이름이 가려져도 보여요 (나를 파티원으로 세던 것 고침) · 자동이 안 받으면 이유 한 줄 · 르엘 마크: 징이 가려진 컴퓨터에서도 파티원 징 강조 · 가방 골드 로그아웃 0 고침 · 드루이드 마나 줄 전투 중 차단 고침"] = "Auto quest switch in the Leel Quest header (pink = on) · party faces and progress rings show even when names are hidden (no longer counts yourself) · a chat line says why auto did not accept · Leel Mark: party marks highlighted even where marks are hidden · bag gold no longer saved as 0 at logout · druid mana line combat block fix"
+E["자동 퀘 스위치 고침"] = "Auto quest switch fix"
+E["Leel Quest 자동 스위치를 켜면 자동 수락 · 완료도 같이 켜져요 (허브에서 자동 수락만 꺼져 있으면 안 받던 것 고침)"] = "Turning on the Leel Quest auto switch also turns on auto accept and turn-in (fixes quests not being accepted when only auto accept was off in the Hub)"
