@@ -87,7 +87,7 @@ local function Collect()
                     else
                         local name = C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(info.itemID)
                         e = { id = info.itemID, icon = info.iconFileID, q = info.quality, link = info.hyperlink,
-                              name = name or (info.hyperlink and info.hyperlink:match("%[(.-)%]")) or ("#" .. info.itemID),
+                              name = (not com and info.hyperlink and info.hyperlink:match("%[(.-)%]")) or name or (info.hyperlink and info.hyperlink:match("%[(.-)%]")) or ("#" .. info.itemID),   -- 장비는 접미사까지 ("기사의 …")
                               bag = bag, slot = slot, loc = loc, qty = info.stackCount or 1, com = com, state = "wait" }
                         local o = old[k]
                         if o and o.id == e.id then   -- 앞서 찾은 값 · 상태 이어받기
@@ -145,6 +145,7 @@ end
 -- 최저가 찾기 (하나씩 · 게임이 숨 돌릴 틈을 주면서)
 ----------------------------------------------------------------------
 local finding     -- 지금 찾는 줄
+local seenKey = {} -- itemID → 게임이 결과를 돌려준 열쇠 (블리자드 등록 창이 찾은 것도)
 local findT = 0
 local Paint
 local function Sorts() return { { sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false } } end
@@ -159,15 +160,33 @@ local function ReadResult(e)
         local mine = (r.numOwnerItems or 0) > 0 and (r.numOwnerItems or 0) >= (r.quantity or 0)
         return r.unitPrice, mine
     else
-        local okN, n = pcall(AHC.GetNumItemSearchResults, e.key)
+        -- 게임이 돌려준 열쇠(접미사 · 템레벨까지 맞는 것)가 있으면 그걸로 읽어요
+        local key, okN, n
+        for _, k in ipairs({ e.rkey, seenKey[e.id], e.key }) do
+            if k then
+                key = k; okN, n = pcall(AHC.GetNumItemSearchResults, k)
+                if okN and n and n > 0 then break end
+            end
+        end
         if not okN or not n or n == 0 then return false end
-        local ok, r = pcall(AHC.GetItemSearchResultInfo, e.key, 1)
+        local ok, r = pcall(AHC.GetItemSearchResultInfo, key, 1)
         if not (ok and r and r.buyoutAmount and r.buyoutAmount > 0) then return false end
         return r.buyoutAmount / math.max(1, r.quantity or 1), r.containsOwnerItem and true or false
     end
 end
 
+-- 경매장 시세 책에 방금(age초 안) 적힌 최저가 (블리자드 창 · 오른쪽 클릭으로 본 것도 여기 적혀요)
+local function Fresh(id, age)
+    local book = ns.AH and ns.AH.Book and ns.AH.Book()
+    local r = book and book[id]
+    if r and r.m and r.m > 0 and r.t and time() - r.t <= age then return r.m end
+end
+
 local function Found(e, low, mine)
+    if low == false and not e.com then
+        local f = Fresh(e.id, 1800)   -- 내 찾기가 빈손이어도 30분 안에 본 시세가 있으면 그걸로
+        if f then low, mine = f, false end
+    end
     e.low, e.mine, e.lowT = low, mine, GetTime()
     if low and low ~= false and not mine then Remember(e.id, low) end
     Decide(e)
@@ -177,7 +196,7 @@ end
 
 local function FindNext()
     if finding then
-        if GetTime() - findT > 4 then
+        if GetTime() - findT > 2.5 then
             -- 대답 이벤트를 못 받았어도 결과가 와 있을 수 있어요 → 직접 읽어 봐요
             local e = finding
             local low, mine = ReadResult(e)
@@ -196,13 +215,20 @@ local function FindNext()
     if not (AHC.IsThrottledMessageSystemReady and AHC.IsThrottledMessageSystemReady()) then return end
     for _, e in ipairs(list) do
         if e.state == "wait" or (e.state == "ready" and e.lowT and GetTime() - e.lowT > 90) then
+            -- 장비: 방금(5분 안) 본 시세가 있으면 찾지 않고 바로 (빨라요)
+            local f = not e.com and e.state == "wait" and Fresh(e.id, 300)
+            if f then Found(e, f, false) return end
             if not e.key then
                 if e.com then e.key = AHC.MakeItemKey(e.id)
                 else local ok, k = pcall(AHC.GetItemKeyFromItem, e.loc); e.key = ok and k or AHC.MakeItemKey(e.id) end
             end
             finding, findT = e, GetTime()
             e.state = "find"
-            local ok = pcall(AHC.SendSearchQuery, e.key, Sorts(), true)
+            e.rkey = nil
+            -- 장비는 경매 등록 창과 같은 찾기 (접미사 붙은 녹색 템도 같은 것끼리)
+            local ok
+            if not e.com and not e.wide and AHC.SendSellSearchQuery then ok = pcall(AHC.SendSellSearchQuery, e.key, Sorts(), true) end
+            if not ok then ok = pcall(AHC.SendSearchQuery, e.key, Sorts(), true) end
             if not ok then Found(e, false, false) end
             if Paint then Paint() end
             return
@@ -449,9 +475,39 @@ ev:SetScript("OnEvent", function(_, e, a1)
             if low then Found(finding, low, mine) end
         end
     elseif e == "ITEM_SEARCH_RESULTS_UPDATED" or e == "ITEM_SEARCH_RESULTS_ADDED" then
-        if finding and not finding.com and type(a1) == "table" and finding.key and a1.itemID == finding.key.itemID then
-            local low, mine = ReadResult(finding)
-            if low then Found(finding, low, mine) end   -- 비어 있으면 조금 더 기다려요 (결과가 나눠 와요)
+        if type(a1) == "table" and a1.itemID then
+            seenKey[a1.itemID] = a1
+            -- 시세 책이 적힌 뒤에 "매물 없음" 줄을 한 번 더 채워요
+            C_Timer.After(0.3, function()
+                local ch
+                for _, x in ipairs(list) do
+                    if not x.com and x.low == false and x.state ~= "done" then
+                        local f = Fresh(x.id, 120)
+                        if f then x.low, x.mine, x.lowT = f, false, GetTime(); Decide(x); ch = true end
+                    end
+                end
+                if ch and Paint then Paint() end
+            end)
+            if finding and not finding.com and a1.itemID == finding.id then
+                finding.rkey = a1
+                local low, mine = ReadResult(finding)
+                if low then Found(finding, low, mine) end   -- 비어 있으면 조금 더 기다려요 (결과가 나눠 와요)
+            else
+                -- 블리자드 등록 창이 찾은 결과도 같은 템 줄에 채워요 (아직 매물 없음 · 기다리는 줄)
+                for _, x in ipairs(list) do
+                    if not x.com and x.id == a1.itemID and x ~= finding and (x.state == "wait" or x.low == false) then
+                        x.rkey = a1
+                        local low, mine = ReadResult(x)
+                        if low then
+                            x.low, x.mine, x.lowT = low, mine, GetTime()
+                            if not mine then Remember(x.id, low) end
+                            if x.state == "wait" then x.state = "ready" end
+                            Decide(x)
+                        end
+                    end
+                end
+                if Paint then Paint() end
+            end
         end
     elseif e == "AUCTION_HOUSE_AUCTION_CREATED" then
         local p = posting
