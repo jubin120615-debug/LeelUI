@@ -2,7 +2,7 @@
 ## Title: |cfff2b3c2르엘|r UI
 ## Notes: 르엘을 위한 연분홍 통합 UI
 ## Author: Leel
-## Version: 1.3.60
+## Version: 1.3.61
 ## X-Curse-Project-ID: 1794148
 ## Category: 르엘 UI
 ## SavedVariables: LeelUIDB
@@ -49,6 +49,7 @@ Hub.lua
 Minimap.lua
 MinimapSkin.lua
 ActionBars.lua
+FlightBar.lua
 RankUp.lua
 Chat.lua
 Cursor.lua

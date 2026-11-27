@@ -640,6 +640,9 @@ local MODULES = {
             { t = "toggle", label = "비행 중 내리기 구슬", hint = "와이번 · 그리폰 · 박쥐를 탈 때 가운데 원 위에 · 누르면 다음 비행 지점에서 내려요", sec = 3,
               get = function() return not (ns.ABarDB and ns.ABarDB().taxiBtn == false) end,
               set = function(v) if ns.ABarDB then ns.ABarDB().taxiBtn = v and true or false end; if ns.ABarTaxiUpdate then ns.ABarTaxiUpdate() end end },
+            { t = "toggle", label = "비행 남은 시간 띠", hint = "비행할 때 화면 위 가운데 · 경유지 · 남은 시간 · 도착 시각 · 남은 거리 (/르엘비행 = 미리 보기)", sec = 3,
+              get = function() return ns.db.flyBar ~= false end,
+              set = function(v) ns.db.flyBar = v and true or false; if ns.FlightBarUpdate then ns.FlightBarUpdate() end end },
             { t = "seg", label = "페이지 넘기기 키", hint = "왼쪽 10칸만 바뀌어요", sec = 3,
               dimIf = function() return not (ns.ABarDB and ns.ABarDB().style == "wing") end, dimWhy = "날개 모양에서만",
               options = { { "끔", "off" }, { "Z · X", "zx" } },
@@ -1825,6 +1828,7 @@ local MOVE_SIZE = {
 }
 local CMP_W = 330         -- 크기 · 위치: 오른쪽 좁은 허브 너비
 local NEWS = {
+    { "1.3.61", "비행 남은 시간 띠 · 지도 좌표 찍기 새 모양 · 사냥꾼 펫 만족도 고침", "와이번 · 그리폰 · 박쥐를 타면 화면 위 가운데 띠 (목적지 · 경유지 줄 · 남은 시간 · 도착 시각 · 남은 거리 · 다음 지점에서 내리기 · /르엘비행 미리 보기) · M 지도 좌표 찍기가 위 좌표 알약 안으로 (분홍 핀 = 칸 열기 · 마우스 좌표 · 내 위치 · 최근 핀 3개) · 펫 만족도 · 충성도 고리가 진짜 펫에서 안 나오던 것 고침" },
     { "1.3.60", "펫 만족도 · 충성도 고리 · 휴식 Zz · 퀘 내용 전부 · 로아식 초대", "사냥꾼 펫 초상화 고리 6조각 (색 = 만족도 · 조각 = 충성도) · 시험 펫 (허브 > 펫) · 쉬는 곳이면 내 초상화에 Zz 배지 + 떠오르는 z · L 퀘스트 판 내용 끝까지 + 할 일 강조 · 로아식 대상 줄 오른쪽 클릭 = 파티 초대 메뉴 · 템 추천 점수 고침" },
     { "1.3.59", "모던 액션바 옆 바 18칸", "모던 액션바: 화면 오른쪽 끝 옆 바 18칸 (바 8 + 남는 칸) · 쪽을 넘겨도 그대로 · 빈 칸은 투명, 스킬을 집으면 분홍 점선 · 손잡이 끌기 = 옮기기 · 오른쪽 클릭 = 줄 바꾸기 · 빠른 설정에서 끄기" },
     { "1.3.58", "경매장 녹색 장비 시세 고침", "일괄 등록: 녹색 장비(접미사 템)도 블리자드 등록 창과 같은 최저가 −1동 · 방금 본 시세를 바로 써서 빨라요 · 오른쪽 클릭으로 본 시세도 바로 채워요 · 목록에 접미사까지 이름 표시" },

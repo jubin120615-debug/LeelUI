@@ -394,6 +394,8 @@ do
             if f:GetFrameLevel() < lv then f:SetFrameLevel(lv) end
             right = right - SZ - GAP
         end
+        wm.leelToolsRight = right + GAP
+        if _G.LeelMapPlaceHdr then _G.LeelMapPlaceHdr() end
         placing = false
     end
     local hooked
@@ -818,7 +820,7 @@ local function CreateCoords()
         local hp = coords.hdr
         if hp then
             hp.me:SetText(coords.me:GetText() or "-"); hp.cur:SetText(cs or "-")
-            local w = math.floor(12 + hp.me:GetStringWidth() + 7 + hp.dot:GetStringWidth() + 7 + hp.curL:GetStringWidth() + 5 + math.max(52, hp.cur:GetStringWidth()) + 12)
+            local w = math.floor(12 + hp.me:GetStringWidth() + 7 + hp.dot:GetStringWidth() + 7 + hp.curL:GetStringWidth() + 5 + math.max(52, hp.cur:GetStringWidth()) + 6 + (hp.extra or 6))
             if hp.w ~= w then hp.w = w; hp:SetWidth(w) end
         end
 
@@ -871,7 +873,7 @@ local function CreateCoords()
     hp:SetScript("OnClick", function()
         if coords.lastCur and coords.way then
             local box = coords.way.box
-            box:SetText(coords.lastCur); box.fromMap = coords.lastMap; box:SetFocus()
+            coords.way.open(coords.lastCur, coords.lastMap)
         end
     end)
     coords.hdr = hp
@@ -901,7 +903,7 @@ local function CreateCoords()
     cb:SetScript("OnClick", function()
         if coords.lastCur and coords.way then
             local box = coords.way.box
-            box:SetText(coords.lastCur); box.fromMap = coords.lastMap; box:SetFocus()
+            coords.way.open(coords.lastCur, coords.lastMap)
         end
     end)
     cb:SetScript("OnEnter", function(self) GameTooltip:SetOwner(self, "ANCHOR_TOP"); TipAdd("누르면 마지막 마우스 좌표를 찍기 칸에", 1, 1, 1); GameTooltip:Show() end)
@@ -928,6 +930,16 @@ local function PinAt(mapID, x, y, quiet)
         C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(mapID, x, y))
         if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then C_SuperTrack.SetSuperTrackedUserWaypoint(true) end
     end)
+    if ok and db then
+        local info = C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+        local list, out = db.recentPins or {}, {}
+        out[1] = { m = mapID, x = x, y = y, n = info and info.name }
+        for _, p in ipairs(list) do
+            if #out >= 3 then break end
+            if not (p.m == mapID and math.abs(p.x - x) < 0.001 and math.abs(p.y - y) < 0.001) then out[#out + 1] = p end
+        end
+        db.recentPins = out
+    end
     if ok and not quiet then
         local info = C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
         Print(T("%s %.1f, %.1f 에 핀을 찍었어요 · 지우기 = [찍기] 오른쪽 클릭"):format(info and info.name or "", x * 100, y * 100))
@@ -936,32 +948,40 @@ local function PinAt(mapID, x, y, quiet)
 end
 _G.LeelMapPin = PinAt
 
+-- 1안: 머리 줄 좌표 알약 안에 찍기 칸 = [나 · 마우스 | 입력 칸 (핀)]
+--   칸을 누르면 아래로 목록: 마우스 좌표 넣기 · 내 위치 넣기 · 최근 핀 · 핀 지우기
+--   지도 위에는 아무것도 안 떠요
+local WAY_W, PIN_SZ = 84, 20
 local function CreateWayBox()
     local wm = WorldMapFrame
-    local sc = wm and wm.ScrollContainer
-    if not sc or (coords and coords.way) then return end
-    local f = CreateFrame("Frame", nil, wm)
-    f:SetFrameStrata("HIGH"); f:SetFrameLevel(wm.BorderFrame:GetFrameLevel() + 14)
-    f:SetSize(186, 22)
-    -- 왼쪽 아래 작은 알약 (지도 핀보다 위)
-    f:SetFrameLevel(math.max(wm.BorderFrame:GetFrameLevel() + 14, math.min(sc:GetFrameLevel() + 9950, 9990)))
-    f:SetFrameStrata(sc:GetFrameStrata() or "HIGH")
-    f:SetSize(200, 28)
-    f:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 10, 10)
-    f:EnableMouse(true)
-    local bg = RoundTex(f, "BACKGROUND", 0, "panel", { 0.12, 0.086, 0.078 }, 0.94); bg:SetAllPoints()
-    local brim = RoundTex(f, "BORDER", 0, "rim", C.acc, 0.7); brim:SetAllPoints()
-    f.lbl = Font(f, 12, C.tx2); f.lbl:SetText("찍기"); f.lbl:SetPoint("LEFT", 12, 0)
-    local eb = CreateFrame("EditBox", nil, f)
-    eb:SetSize(92, 18); eb:SetPoint("LEFT", f.lbl, "RIGHT", 6, 0)
+    local hp = coords and coords.hdr
+    if not hp or coords.way then return end
+    local Open
+    -- 평소엔 [나 · 마우스 (핀)] 만 · 핀(또는 알약)을 누르면 마우스 자리가 입력 칸으로 바뀌어요 (알약 길이 그대로)
+    hp.extra = 4 + PIN_SZ + 3
+    -- 입력 칸
+    local eb = CreateFrame("EditBox", nil, hp)
+    eb:SetHeight(18)
+    eb:SetPoint("LEFT", hp.dot, "RIGHT", 5, 0)
+    eb:SetPoint("RIGHT", hp, "RIGHT", -(3 + PIN_SZ + 4), 0)
+    eb:Hide()
     eb:SetAutoFocus(false); eb:SetMaxLetters(24)
     if not eb:SetFont(NUM, 14, "") then eb:SetFontObject(ChatFontNormal) end
     eb:SetTextColor(1, 1, 1); eb:SetTextInsets(8, 6, 0, 0); eb:SetJustifyH("CENTER")
-    local ebg = RoundTex(eb, "BACKGROUND", 0, "panel", { 0.165, 0.122, 0.114 }); ebg:SetAllPoints()
-    local erim = RoundTex(eb, "BORDER", 0, "rim", C.acc, 0.8); erim:SetAllPoints()
-    eb.hint = Font(eb, 11, { 0.55, 0.48, 0.46 }); eb.hint:SetPoint("CENTER"); eb.hint:SetText("45.3, 62.1")
-    eb:SetScript("OnTextChanged", function(self, user) self.hint:SetShown(self:GetText() == ""); if user then self.fromMap = nil end end)
-    eb:SetScript("OnEscapePressed", eb.ClearFocus)
+    local ebg = eb:CreateTexture(nil, "BACKGROUND"); ebg:SetTexture(MEDIA .. "pill22")
+    pcall(ebg.SetTextureSliceMargins, ebg, 11, 11, 11, 11); ebg:SetAllPoints(); ebg:SetVertexColor(0.11, 0.08, 0.085, 1)
+    local erim = eb:CreateTexture(nil, "BORDER"); erim:SetTexture(MEDIA .. "pill22rim")
+    pcall(erim.SetTextureSliceMargins, erim, 11, 11, 11, 11); erim:SetAllPoints(); erim:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0)
+    eb.hint = Font(eb, 11, { 0.55, 0.47, 0.46 }); eb.hint:SetPoint("CENTER"); eb.hint:SetText("45.3, 62.1")
+    -- 핀 단추 (분홍 동그라미 + 가운데 점)
+    local pb = CreateFrame("Button", nil, hp)
+    pb:SetSize(PIN_SZ, PIN_SZ); pb:SetPoint("RIGHT", hp, "RIGHT", -3, 0)
+    pb:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    local pbg = pb:CreateTexture(nil, "BACKGROUND"); pbg:SetTexture(MEDIA .. "circle"); pbg:SetAllPoints()
+    pbg:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+    local pdot = pb:CreateTexture(nil, "ARTWORK"); pdot:SetTexture(MEDIA .. "circle"); pdot:SetSize(7, 7); pdot:SetPoint("CENTER")
+    pdot:SetVertexColor(0.16, 0.08, 0.1, 1)
+
     local function Go()
         local x, y = ParseXY(eb:GetText())
         if not x then Print("좌표를 \"45.3, 62.1\" 처럼 넣어 주세요") return end
@@ -970,25 +990,114 @@ local function CreateWayBox()
         local m = eb.fromMap or (stitched and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")) or wm:GetMapID()
         if PinAt(m, x, y) then eb:ClearFocus() end
     end
-    eb:SetScript("OnEnterPressed", Go)
-    local go = CreateFrame("Button", nil, f)
-    go:SetSize(44, 18); go:SetPoint("LEFT", eb, "RIGHT", 6, 0)
-    go:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    local gbg = RoundTex(go, "BACKGROUND", 0, "panel", C.acc); gbg:SetAllPoints()
-    go.fs = Font(go, 12, C.ink); go.fs:SetShadowColor(0, 0, 0, 0); go.fs:SetPoint("CENTER", 0, 0); go.fs:SetText("찍기")
-    go:SetScript("OnClick", function(_, btn)
-        if btn == "RightButton" then
-            if C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
-            Print("핀을 지웠어요")
-        else Go() end
+    local function Clear()
+        if C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+        Print("핀을 지웠어요")
+    end
+
+    -- 아래로 펼치는 목록
+    local dd = CreateFrame("Frame", nil, hp)
+    dd:SetFrameStrata("DIALOG"); dd:SetWidth(214)
+    dd:SetPoint("TOPRIGHT", pb, "BOTTOMRIGHT", 3, -8)
+    local dbg = RoundTex(dd, "BACKGROUND", 0, "panel", { 0.11, 0.078, 0.086 }, 0.97); dbg:SetAllPoints()
+    local drim = RoundTex(dd, "BORDER", 0, "rim", C.acc, 0.85); drim:SetAllPoints()
+    dd:EnableMouse(true); dd:Hide()
+    local rows = {}
+    local function Row(i)
+        local r = rows[i]
+        if r then return r end
+        r = CreateFrame("Button", nil, dd)
+        r:SetHeight(24); r:SetPoint("TOPLEFT", 6, -6 - (i - 1) * 25); r:SetPoint("TOPRIGHT", -6, -6 - (i - 1) * 25)
+        r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        r.hl = r:CreateTexture(nil, "BACKGROUND"); r.hl:SetTexture(MEDIA .. "pill22")
+        pcall(r.hl.SetTextureSliceMargins, r.hl, 11, 11, 11, 11); r.hl:SetAllPoints()
+        r.hl:SetVertexColor(0.23, 0.1, 0.12, 1); r.hl:Hide()
+        r.l = Font(r, 12, C.tx); r.l:SetPoint("LEFT", 9, 0)
+        r.r = Font(r, 11, C.tx2); r.r:SetPoint("RIGHT", -8, 0); r.r:SetJustifyH("RIGHT")
+        r:SetScript("OnEnter", function(self) self.hl:Show() end)
+        r:SetScript("OnLeave", function(self) self.hl:Hide() end)
+        r:SetScript("OnClick", function(self, btn) if self.fn then self.fn(btn) end end)
+        rows[i] = r
+        return r
+    end
+    local function Put(text, m)
+        Open(text, m)
+        eb:HighlightText(0, 0); eb:SetCursorPosition(#(text or ""))
+    end
+    local function Fill()
+        local list = {}
+        if coords.lastCur then
+            list[#list + 1] = { "마우스 좌표 넣기", coords.lastCur, function() Put(coords.lastCur, coords.lastMap) end }
+        end
+        local meMap = C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+        local me = meMap and PlayerXY(meMap)
+        if me then list[#list + 1] = { "내 위치 넣기", me, function() Put(me, meMap) end } end
+        for _, p in ipairs(db.recentPins or {}) do
+            local txt = ("%.1f, %.1f"):format(p.x * 100, p.y * 100)
+            list[#list + 1] = { "|cffffd6e0" .. txt .. "|r", p.n or "", function()
+                Put(txt, p.m); if PinAt(p.m, p.x, p.y) then eb:ClearFocus() end
+            end, true }
+        end
+        local okH, has = pcall(function() return C_Map.HasUserWaypoint and C_Map.HasUserWaypoint() end)
+        if okH and has then
+            list[#list + 1] = { "|cffff8fab" .. T("핀 지우기") .. "|r", "", function() Clear(); eb:ClearFocus() end, true }
+        end
+        for i, it in ipairs(list) do
+            local r = Row(i)
+            r.l:SetText(it[4] and it[1] or T(it[1])); r.r:SetText(it[2] or ""); r.fn = it[3]; r:Show()
+        end
+        for i = #list + 1, #rows do rows[i]:Hide() end
+        dd:SetHeight(12 + #list * 25 - 1)
+        dd:SetShown(#list > 0)
+    end
+    local hideAt
+    local function HideSoon()
+        local me = {}; hideAt = me
+        C_Timer.After(0.2, function()
+            if hideAt == me and not eb:HasFocus() and not dd:IsMouseOver() then dd:Hide() end
+        end)
+    end
+    dd:SetScript("OnLeave", function() if not eb:HasFocus() then HideSoon() end end)
+    wm:HookScript("OnHide", function() dd:Hide(); eb:ClearFocus() end)
+
+    eb:SetScript("OnTextChanged", function(self, user) self.hint:SetShown(self:GetText() == ""); if user then self.fromMap = nil end end)
+    eb:SetScript("OnEditFocusGained", function()
+        erim:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1); Fill()
     end)
-    go:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP"); TipAdd("지금 보는 지도에 핀 + 길 안내", 1, 1, 1)
+    eb:SetScript("OnEditFocusLost", function()
+        erim:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0); HideSoon()
+        eb:Hide(); hp.curL:Show(); hp.cur:Show()
+    end)
+    eb:SetScript("OnEscapePressed", eb.ClearFocus)
+    eb:SetScript("OnEnterPressed", Go)
+
+    pb:SetScript("OnClick", function(_, btn)
+        if btn == "RightButton" then Clear()
+        elseif eb:IsShown() and ParseXY(eb:GetText()) then Go()
+        else coords.way.open() end
+    end)
+    pb:SetScript("OnEnter", function(self)
+        pbg:SetVertexColor(1, 0.84, 0.88, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); TipAdd("지금 보는 지도에 핀 + 길 안내", 1, 1, 1)
         TipAdd("오른쪽 클릭: 핀 지우기", C.tx2[1], C.tx2[2], C.tx2[3]); GameTooltip:Show()
     end)
-    go:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    f.box = eb
-    if coords then coords.way = f end
+    pb:SetScript("OnLeave", function() pbg:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1); GameTooltip:Hide() end)
+
+    -- 알약을 오른쪽 단추들 바로 왼쪽에 붙여서 왼쪽으로 늘어나게 (지역 이름 쪽과 안 부딪히게)
+    function _G.LeelMapPlaceHdr()
+        local r = wm.leelToolsRight or -160
+        hp:ClearAllPoints()
+        hp:SetPoint("RIGHT", wm, "TOPRIGHT", r - 8, ROW_Y)
+    end
+    _G.LeelMapPlaceHdr()
+
+    eb.dd = dd
+    function Open(text, m)
+        hp.curL:Hide(); hp.cur:Hide(); eb:Show()
+        if text then eb:SetText(text); eb.fromMap = m end
+        eb:SetFocus(); eb:SetCursorPosition(#(eb:GetText() or ""))
+    end
+    coords.way = { box = eb, open = Open }
 end
 
 ----------------------------------------------------------------------

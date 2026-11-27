@@ -1714,6 +1714,7 @@ end
 -- 펫 만족도 · 충성도 (사냥꾼): 진짜 펫 값, 시험 중이면 시험 값
 --   돌려주는 값: 만족도(1 불만 · 2 보통 · 3 행복), 피해 %, 충성도 흐름(+ 오름 · - 내림), 충성도 단계(1~6), 단계 이름, 시험인지
 local LOY_NAME = { "반항", "제멋대로", "순종", "믿음직", "충실", "단짝" }
+local LOY_EN = { "rebellious", "unruly", "submissive", "dependable", "faithful", "best friend" }
 local MOOD_NAME = { "불만", "보통", "행복" }
 local MOOD_COL = { { 1, 0.42, 0.42 }, { 1, 0.83, 0.42 }, { 0.5, 0.84, 0.48 } }
 local function PetMood()
@@ -1724,16 +1725,28 @@ local function PetMood()
         local lv = tonumber(T.loy) or (st % 6 + 1)
         return h, ({ 75, 100, 125 })[h], (h == 3 and 1) or (h == 1 and -1) or 0, lv, LOY_NAME[lv], true
     end
-    local ok, h, dmg, rate = pcall(GetPetHappiness)
+    -- 포에버: 만족도는 C_PetInfo.GetPetHappiness (예전 GetPetHappiness 는 없음 · 블리자드 펫 창도 이걸 써요)
+    local HappyFn = (C_PetInfo and C_PetInfo.GetPetHappiness) or GetPetHappiness
+    if not HappyFn then return nil end
+    local ok, h, dmg, rate = pcall(HappyFn)
     if not ok or type(h) ~= "number" or ns.IsSecret(h) then return nil end
     if ns.IsSecret(dmg) then dmg = nil end
     if ns.IsSecret(rate) then rate = nil end
     local lv, nm
-    if GetPetLoyalty then
-        local ok2, v = pcall(GetPetLoyalty)
+    local LoyFn = (C_PetInfo and C_PetInfo.GetPetLoyalty) or GetPetLoyalty
+    if LoyFn then
+        local ok2, v = pcall(LoyFn)
         if ok2 and v ~= nil and not ns.IsSecret(v) then
             if type(v) == "number" then lv = v
-            elseif type(v) == "string" then lv = tonumber(v:match("(%d+)")); nm = v:match("%((.-)%)") end
+            elseif type(v) == "string" then
+                lv = tonumber(v:match("(%d+)")); nm = v:match("%((.-)%)")
+                if not lv then   -- 숫자 없이 이름만 오면 이름으로 단계 찾기
+                    local key = (nm or v):lower()
+                    for i, n in ipairs(LOY_NAME) do if key:find(n, 1, true) then lv = i end end
+                    for i, n in ipairs(LOY_EN) do if key:find(n, 1, true) then lv = i end end
+                    if lv then nm = nm or v end
+                end
+            end
         end
     end
     if lv and (lv < 1 or lv > 6) then lv = nil end
@@ -2479,7 +2492,16 @@ function ns:CreateHUD()
         local ok, h, dmg, loy = pcall(GetPetHappiness)
         local sec = issecretvalue and h ~= nil and issecretvalue(h)
         P("결과: ok=" .. tostring(ok) .. " · 만족도=" .. (sec and "(숨김 값)" or tostring(h)) .. " · 피해=" .. tostring(not sec and dmg or "?") .. " · 충성=" .. tostring(not sec and loy or "?"))
-        P("펫 칸: " .. tostring(pet and pet:IsShown()) .. " · 얼굴 표시: " .. tostring(pet and pet.moodFrame and pet.moodFrame:IsShown()))
+        if C_PetInfo and C_PetInfo.GetPetHappiness then
+            local okc, ch, cd, cr = pcall(C_PetInfo.GetPetHappiness)
+            P("C_PetInfo 만족도: ok=" .. tostring(okc) .. " · " .. tostring(ch) .. " · 피해=" .. tostring(cd) .. " · 흐름=" .. tostring(cr))
+        end
+        local LoyFn = (C_PetInfo and C_PetInfo.GetPetLoyalty) or GetPetLoyalty
+        local okL, lv = pcall(function() return LoyFn and LoyFn() end)
+        P("충성도: " .. tostring(okL and lv))
+        local mh, _, _, mlv = PetMood()
+        P("고리: " .. tostring(pet and pet.ringOn) .. " · 읽은 만족도=" .. tostring(mh) .. " · 충성 단계=" .. tostring(mlv)
+            .. " · 설정 끔=" .. tostring(ns.db and ns.db.petMoodOff and true or false) .. " · 버전 " .. tostring(ns.VERSION or (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata("LeelUI", "Version"))))
         if C_PetInfo then P("C_PetInfo 있음") end
         if PetFrameHappiness then P("블리자드 펫 만족도 그림: " .. tostring(PetFrameHappiness:IsShown())) end
     end
