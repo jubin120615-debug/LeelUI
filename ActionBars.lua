@@ -1567,7 +1567,7 @@ local function Relayout()
 end
 local function BuildCard()
     card = CreateFrame("Frame", "LeelUI_RingCard", UIParent)
-    card:SetSize(262, 232); card:SetFrameStrata("DIALOG"); card:EnableMouse(true); card:Hide()
+    card:SetSize(262, 256); card:SetFrameStrata("DIALOG"); card:EnableMouse(true); card:Hide()
     local edge = card:CreateTexture(nil, "BACKGROUND"); edge:SetAllPoints(); edge:SetColorTexture(1, 0.35, 0.29, 0.75)
     local bg = card:CreateTexture(nil, "BORDER"); bg:SetPoint("TOPLEFT", 1, -1); bg:SetPoint("BOTTOMRIGHT", -1, 1); bg:SetColorTexture(0.047, 0.043, 0.06, 0.96)
     local t = ns.Font(card, 13.5, { 1, 1, 1 }); t:SetPoint("TOPLEFT", 12, -10); t:SetText("빠른 설정")
@@ -1582,7 +1582,8 @@ local function BuildCard()
         local Pp = wing and wing.pulse
         if Pp then Pp.want = (v and Pp.on and UnitAffectingCombat("player")) and true or false; if Pp.want then Pp.frame:Show() end end
     end)); y = y - 24
-    add(Toggle(card, y, "오른쪽 쪽 탭", function() return DB().rtabs ~= false end, function(v) DB().rtabs = v and true or false; Relayout() end)); y = y - 26
+    add(Toggle(card, y, "오른쪽 쪽 탭", function() return DB().rtabs ~= false end, function(v) DB().rtabs = v and true or false; Relayout() end)); y = y - 24
+    add(Toggle(card, y, "옆 바 (18칸)", function() return DB().side ~= false end, function(v) DB().side = v and true or false; Relayout() end)); y = y - 26
     -- 원 보기
     local ml = ns.Font(card, 11.5, { 0.86, 0.84, 0.86 }); ml:SetPoint("TOPLEFT", 12, y); ml:SetText("원 보기")
     local segs = {}
@@ -2115,6 +2116,162 @@ local function WRightPaint()
         t.bar:SetShown(on)
     end
 end
+-- 칸 숨기기 (안 보이는 틀로 옮겨요 · 다시 쓰면 그 틀로 다시 옮겨져요)
+local function Stash(b)
+    if b and b:GetParent() ~= hider then b.leelOrigParent = b.leelOrigParent or b:GetParent(); b:SetParent(hider) end
+end
+
+----------------------------------------------------------------------
+-- 옆 바 (모던): 바 8 12칸 + 쪽에 못 들어간 남은 칸 6개(오른쪽 바 2 · 바 6의 10~12) = 18칸
+--   화면 오른쪽 끝 세로 · 빈 칸도 보여서 끌어다 놓기 쉬워요 · 손잡이 끌기 = 옮기기 · 오른쪽 클릭 = 줄 바꾸기
+----------------------------------------------------------------------
+local side
+local SIDE_COLS = { 2, 1, 3, 6, 9 }
+local function SideButtons()
+    local t = {}
+    for i = 1, 12 do local b = G("MultiBar7Button" .. i); if b then t[#t + 1] = b end end
+    for _, pre in ipairs({ "MultiBarLeftButton", "MultiBar6Button" }) do
+        for i = 10, 12 do local b = G(pre .. i); if b then t[#t + 1] = b end end
+    end
+    return t
+end
+local function SideGrid(b)
+    -- 빈 칸도 늘 보이기 (르엘 몫 표시 64 · 블리자드 "늘 보이기" 설정과 따로)
+    if b.SetShowGrid then pcall(b.SetShowGrid, b, true, 64)
+    elseif b.ShowGrid then pcall(b.ShowGrid, b, 64)
+    else pcall(b.SetAttribute, b, "showgrid", 1) end
+    pcall(b.Show, b)
+end
+-- 1안: 빈 칸은 투명 (클릭도 안 막아요) · 스킬 · 아이템을 집어 들면 분홍 점선 · 바에 마우스 = 옅게
+local function SideHas(b)
+    local a = b.action
+    if not a and b.GetAttribute then local ok, v = pcall(b.GetAttribute, b, "action"); if ok then a = v end end
+    if not a and b.CalculateAction then local ok, v = pcall(b.CalculateAction, b); if ok then a = v end end
+    return a and HasAction(a) and true or false
+end
+local function SideDrop(b)
+    if b.leelDrop then return b.leelDrop end
+    local f = CreateFrame("Frame", nil, b)
+    f:SetAllPoints(); f:SetFrameLevel(b:GetFrameLevel() + 5)
+    local pk = { 0.949, 0.702, 0.761 }
+    local fill = f:CreateTexture(nil, "ARTWORK"); fill:SetPoint("TOPLEFT", 2, -2); fill:SetPoint("BOTTOMRIGHT", -2, 2)
+    fill:SetColorTexture(pk[1], pk[2], pk[3], 0.14)
+    -- 점선 테 (짧은 조각을 이어서 · 칸 크기가 바뀌면 다시 놓아요)
+    local dashes = {}
+    for side4 = 1, 4 do
+        for i = 0, 4 do
+            local t = f:CreateTexture(nil, "OVERLAY"); t:SetColorTexture(pk[1], pk[2], pk[3], 0.95)
+            dashes[#dashes + 1] = { t = t, s = side4, i = i }
+        end
+    end
+    local function Place()
+        local w, h = f:GetSize()
+        if not w or w <= 0 then return end
+        for _, d in ipairs(dashes) do
+            local t, a, len = d.t, d.i / 5, 0.6 / 5
+            t:ClearAllPoints()
+            if d.s == 1 then t:SetSize(w * len, 2); t:SetPoint("TOPLEFT", f, "TOPLEFT", w * a, 0)
+            elseif d.s == 2 then t:SetSize(w * len, 2); t:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", w * a, 0)
+            elseif d.s == 3 then t:SetSize(2, h * len); t:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -h * a)
+            else t:SetSize(2, h * len); t:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, -h * a) end
+        end
+    end
+    f:SetScript("OnSizeChanged", Place); f:SetScript("OnShow", Place)
+    f:Hide()
+    b.leelDrop = f
+    return f
+end
+local function SidePaint()
+    if not side or not side:IsShown() or not side.btns then return end
+    local drag = GetCursorInfo and GetCursorInfo() ~= nil
+    local hover = side:IsMouseOver() or (side.grip and side.grip:IsMouseOver())
+    local combat = InCombatLockdown()
+    for _, b in ipairs(side.btns) do
+        local has = SideHas(b)
+        local dp = SideDrop(b)
+        if has then b:SetAlpha(1); dp:Hide()
+        elseif drag then b:SetAlpha(1); dp:Show()
+        elseif hover then b:SetAlpha(0.3); dp:Hide()
+        else b:SetAlpha(0); dp:Hide() end
+        -- 빈 칸은 클릭을 안 막아요 (뒤의 창을 누를 수 있게) · 집어 들었을 땐 놓을 수 있게 켜요
+        if not combat then pcall(b.EnableMouse, b, has or drag) end
+    end
+end
+
+local function WSide(S, G0)
+    if InCombatLockdown() then return end
+    local d = DB()
+    local btns = SideButtons()
+    if d.side == false then
+        for _, b in ipairs(btns) do Stash(b) end
+        if side then side:Hide() end
+        return
+    end
+    if not side then
+        side = CreateFrame("Frame", "LeelUI_SideBar", holder)
+        side:SetMovable(true); side:SetClampedToScreen(true)
+        local g = CreateFrame("Button", nil, side)
+        g:SetHeight(10); g:SetPoint("BOTTOMLEFT", side, "TOPLEFT", 0, 3); g:SetPoint("BOTTOMRIGHT", side, "TOPRIGHT", 0, 3)
+        g:RegisterForClicks("RightButtonUp"); g:RegisterForDrag("LeftButton")
+        g.t = g:CreateTexture(nil, "ARTWORK"); g.t:SetAllPoints(); g.t:SetColorTexture(C.acc[1], C.acc[2], C.acc[3], 1)
+        g:SetAlpha(0.35)
+        g:SetScript("OnDragStart", function() if not InCombatLockdown() then side:StartMoving() end end)
+        g:SetScript("OnDragStop", function()
+            side:StopMovingOrSizing()
+            local pt, _, rp, x, y = side:GetPoint(1)
+            DB().sidePos = { pt, rp, math.floor(x + 0.5), math.floor(y + 0.5) }
+        end)
+        g:SetScript("OnClick", function()
+            if InCombatLockdown() then P("전투가 끝나면 바꿀 수 있어요.") return end
+            local cur, nx = DB().sideCols or 2, 1
+            for i, c in ipairs(SIDE_COLS) do if c == cur then nx = i % #SIDE_COLS + 1 end end
+            DB().sideCols = SIDE_COLS[nx]
+            if ns.ABarRelayout then ns.ABarRelayout() end
+        end)
+        g:SetScript("OnEnter", function(self)
+            self:SetAlpha(1)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT"); TTS("옆 바 (18칸)", 1, 1, 1)
+            TT("끌기: 옮기기 · 오른쪽 클릭: 줄 바꾸기", 0.8, 0.8, 0.8)
+            TT("바 8 + 오른쪽 바 2 · 바 6의 남은 칸 · 쪽을 넘겨도 그대로", 0.6, 0.6, 0.6)
+            TT("끄기: 액션바 빠른 설정 > 옆 바", 0.6, 0.6, 0.6)
+            GameTooltip:Show()
+        end)
+        g:SetScript("OnLeave", function(self) self:SetAlpha(0.35); GameTooltip:Hide() end)
+        side.grip = g
+        -- 빈 칸 보이기 · 숨기기
+        local ev = CreateFrame("Frame", nil, side)
+        for _, e in ipairs({ "CURSOR_CHANGED", "ACTIONBAR_SLOT_CHANGED", "PLAYER_REGEN_ENABLED", "UPDATE_BINDINGS" }) do pcall(ev.RegisterEvent, ev, e) end
+        ev:SetScript("OnEvent", function() C_Timer.After(0, SidePaint) end)
+        local acc, wasHover = 0, false
+        side:SetScript("OnUpdate", function(_, el)
+            acc = acc + el
+            if acc < 0.15 then return end
+            acc = 0
+            local h = side:IsMouseOver() or g:IsMouseOver()
+            if h ~= wasHover then wasHover = h; SidePaint() end
+        end)
+    end
+    side.btns = btns
+    side:Show()
+    local cols = d.sideCols or 2
+    local n = #btns
+    local rows = math.ceil(n / cols)
+    side:SetSize(math.max(1, cols * S + (cols - 1) * G0), math.max(1, rows * S + (rows - 1) * G0))
+    side:ClearAllPoints()
+    local sp = d.sidePos
+    if sp then side:SetPoint(sp[1], UIParent, sp[2], sp[3], sp[4]) else side:SetPoint("RIGHT", UIParent, "RIGHT", -8, 40) end
+    for i, b in ipairs(btns) do
+        if b:GetParent() ~= side then b.leelOrigParent = b.leelOrigParent or b:GetParent(); b:SetParent(side) end
+        if not managed[b] then managed[b] = true; Skin(b) end
+        if b.leelStrip then b.leelStrip() end
+        local c, r = (i - 1) % cols, math.floor((i - 1) / cols)
+        b:ClearAllPoints(); b:SetSize(S, S)
+        b:SetPoint("TOPLEFT", side, "TOPLEFT", c * (S + G0), -r * (S + G0))
+        SideGrid(b); SideDrop(b)   -- 점선 틀은 전투 밖에서 미리 만들어 둬요
+    end
+    SidePaint()
+end
+
 local function WRightPages(p1, rx, ry, RS, RG, RC, RR)
     local pages = { p1 }
     for _, row in ipairs(ROWS) do if row.page then pages[row.page] = row.btns end end
@@ -2123,6 +2280,10 @@ local function WRightPages(p1, rx, ry, RS, RG, RC, RR)
     if DB().rtabs == false then pages = { p1 } end   -- 빠른 설정: 쪽 탭 끔 = I쪽만
     local cur = DB().rpage or 1
     if not pages[cur] then cur = 1 end
+    -- 쪽 탭을 끄면 I쪽만이라 II · III쪽 칸은 숨겨요 (단축키는 그대로 돼요)
+    if not InCombatLockdown() and DB().rtabs == false then
+        for _, row in ipairs(ROWS) do if row.page then for _, b in ipairs(row.btns) do Stash(b) end end end
+    end
     local count = 0
     for p = 1, 3 do
         local btns = pages[p]
@@ -2240,7 +2401,7 @@ local function LayoutWing()
         b:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", rx + c * (RS + RG), ry + (RR - 1 - r) * (RS + RG))
         b:SetAlpha(1); pcall(b.EnableMouse, b, true)
     end
-    if DB().wskin == "tac" then WRightPages(right, rx, ry, RS, RG, RC, RR) end
+    if DB().wskin == "tac" then WRightPages(right, rx, ry, RS, RG, RC, RR); WSide(RS, RG) end
     -- 체력 · 마나 줄
     local by = base + PH + 6
     local goldSkin = DB().wskin ~= "pink"
@@ -2863,7 +3024,7 @@ local function Hooks()
         C_Timer.After(0, Layout)
     end
     for _, n in ipairs({ "MainMenuBar", "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight",
-                         "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6",
+                         "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7",
                          "StanceBar", "PetActionBar" }) do
         local f = G(n)
         if f then
