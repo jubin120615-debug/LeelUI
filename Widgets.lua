@@ -272,8 +272,8 @@ end
 ----------------------------------------------------------------------
 -- 둥근 초상화: 둥근 사각형으로 자르고 연분홍 테두리
 ----------------------------------------------------------------------
-function ns.CreatePortrait(parent, w, h)
-    local shape = ns.MEDIA .. "portrait_round"
+function ns.CreatePortrait(parent, w, h, round)
+    local shape = ns.MEDIA .. (round and "circle" or "portrait_round")   -- round = 동그란 초상화 (펫)
     local holder = CreateFrame("Frame", nil, parent)
     holder:SetSize(w, h)
 
@@ -287,7 +287,7 @@ function ns.CreatePortrait(parent, w, h)
     tex:SetAllPoints()
     tex:AddMaskTexture(Mask(holder, shape))
 
-    local edge = Tex(holder, "OVERLAY", 0, ns.MEDIA .. "portrait_edge", C.acc)
+    local edge = Tex(holder, "OVERLAY", 0, ns.MEDIA .. (round and "pet_ring" or "portrait_edge"), C.acc)
     edge:SetAllPoints()
 
     holder.tex, holder.cut = tex, edge

@@ -113,8 +113,9 @@ local ROLE_FALLBACK = {
     healer = function(cls) return W.PRIEST.healer end,
 }
 
--- 적중이 이미 상한이면 적중 무게를 거의 0으로 (근접 · 원거리 8%, 주문 16%)
-local function HitCapped(role)
+-- 적중이 이미 상한이면 적중 무게를 줄여요 (2026-11 확인: 근접 · 원거리 8% · 주문 17% · 쌍수 흰 공격 27%)
+--   와우 포에버는 근접 · 원거리 · 주문 적중이 하나로 합쳐져요
+local function HitPct(role)
     local ok, pct = pcall(function()
         if role == "caster" or role == "healer" then
             local r = (GetCombatRatingBonus and CR_HIT_SPELL) and GetCombatRatingBonus(CR_HIT_SPELL) or 0
@@ -124,20 +125,39 @@ local function HitCapped(role)
         local r = (GetCombatRatingBonus and cr) and GetCombatRatingBonus(cr) or 0
         return r + ((GetHitModifier and GetHitModifier()) or 0)
     end)
-    if not ok or type(pct) ~= "number" or (issecretvalue and issecretvalue(pct)) then return false end
-    local cap = (role == "caster" or role == "healer") and 16 or 8
-    return pct >= cap
+    if not ok or type(pct) ~= "number" or (issecretvalue and issecretvalue(pct)) then return nil end
+    return pct
+end
+-- 보조 손에 무기를 들었나 (쌍수면 8%를 넘어도 흰 공격 빗나감이 27%까지 줄어요)
+local function DualWielding()
+    local l = GetInventoryItemLink and GetInventoryItemLink("player", 17)
+    if not l then return false end
+    local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    local ok, _, _, _, loc = pcall(instant, l)
+    return ok and (loc == "INVTYPE_WEAPON" or loc == "INVTYPE_WEAPONOFFHAND") or false
+end
+-- 적중 무게 배수: 1 = 그대로 · 0.5 = 쌍수 흰 공격만 남음 · 0.1 = 상한
+local function HitFactor(role)
+    local pct = HitPct(role)
+    if not pct then return 1 end
+    if role == "caster" or role == "healer" then return pct >= 17 and 0.1 or 1 end
+    if pct < 8 then return 1 end
+    if role ~= "tank" and DualWielding() then return pct >= 27 and 0.1 or 0.5 end
+    return 0.1
 end
 
 local wCache, wKey
 local function Weights()
     local r, cls = Role(), ClassTag()
-    local key = (cls or "") .. r
+    local hf = HitFactor(r)
+    local key = (cls or "") .. r .. hf
     if wCache and wKey == key then return wCache end
     local base = (W[cls] and W[cls][r]) or ROLE_FALLBACK[r](cls)
     local w = {}
     for k, v in pairs(base) do w[k] = v end
-    if HitCapped(r) then w.HIT = (w.HIT or 0) * 0.1 end
+    w.HIT = (w.HIT or 0) * hf
+    -- 주문 공격력(피해만): 힐러에겐 거의 쓸모없고, 나머지는 주문력과 같아요
+    if w.SPD == nil then w.SPD = (r == "healer") and 0.1 or (w.SP or 0) end
     wCache, wKey = w, key
     return w
 end
@@ -145,14 +165,14 @@ ns.GearWeights = Weights
 
 local STAT_NAME = {
     STR = "힘", AGI = "민첩", STA = "체력", INT = "지능", SPI = "정신력", ARMOR = "방어도",
-    AP = "전투력", RAP = "원거리 전투력", SP = "주문력", HEAL = "치유량", MP5 = "마나 회복",
+    AP = "전투력", RAP = "원거리 전투력", SP = "주문력", SPD = "주문 공격력", HEAL = "치유량", MP5 = "마나 회복",
     CRIT = "치명타", HIT = "적중", DEF = "방어 숙련", DODGE = "회피", PARRY = "무기 막기", BLOCK = "방패 막기",
     DPS = "무기 공격력", RDPS = "원거리 무기 공격력",
     EXP = "숙련", HASTE = "가속", BLOCKVAL = "방패 막기 수치",
 }
 local STAT_EN = {
     STR = "Strength", AGI = "Agility", STA = "Stamina", INT = "Intellect", SPI = "Spirit", ARMOR = "Armor",
-    AP = "Attack Power", RAP = "Ranged AP", SP = "Spell Power", HEAL = "Healing", MP5 = "MP5",
+    AP = "Attack Power", RAP = "Ranged AP", SP = "Spell Power", SPD = "Spell Damage", HEAL = "Healing", MP5 = "MP5",
     CRIT = "Crit", HIT = "Hit", DEF = "Defense", DODGE = "Dodge", PARRY = "Parry", BLOCK = "Block",
     DPS = "Weapon DPS", RDPS = "Ranged DPS", EXP = "Expertise", HASTE = "Haste", BLOCKVAL = "Block Value",
 }
@@ -160,7 +180,7 @@ ns.GearStatNameEn = STAT_EN
 -- 토끼가 쓰는 쉬운 말
 local STAT_EASY = {
     STR = "힘", AGI = "민첩", STA = "체력", INT = "마나", SPI = "마나 회복", ARMOR = "방어도",
-    AP = "공격력", RAP = "원거리 공격력", SP = "주문 위력", HEAL = "치유량", MP5 = "마나 회복",
+    AP = "공격력", RAP = "원거리 공격력", SP = "주문 위력", SPD = "주문 공격력", HEAL = "치유량", MP5 = "마나 회복",
     CRIT = "치명타", HIT = "적중", DEF = "방어", DODGE = "회피", PARRY = "막기", BLOCK = "방패 막기",
     DPS = "무기 공격력", RDPS = "원거리 무기 공격력",
     EXP = "숙련", HASTE = "가속", BLOCKVAL = "방패 막기",
@@ -173,7 +193,7 @@ local KEYMAP = {
     ITEM_MOD_STRENGTH_SHORT = "STR", ITEM_MOD_AGILITY_SHORT = "AGI", ITEM_MOD_STAMINA_SHORT = "STA",
     ITEM_MOD_INTELLECT_SHORT = "INT", ITEM_MOD_SPIRIT_SHORT = "SPI", RESISTANCE0_NAME = "ARMOR",
     ITEM_MOD_ATTACK_POWER_SHORT = "AP", ITEM_MOD_RANGED_ATTACK_POWER_SHORT = "RAP",
-    ITEM_MOD_SPELL_POWER_SHORT = "SP", ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = "SP",
+    ITEM_MOD_SPELL_POWER_SHORT = "SP", ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = "SPD",   -- SPD = 주문 공격력(피해만 · 치유엔 안 들어가요)
     ITEM_MOD_SPELL_HEALING_DONE_SHORT = "HEAL", ITEM_MOD_MANA_REGENERATION_SHORT = "MP5",
     ITEM_MOD_POWER_REGEN0_SHORT = "MP5",
     ITEM_MOD_CRIT_RATING_SHORT = "CRIT", ITEM_MOD_HIT_RATING_SHORT = "HIT",
@@ -192,6 +212,13 @@ local function Num(s) local t = (s or ""):gsub(",", ""); return tonumber(t) end
 -- 착용 효과 한 줄에서 아는 능력치를 꺼냄. 모르는 효과면 nil
 local function ParseEquipLine(t)
     local n
+    -- 와우 포에버: "치유량이 최대 90만큼, 주문 공격력이 최대 30만큼" (치유 장비에 주문 공격력이 같이)
+    local h1 = t:match("치유량이 최대 ([%d,]+)")
+    local d1 = t:match("주문 공격력이 최대 ([%d,]+)") or t:match("주문 공격력이 ([%d,]+)")
+    if h1 and d1 then return "HEAL", Num(h1), "SPD", Num(d1) end
+    local h2, d2 = t:match("healing done by up to ([%d,]+) and damage done by up to ([%d,]+)")
+    if h2 and d2 then return "HEAL", Num(h2), "SPD", Num(d2) end
+    if d1 then return "SPD", Num(d1) end
     -- 등급 글줄 (와우 포에버): "치명타 적중도가 14만큼", "적중도가 10만큼", "가속도가", "숙련도가"
     -- 영어 게임 글줄
     n = t:match("critical strike rating by ([%d,]+)")
@@ -274,8 +301,13 @@ local function ReadLines(data, out)
         if type(lt) == "string" then
             local eq = lt:match("^착용 효과:%s*(.+)") or lt:match("^Equip:%s*(.+)")
             if eq then
-                local k, v = ParseEquipLine(eq)
-                if k and v then out.stats[k] = (out.stats[k] or 0) + v else out.effect = true end
+                local k, v, k2, v2 = ParseEquipLine(eq)
+                local api = out.api or {}
+                if k and v then
+                    -- 게임 능력치 목록(GetItemStats)에 이미 있으면 글줄로 또 더하지 않아요
+                    if not api[k] then out.stats[k] = (out.stats[k] or 0) + v end
+                    if k2 and v2 and not api[k2] then out.stats[k2] = (out.stats[k2] or 0) + v2 end
+                else out.effect = true end
             elseif lt:match("^사용 효과:") or lt:match("^발동 효과:") or lt:match("^Use:") or lt:match("^Chance on hit:") then
                 out.effect = true
             end
@@ -298,7 +330,10 @@ local function ItemInfo(link, data)
         if ok and type(t) == "table" then
             for k, v in pairs(t) do
                 local key = KEYMAP[k]
-                if key and type(v) == "number" then c.stats[key] = (c.stats[key] or 0) + v end
+                if key and type(v) == "number" then
+                    c.stats[key] = (c.stats[key] or 0) + v
+                    c.api = c.api or {}; c.api[key] = true
+                end
                 if k == "ITEM_MOD_DAMAGE_PER_SECOND_SHORT" and type(v) == "number" then c.dps = v end
             end
         end
@@ -321,8 +356,10 @@ end
 local function Score(info, slotKind)
     local w = Weights()
     local s, parts = 0, {}
+    local healer = Role() == "healer"
     for k, v in pairs(info.stats) do
         local wk = w[k] or 0
+        if k == "HEAL" and info.stats.SPD and not healer then wk = 0 end
         parts[k] = v * wk
         s = s + v * wk
     end

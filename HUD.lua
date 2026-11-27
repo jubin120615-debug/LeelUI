@@ -925,10 +925,10 @@ function ns.BuildHudPreview(parent)
         function pet:PvMood()
             local off = ns.db and ns.db.petMoodOff
             local sad = ns.hudPvPeek == "mood"
-            if off then self.moodFrame:Hide(); self.moodAg:Stop(); self.moodGlow:Hide(); self.portrait.cut:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) return end
+            self.moodFrame:Hide()
+            if off then if ns.PetRing then ns.PetRing(self, nil) end; self.moodAg:Stop(); self.moodGlow:Hide(); self.portrait.cut:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) return end
             local c = sad and { 1, 0.42, 0.42 } or { 0.5, 0.84, 0.48 }
-            self.portrait.cut:SetVertexColor(c[1], c[2], c[3], 1)
-            self.mood:SetTexture(ns.MEDIA .. (sad and "pet_sad" or "pet_happy")); self.moodFrame:Show()
+            if ns.PetRing then ns.PetRing(self, c, sad and 2 or 5) end
             if sad then self.moodGlow:Show(); if not self.moodAg:IsPlaying() then self.moodAg:Play() end
             else self.moodAg:Stop(); self.moodGlow:Hide() end
         end
@@ -1711,9 +1711,40 @@ local function Chip(parent)
     return c
 end
 
+-- 펫 만족도 · 충성도 (사냥꾼): 진짜 펫 값, 시험 중이면 시험 값
+--   돌려주는 값: 만족도(1 불만 · 2 보통 · 3 행복), 피해 %, 충성도 흐름(+ 오름 · - 내림), 충성도 단계(1~6), 단계 이름, 시험인지
+local LOY_NAME = { "반항", "제멋대로", "순종", "믿음직", "충실", "단짝" }
+local MOOD_NAME = { "불만", "보통", "행복" }
+local MOOD_COL = { { 1, 0.42, 0.42 }, { 1, 0.83, 0.42 }, { 0.5, 0.84, 0.48 } }
+local function PetMood()
+    local T = ns.petTest
+    if T and T.on then
+        local st = T.step or 0
+        local h = tonumber(T.mood) or ({ 3, 2, 1 })[st % 3 + 1]
+        local lv = tonumber(T.loy) or (st % 6 + 1)
+        return h, ({ 75, 100, 125 })[h], (h == 3 and 1) or (h == 1 and -1) or 0, lv, LOY_NAME[lv], true
+    end
+    local ok, h, dmg, rate = pcall(GetPetHappiness)
+    if not ok or type(h) ~= "number" or ns.IsSecret(h) then return nil end
+    if ns.IsSecret(dmg) then dmg = nil end
+    if ns.IsSecret(rate) then rate = nil end
+    local lv, nm
+    if GetPetLoyalty then
+        local ok2, v = pcall(GetPetLoyalty)
+        if ok2 and v ~= nil and not ns.IsSecret(v) then
+            if type(v) == "number" then lv = v
+            elseif type(v) == "string" then lv = tonumber(v:match("(%d+)")); nm = v:match("%((.-)%)") end
+        end
+    end
+    if lv and (lv < 1 or lv > 6) then lv = nil end
+    if lv and not nm then nm = LOY_NAME[lv] end
+    return h, dmg, rate, lv, nm, false
+end
+ns.PetMood = PetMood
+
 local function CreatePet(hud, preview)
     local f = preview and CreateFrame("Button", nil, hud) or CreateFrame("Button", "LeelUI_pet", hud, "SecureUnitButtonTemplate")
-    f:SetSize(PET_POR + PET_BAR, PET_POR + 4)
+    f:SetSize(PET_POR + 12 + PET_BAR, PET_POR + 4)
     f:SetPoint("TOPLEFT", hud, "TOPLEFT", 14, -(POR_H + 14))
     f:SetAttribute("unit", "pet")
     f:SetAttribute("*type1", "target")
@@ -1721,11 +1752,11 @@ local function CreatePet(hud, preview)
     f:RegisterForClicks("AnyUp")
     f.unit = "pet"
 
-    f.portrait = ns.CreatePortrait(f, PET_POR, PET_POR)
+    f.portrait = ns.CreatePortrait(f, PET_POR, PET_POR, true)   -- 펫은 동그랗게 (만족도 · 충성도 고리)
     f.portrait:SetPoint("TOPLEFT")
 
     f.name = ns.Font(f, 15)
-    f.name:SetPoint("TOPLEFT", f, "TOPLEFT", PET_POR + 6, -2)
+    f.name:SetPoint("TOPLEFT", f, "TOPLEFT", PET_POR + 12, -2)   -- 고리 바깥에서 시작
     f.lvLabel = ns.Font(f, 11, C.tx2)
     f.lvLabel:SetText("LV")
     f.lvLabel:SetPoint("BOTTOMLEFT", f.name, "BOTTOMRIGHT", 8, 1)
@@ -1735,7 +1766,7 @@ local function CreatePet(hud, preview)
     f.chip:SetPoint("LEFT", f.lv, "RIGHT", 8, 1)
 
     f.hp = ns.CreateSkewBar(f, PET_BAR, 18, { inset = 2, noShadow = true })
-    f.hp:SetPoint("TOPLEFT", f, "TOPLEFT", PET_POR - 8, -22)
+    f.hp:SetPoint("TOPLEFT", f, "TOPLEFT", PET_POR + 4, -22)   -- 만족도 · 충성도 고리와 안 겹치게
     ns.PaintHealthRed(f.hp)
     f.hpValue = ns.Num(f.hp.over, 15, { 1, 0.953, 0.953 })
     f.hpValue:SetShadowColor(0.35, 0.06, 0.1, 0.8); f.hpValue:SetShadowOffset(1, -1)
@@ -1756,8 +1787,8 @@ local function CreatePet(hud, preview)
 
     -- 펫 만족도 (사냥꾼): 초상화 테두리 색 + 오른쪽 아래 얼굴 · 불만이면 빨간 빛이 숨쉬듯
     f.moodGlow = f.portrait:CreateTexture(nil, "BACKGROUND", nil, -1)
-    f.moodGlow:SetTexture(ns.MEDIA .. "portrait_edge")
-    f.moodGlow:SetPoint("TOPLEFT", -5, 5); f.moodGlow:SetPoint("BOTTOMRIGHT", 5, -5)
+    f.moodGlow:SetTexture(ns.MEDIA .. "pet_ring")
+    f.moodGlow:SetPoint("TOPLEFT", -11, 11); f.moodGlow:SetPoint("BOTTOMRIGHT", 11, -11)
     f.moodGlow:SetVertexColor(1, 0.42, 0.42, 1); f.moodGlow:SetBlendMode("ADD"); f.moodGlow:Hide()
     local ag = f.moodGlow:CreateAnimationGroup()
     local a1 = ag:CreateAnimation("Alpha"); a1:SetFromAlpha(0.25); a1:SetToAlpha(1); a1:SetDuration(0.7); a1:SetOrder(1)
@@ -1766,19 +1797,47 @@ local function CreatePet(hud, preview)
     local mf = CreateFrame("Frame", nil, f); mf:SetFrameLevel(f:GetFrameLevel() + 5)
     mf:SetSize(22, 22); mf:SetPoint("CENTER", f.portrait, "BOTTOMRIGHT", -4, 4)
     f.mood = mf:CreateTexture(nil, "OVERLAY"); f.mood:SetAllPoints(); mf:Hide(); f.moodFrame = mf
+    -- 초상화 고리 6조각: 색 = 만족도 · 채운 조각 수 = 충성도 단계
+    f.ring = {}
+    -- 체력 바보다 위에 (바 왼쪽 끝이 고리 밑으로 들어가게)
+    local rf = CreateFrame("Frame", nil, f); rf:SetAllPoints(f.portrait)
+    rf:SetFrameLevel(math.max(f.hp:GetFrameLevel(), f.focus:GetFrameLevel()) + 4)
+    f.ringFrame = rf
+    for i = 1, 6 do
+        local t = rf:CreateTexture(nil, "OVERLAY", nil, 2)
+        -- 초상화 바깥에 굵게 (잘 보이게)
+        t:SetTexture(ns.MEDIA .. "pet_seg" .. i); t:SetPoint("TOPLEFT", f.portrait, "TOPLEFT", -5, 5); t:SetPoint("BOTTOMRIGHT", f.portrait, "BOTTOMRIGHT", 5, -5); t:Hide()
+        f.ring[i] = t
+    end
+    -- 충성도 칸 6개 + "충성 5 · 단짝" (집중 바 아래 · 지금은 안 씀 · 고리로 대신)
+    local lf = CreateFrame("Frame", nil, f); lf:SetSize(130, 10)
+    lf.pip = {}
+    for i = 1, 6 do
+        local pf = CreateFrame("Frame", nil, lf); pf:SetSize(9, 9); pf:SetPoint("LEFT", (i - 1) * 12, 0)
+        lf.pip[i] = ns.RoundRect(pf, 3, C.acc, "ARTWORK", 0, 0)
+    end
+    lf.fs = ns.Font(lf, 11, C.acc); lf.fs:SetPoint("LEFT", 6 * 12 + 4, 0)
+    lf:Hide(); f.loyRow = lf
+    -- 만족도 알약 (체력 바 오른쪽): "행복 · 피해 125%"
+    f.moodPill = Chip(f); f.moodPill:SetPoint("LEFT", f.hp, "RIGHT", 8, 0)
+    -- 시험 중 표 (허브 > 펫 > 시험 펫)
+    f.testTag = Chip(f); f.testTag:SetPoint("BOTTOMLEFT", f.portrait, "TOPLEFT", -6, 7)
+    f.testTag:SetFrameLevel(f.ringFrame:GetFrameLevel() + 2)
     -- 마우스 올리면 툴팁 아래에 만족도 · 피해 % · 충성도
     f:HookScript("OnEnter", function(self)
-        local ok, h, dmg, loy = pcall(GetPetHappiness)
-        if not ok or not h then return end
-        if issecretvalue and (issecretvalue(h) or issecretvalue(dmg)) then return end
-        if not GameTooltip:IsOwned(self) then GameTooltip:SetOwner(self, "ANCHOR_BOTTOM"); GameTooltip:SetUnit("pet") end
-        local N = { "불만", "보통", "행복" }
-        local CC = { { 1, 0.42, 0.42 }, { 1, 0.83, 0.42 }, { 0.5, 0.84, 0.48 } }
-        local c = CC[h] or { 1, 1, 1 }
+        local h, dmg, rate, lv, nm, test = PetMood()
+        if not h then return end
+        if not GameTooltip:IsOwned(self) then
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            if test then GameTooltip:SetText("시험 펫") else GameTooltip:SetUnit("pet") end
+        end
+        local c = MOOD_COL[h] or { 1, 1, 1 }
         ns.TAdd(GameTooltip, " ")
-        ns.TAdd(GameTooltip, "만족도: " .. (N[h] or "?") .. (dmg and ("  ·  피해 " .. dmg .. "%") or ""), c[1], c[2], c[3])
-        if loy and loy ~= 0 then ns.TAdd(GameTooltip, "충성도 " .. (loy > 0 and "오르는 중" or "내려가는 중"), 0.8, 0.74, 0.72) end
+        ns.TAdd(GameTooltip, "만족도: " .. (MOOD_NAME[h] or "?") .. (dmg and ("  ·  피해 " .. dmg .. "%") or ""), c[1], c[2], c[3])
+        if lv then ns.TAdd(GameTooltip, ("충성도 %d / 6 (%s)"):format(lv, nm or "?"), 0.95, 0.7, 0.76) end
+        if rate and rate ~= 0 then ns.TAdd(GameTooltip, "충성도 " .. (rate > 0 and "오르는 중" or "내려가는 중"), 0.8, 0.74, 0.72) end
         if h == 1 then ns.TAdd(GameTooltip, "먹이를 주세요!", 1, 0.42, 0.42) end
+        if test then ns.TAdd(GameTooltip, "시험 중 · 허브 > 펫에서 끄기", 0.6, 0.58, 0.6) end
         GameTooltip:Show()
     end)
     return f
@@ -1812,13 +1871,14 @@ function ns.StylePet(f, isPv)
         elseif UnitExists("pettarget") then f.ptg:SetFormattedText("▸ %s", UnitName("pettarget") or ""); f.ptg:Show()
         else f.ptg:Hide() end
         f.ptg:ClearAllPoints()
-        if f.focus:IsShown() then f.ptg:SetPoint("TOPLEFT", f.focus, "BOTTOMLEFT", 0, -4) else f.ptg:SetPoint("TOPLEFT", f.hp, "BOTTOMLEFT", 12, -4) end
+        if f.loyRow and f.loyRow:IsShown() then f.ptg:SetPoint("TOPLEFT", f.loyRow, "BOTTOMLEFT", 0, -4)
+        elseif f.focus:IsShown() then f.ptg:SetPoint("TOPLEFT", f.focus, "BOTTOMLEFT", 0, -4) else f.ptg:SetPoint("TOPLEFT", f.hp, "BOTTOMLEFT", 12, -4) end
     else
         f.ptg:Hide()
     end
     f.portrait:SetAlpha(O("porOff") and 0 or 1)
     local e = O("porEdge")
-    if e == "off" then f.portrait.cut:SetAlpha(0)
+    if e == "off" or f.ringOn then f.portrait.cut:SetAlpha(0)
     else
         f.portrait.cut:SetAlpha(1)
         if e == "pink" then f.portrait.cut:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1) end
@@ -1830,12 +1890,12 @@ function ns.StylePet(f, isPv)
     f.hpPct:SetAlpha(O("pctOff") and 0 or 1)
     if isPv then return end
     f:SetAlpha((O("vis") == "combat" and not UnitAffectingCombat("player")) and 0 or 1)
-    -- 불만으로 바뀌는 순간 한 번 알림
-    local ok, h = pcall(GetPetHappiness)
-    if ok and type(h) == "number" and not ns.IsSecret(h) then
+    -- 불만으로 바뀌는 순간 한 번 알림 (시험 펫도)
+    local h, _, _, _, _, test = PetMood()
+    if type(h) == "number" then
         if h == 1 and (f.lastHappy or 0) > 1 then
             local a = O("alert")
-            if a == "chat" then print(ns.L("|cfff2b3c2[르엘 펫]|r 펫이 배고파요. 먹이를 주세요!"))
+            if a == "chat" then print(ns.L("|cfff2b3c2[르엘 펫]|r 펫이 배고파요. 먹이를 주세요!") .. (test and ns.L(" |cff9a8a86(시험)|r") or ""))
             elseif a == "sound" then pcall(PlaySoundFile, ns.MEDIA .. "leel_black_warn.ogg", "Master") end
         end
         f.lastHappy = h
@@ -1951,7 +2011,68 @@ local function SetupFollow(f)
     end
 end
 
+-- 고리: n칸을 색 c로, 나머지는 어둡게 (c = nil 이면 고리 숨기고 원래 테두리)
+local function PetRing(f, c, n)
+    if not f.ring then return end
+    f.ringOn = c and true or false
+    for i = 1, 6 do
+        local t = f.ring[i]
+        if c then
+            if i <= (n or 6) then t:SetVertexColor(c[1], c[2], c[3], 1) else t:SetVertexColor(0.3, 0.24, 0.25, 0.9) end
+            t:Show()
+        else t:Hide() end
+    end
+    f.portrait.cut:SetAlpha(c and 0 or 1)
+end
+ns.PetRing = PetRing
+
+-- 만족도 · 충성도 = 초상화 고리 하나 (불만이면 빨간 빛 숨쉬기)
+local function PaintMood(f, dead, aggro)
+    local h, dmg, rate, lv, nm, test = PetMood()
+    local c = h and MOOD_COL[h]
+    local off = ns.db and ns.db.petMoodOff
+    f.moodFrame:Hide(); f.moodPill:Hide()   -- (얼굴 · 알약은 안 써요 · 고리 하나로)
+    if c and not dead and not off then
+        PetRing(f, (not aggro) and c or nil, lv or 6)   -- 맞는 중이면 원래 빨간 테두리
+        if h == 1 then f.moodGlow:Show(); if not f.moodAg:IsPlaying() then f.moodAg:Play() end
+        else f.moodAg:Stop(); f.moodGlow:Hide() end
+    else
+        PetRing(f, nil); f.moodAg:Stop(); f.moodGlow:Hide()
+    end
+    -- 충성도 칸 (안 써요)
+    local lf = f.loyRow
+    if lf then
+        if false and lv and not off then
+            for i = 1, 6 do
+                if i <= lv then lf.pip[i]:SetColor(C.acc, 1) else lf.pip[i]:SetColor({ 0.29, 0.204, 0.22 }, 1) end
+            end
+            local arrow = (rate and rate > 0 and " |cff8fd67a▲|r") or (rate and rate < 0 and " |cffff7a7a▼|r") or ""
+            lf.fs:SetText(("충성 %d · %s"):format(lv, nm or "") .. arrow)
+            lf:ClearAllPoints()
+            if f.focus:IsShown() then lf:SetPoint("TOPLEFT", f.focus, "BOTTOMLEFT", 0, -5)
+            else lf:SetPoint("TOPLEFT", f.hp, "BOTTOMLEFT", 12, -5) end
+            lf:Show()
+        else
+            lf:Hide()
+        end
+    end
+    if test then f.testTag:Set("시험 중", { 1, 0.8, 0.3 }, { 0.1, 0.04, 0.05 }) else f.testTag:Hide() end
+end
+
 local function UpdatePetCore(f)
+    -- 시험 펫 (사냥꾼이 아니어도 모양 · 알림 확인)
+    if ns.petTest and ns.petTest.on then
+        f.name:SetText("시험 펫"); f.lv:SetText(UnitLevel("player") or 60)
+        f.portrait.tex:SetTexture("Interface\\Icons\\Ability_Hunter_Pet_Cat"); f.portrait.tex:SetDesaturated(false)
+        f.hp.bar:SetMinMaxValues(0, 1000); f.hp.bar:SetValue(860)
+        f.hpValue:SetText("860"); f.hpValue:Show(); f.hpPct:SetText("86%"); f.hpPct:Show()
+        f.focus:SetMinMaxValues(0, 100); f.focus:SetValue(70)
+        f.portrait.cut:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 1)
+        f.hp.border:SetVertexColor(C.edge[1], C.edge[2], C.edge[3], C.edge[4])
+        f.chip:Hide()
+        PaintMood(f, false, false)
+        return
+    end
     if not UnitExists("pet") then return end
     ns.SetText(f.name, UnitName("pet"))
     ns.SetText(f.lv, UnitLevel("pet"))
@@ -1987,21 +2108,8 @@ local function UpdatePetCore(f)
         f.hp.border:SetVertexColor(C.edge[1], C.edge[2], C.edge[3], C.edge[4])
         if fighting then f.chip:Set("공격 중", C.acc, C.ink) else f.chip:Hide() end
     end
-    -- 만족도 (사냥꾼 펫만 값이 있어요)
-    local ok, h = pcall(GetPetHappiness)
-    if ok and h and not (issecretvalue and issecretvalue(h)) and not dead and not (ns.db and ns.db.petMoodOff) then
-        local CC = { { 1, 0.42, 0.42 }, { 1, 0.83, 0.42 }, { 0.5, 0.84, 0.48 } }
-        local FACE = { "pet_sad", "pet_ok", "pet_happy" }
-        local c = CC[h]
-        if c then
-            if not aggro then f.portrait.cut:SetVertexColor(c[1], c[2], c[3], 1) end
-            f.mood:SetTexture(ns.MEDIA .. FACE[h]); f.moodFrame:Show()
-            if h == 1 then f.moodGlow:Show(); if not f.moodAg:IsPlaying() then f.moodAg:Play() end
-            else f.moodAg:Stop(); f.moodGlow:Hide() end
-            return
-        end
-    end
-    f.moodFrame:Hide(); f.moodAg:Stop(); f.moodGlow:Hide()
+    -- 만족도 · 충성도 (사냥꾼 펫만 값이 있어요)
+    PaintMood(f, dead, aggro)
 end
 local function UpdatePet(f)
     UpdatePetCore(f)
@@ -2100,6 +2208,70 @@ function ns:CreateHUD()
 
     local player = CreateSide(hud, "player", false)
     AddPlayerExtras(player)
+    -- 휴식 Zz 배지: 여관 · 도시에서 쉴 때만 초상화 구석 · 마우스 = 휴식 경험치 · 꽉 차기까지
+    do
+        local zb = CreateFrame("Frame", nil, player)
+        zb:SetSize(38, 38); zb:SetPoint("CENTER", player.portrait, "TOPLEFT", 6, -6)   -- 이름과 안 겹치게 왼쪽 위
+        zb:SetFrameLevel(player:GetFrameLevel() + 12)
+        local rim = zb:CreateTexture(nil, "BACKGROUND"); rim:SetTexture(ns.MEDIA .. "circle")
+        rim:SetPoint("TOPLEFT", -3, 3); rim:SetPoint("BOTTOMRIGHT", 3, -3); rim:SetVertexColor(0.1, 0.07, 0.08, 1)
+        local disc = zb:CreateTexture(nil, "ARTWORK"); disc:SetTexture(ns.MEDIA .. "circle"); disc:SetAllPoints()
+        disc:SetVertexColor(0.48, 0.35, 0.88, 1)
+        local fs = zb:CreateFontString(nil, "OVERLAY"); fs:SetFont(ns.FONT, 17, "OUTLINE"); fs:SetPoint("CENTER", 1, 0)
+        fs:SetText("Zz"); fs:SetTextColor(1, 1, 1)
+        -- 떠오르는 z 셋: 배지에서 살랑살랑 올라가며 커지다가 사라져요 (쉬는 동안 계속)
+        local zs = {}
+        for k = 1, 3 do
+            local z = zb:CreateFontString(nil, "OVERLAY")
+            z:SetFont(ns.FONT, 16, "OUTLINE"); z:SetText("z"); z:SetTextColor(0.86, 0.82, 1)
+            z:SetShadowColor(0.16, 0.08, 0.32, 1); z:SetShadowOffset(1, -1)
+            zs[k] = z
+        end
+        local zt, PERIOD = 0, 3.2
+        zb:SetScript("OnUpdate", function(_, el)
+            zt = zt + el
+            for k, z in ipairs(zs) do
+                local p = (zt / PERIOD + (k - 1) / 3) % 1
+                local x = 4 + p * 30 + math.sin(p * 6.283) * 5
+                local y = 14 + p * 64
+                z:ClearAllPoints(); z:SetPoint("CENTER", zb, "CENTER", x, y)
+                if z.SetTextScale then z:SetTextScale(0.7 + p * 0.9) end
+                z:SetAlpha(math.min(1, p * 4) * (1 - p))
+            end
+        end)
+        zb:EnableMouse(true)
+        zb:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:SetText(ns.L("휴식 중"), 0.85, 0.8, 1)
+            local ex = (GetXPExhaustion and GetXPExhaustion()) or 0
+            local mx = UnitXPMax("player") or 0
+            if not ns.IsSecret(mx) and not ns.IsSecret(ex) and mx > 0 then
+                local pct = ex / mx * 100
+                ns.TAdd(GameTooltip, (ns.L("휴식 경험치 +%d%%")):format(math.floor(pct + 0.5)), 0.73, 0.62, 1)
+                if pct < 149.5 then
+                    local hrs = (150 - pct) / 5 * 8   -- 쉬는 곳에서 8시간마다 한 레벨의 5%
+                    local t = hrs >= 48 and (ns.L("약 %d일")):format(math.floor(hrs / 24 + 0.5)) or (ns.L("약 %d시간")):format(math.max(1, math.floor(hrs + 0.5)))
+                    ns.TAdd(GameTooltip, ns.L("꽉 차기까지 ") .. t, 0.8, 0.78, 0.82)
+                else
+                    ns.TAdd(GameTooltip, ns.L("휴식 경험치가 꽉 찼어요"), 0.8, 0.78, 0.82)
+                end
+            end
+            ns.TAdd(GameTooltip, ns.L("휴식 경험치 = 사냥 경험치 2배"), 0.6, 0.58, 0.62)
+            GameTooltip:Show()
+        end)
+        zb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        zb:Hide()
+        player.restBadge = zb
+        local function RestPaint()
+            local r = IsResting and IsResting()
+            if ns.IsSecret(r) then r = false end
+            zb:SetShown((r and not (ns.db and ns.db.restOff)) and true or false)
+        end
+        ns.HudRestRefresh = RestPaint
+        local rev = CreateFrame("Frame")
+        for _, e in ipairs({ "PLAYER_UPDATE_RESTING", "PLAYER_ENTERING_WORLD", "UPDATE_EXHAUSTION", "ZONE_CHANGED_NEW_AREA" }) do pcall(rev.RegisterEvent, rev, e) end
+        rev:SetScript("OnEvent", RestPaint)
+    end
     local target = CreateSide(hud, "target", true)
     AddTargetExtras(target)
     AddTargetPower(target)
@@ -2312,6 +2484,35 @@ function ns:CreateHUD()
         if PetFrameHappiness then P("블리자드 펫 만족도 그림: " .. tostring(PetFrameHappiness:IsShown())) end
     end
     ns.HudPetRefresh = function() if pet and not ns.moving then pcall(UpdatePet, pet) end end
+    -- 시험 펫: 사냥꾼이 아니어도 진짜 펫 창 자리에 띄워서 만족도 · 충성도 · 알림 확인 (/reload 하면 꺼져요)
+    local testTicker
+    ns.PetTest = function(on)
+        if InCombatLockdown() then print(ns.L("|cfff2b3c2[르엘 펫]|r 전투가 끝나면 할 수 있어요.")) return end
+        ns.petTest = ns.petTest or { mood = "auto", loy = "auto", step = 0 }
+        local T = ns.petTest
+        if on then
+            T.on = true; T.step = 0
+            UnregisterUnitWatch(pet); pet:Show()
+            if testTicker then testTicker:Cancel() end
+            testTicker = C_Timer.NewTicker(6, function()
+                if not T.on then return end
+                T.step = (T.step or 0) + 1
+                if ns.HudPetRefresh then ns.HudPetRefresh() end
+            end)
+            print(ns.L("|cfff2b3c2[르엘 펫]|r 시험 펫을 띄웠어요 · 6초마다 상태가 바뀌어요 (허브 > 펫에서 고정 · 끄기)"))
+        else
+            T.on = false
+            if testTicker then testTicker:Cancel(); testTicker = nil end
+            pet.testTag:Hide(); pet.loyRow:Hide(); pet.moodPill:Hide()
+            RegisterUnitWatch(pet)
+            if not UnitExists("pet") then pet:Hide() end
+            print(ns.L("|cfff2b3c2[르엘 펫]|r 시험 펫을 껐어요."))
+        end
+        pet.lastHappy = nil
+        ns.HudPetRefresh()
+    end
+    SLASH_LEELPETTEST1 = "/르엘펫시험"
+    SlashCmdList.LEELPETTEST = function() ns.PetTest(not (ns.petTest and ns.petTest.on)) end
     petEv:SetScript("OnEvent", function()
         if not ns.moving then UpdatePet(pet) end
     end)

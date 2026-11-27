@@ -3580,6 +3580,36 @@ local function BuildTop()
     top:SetScript("OnUpdate", function(_, e) acc = acc + e; if acc > 0.05 then acc = 0; TopTick() end end)
 end
 
+-- 대상 줄 클릭 칸 (보안 단추): 오른쪽 클릭 = 게임 기본 메뉴 (파티 초대 · 귓속말 · 살펴보기 · 거래 · 따라가기)
+--   대상 줄(그림)은 전투 중에도 숨기고 보여야 해서, 클릭 칸은 따로 만들어 같은 자리에 겹쳐요
+local topClick
+local function TopClick()
+    if topClick or not top then return topClick end
+    if InCombatLockdown() then return end
+    local b = CreateFrame("Button", "LeelUI_LATargetClick", UIParent, "SecureUnitButtonTemplate")
+    b:SetAttribute("unit", "target")
+    b:SetAttribute("*type1", "target")
+    b:SetAttribute("*type2", "togglemenu")
+    b:RegisterForClicks("AnyUp")
+    b:SetFrameStrata(top:GetFrameStrata()); b:SetFrameLevel(math.max(1, top:GetFrameLevel()))
+    b:Hide()
+    topClick = b
+    return b
+end
+local function TopClickPlace(on)
+    local b = TopClick()
+    if not b or InCombatLockdown() then return end
+    if on then
+        b:SetScale(top:GetScale())
+        b:ClearAllPoints()
+        for i = 1, top:GetNumPoints() do b:SetPoint(top:GetPoint(i)) end
+        b:SetSize(top:GetSize())
+        RegisterStateDriver(b, "visibility", "[@target,exists] show; hide")
+    else
+        UnregisterStateDriver(b, "visibility"); b:Hide()
+    end
+end
+
 -- 자리 · 크기 (기본 = 화면 위 가운데)
 function ns.ABarLAPlace()
     if not top then return end
@@ -3589,6 +3619,7 @@ function ns.ABarLAPlace()
     top:ClearAllPoints()
     if d.laPos then top:SetPoint("CENTER", UIParent, "BOTTOMLEFT", d.laPos[1] / sc, d.laPos[2] / sc)
     else top:SetPoint("TOP", UIParent, "TOP", 0, -64 / sc) end
+    TopClickPlace(LAOn())
 end
 function ns.ABarLASetScale(v)
     DB().laScale = math.floor(tonumber(v) or 100)
@@ -3597,7 +3628,7 @@ end
 
 function ns.ABarLAApply()
     if LAOn() then BuildTop(); ns.ABarLAPlace(); HudParts(true); TopUpdate()
-    else HudParts(false); if top then top:Hide() end end
+    else HudParts(false); if top then top:Hide(); TopClickPlace(false) end end
 end
 local laEv = CreateFrame("Frame")
 laEv:RegisterEvent("PLAYER_LOGIN")

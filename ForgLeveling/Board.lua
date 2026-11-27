@@ -1860,7 +1860,7 @@ MakeDetail = function()
     d.way = Font(d, 11.5, { 1, 0.89, 0.92 }); d.way:SetPoint("TOPLEFT", d.hWay, "BOTTOMLEFT", 0, -3); d.way:SetPoint("RIGHT", -14, 0); d.way:SetJustifyH("LEFT")
     d.hTxt = H("내용", 0)
     d.txt = Font(d, 11, { 0.85, 0.8, 0.78 }); d.txt:SetPoint("TOPLEFT", d.hTxt, "BOTTOMLEFT", 0, -3); d.txt:SetPoint("RIGHT", -14, 0)
-    d.txt:SetJustifyH("LEFT"); d.txt:SetSpacing(2); if d.txt.SetMaxLines then d.txt:SetMaxLines(3) end
+    d.txt:SetJustifyH("LEFT"); d.txt:SetSpacing(2)   -- 내용은 끝까지 다 (전엔 3줄까지만)
     d.hRew = H("보상", 0)
     d.rew = Font(d, 11.5, { 1, 0.83, 0.42 }); d.rew:SetPoint("TOPLEFT", d.hRew, "BOTTOMLEFT", 0, -3); d.rew:SetJustifyH("LEFT")
     d.icons = {}
@@ -1970,7 +1970,50 @@ PaintDetail = function(d, e, w)
     -- 내용 · 보상
     local desc, money, rewards = QuestDetailText(e)
     if desc == false then desc = "|cff9a8a86(이 퀘 내용을 못 불러왔어요 · 게임 퀘스트 창에서 한 번 눌러 보면 돼요)|r"
-    elseif desc then desc = desc:gsub("^%s+", ""):gsub("\n%s*\n", "\n") end   -- 앞 빈 줄 때문에 글이 아래로 밀리던 것
+    elseif desc then
+        desc = desc:gsub("^%s+", ""):gsub("\n%s*\n", "\n")   -- 앞 빈 줄 때문에 글이 아래로 밀리던 것
+        -- 할 일 강조: 목표 글(고대의 알) 통째로 + 낱말(맹독 · 정령 · 협곡 …)을 글 안에서 진한 분홍으로
+        local COL = "|cffff8fab"
+        local words, seen = {}, {}
+        local STOP = { ["처치"] = 1, ["발견"] = 1, ["획득"] = 1, ["수집"] = 1, ["모으기"] = 1, ["찾기"] = 1, ["조사"] = 1,
+            ["사용"] = 1, ["전달"] = 1, ["탐험"] = 1, ["완료"] = 1, ["대화"] = 1, ["slain"] = 1, ["found"] = 1,
+            ["collected"] = 1, ["killed"] = 1, ["the"] = 1, ["of"] = 1 }
+        local JOSA = { "에서", "으로", "의", "을", "를", "이", "가", "은", "는", "에", "와", "과", "로" }
+        local function U(x) return (utf8 and utf8.len and utf8.len(x)) or #x end
+        local function Add(wd)
+            if wd ~= "" and not seen[wd] then seen[wd] = true; words[#words + 1] = wd end
+        end
+        for _, o in ipairs(e.objs or {}) do
+            local t = tostring(o.text or ""):gsub("[%d/:%(%)%[%]]", " "):gsub("^%s+", ""):gsub("%s+$", "")
+            if U(t) >= 2 then Add(t) end   -- 목표 글 통째로
+            for w0 in t:gmatch("%S+") do
+                local wd = w0
+                if (wd:byte(1) or 0) >= 128 then
+                    for _, j in ipairs(JOSA) do   -- 끝에 붙은 조사 떼기 (고대의 → 고대)
+                        if U(wd) > U(j) + 1 and wd:sub(-#j) == j then wd = wd:sub(1, -#j - 1); break end
+                    end
+                end
+                local n = U(wd)
+                if not STOP[wd] and not STOP[wd:lower()] and (((wd:byte(1) or 0) >= 128 and n >= 2) or n >= 4) then Add(wd) end
+            end
+        end
+        table.sort(words, function(a, b) return #a > #b end)
+        -- 이미 칠한 곳은 건너뛰고 나머지만 칠해요 (겹쳐 칠하면 색이 끊겨요)
+        local function HL(str, pat)
+            local out, pos = {}, 1
+            while true do
+                local a, b = str:find("|c%x%x%x%x%x%x%x%x.-|r", pos)
+                local seg = a and str:sub(pos, a - 1) or str:sub(pos)
+                out[#out + 1] = (seg:gsub(pat, COL .. "%0|r"))
+                if not a then break end
+                out[#out + 1] = str:sub(a, b); pos = b + 1
+            end
+            return table.concat(out)
+        end
+        for _, wd in ipairs(words) do
+            desc = HL(desc, (wd:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")))
+        end
+    end
     d.txt:SetText(desc and desc ~= "" and desc or "(내용 없음)")
     local rw = {}
     if e.xp and e.xp > 0 then rw[#rw + 1] = "경험치 " .. (BreakUpLargeNumbers and BreakUpLargeNumbers(e.xp) or e.xp) end
@@ -1992,10 +2035,12 @@ PaintDetail = function(d, e, w)
     d.hWay:ClearAllPoints(); d.hWay:SetPoint("TOPLEFT", 14, y)
     y = y - 14 - d.way:GetStringHeight() - 8
     d.hTxt:ClearAllPoints(); d.hTxt:SetPoint("TOPLEFT", 14, y)
-    -- 내용: 위에 붙여서 3줄까지 (글자 칸 높이를 정해 줘야 가운데로 내려가지 않아요)
+    -- 내용: 위에 붙여서 끝까지 (글자 칸 높이를 정해 줘야 가운데로 내려가지 않아요)
     d.txt:SetJustifyV("TOP")
+    -- 폭을 먼저 딱 정해야 줄 수를 맞게 재요 (안 그러면 끝이 "…"로 잘려요)
+    d.txt:ClearAllPoints(); d.txt:SetPoint("TOPLEFT", d.hTxt, "BOTTOMLEFT", 0, -3); d.txt:SetWidth(w - 28)
     d.txt:SetHeight(0)
-    local th = math.min(d.txt:GetStringHeight() or 14, 44)
+    local th = (d.txt:GetStringHeight() or 14) + 4
     d.txt:SetHeight(th)
     y = y - 14 - th - 8
     d.hRew:ClearAllPoints(); d.hRew:SetPoint("TOPLEFT", 14, y)
