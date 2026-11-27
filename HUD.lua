@@ -1249,7 +1249,10 @@ end
 local function Interact(unit, i)
     if InCombatLockdown() or not CheckInteractDistance then return nil end
     local ok, v = pcall(CheckInteractDistance, unit, i)
-    if ok then return v and true or false end
+    -- 포에버: 숨김 값이 오면 참처럼 보여서 늘 "10m"가 됐어요 → 숨김 값 · 이상한 값은 모름
+    if not ok or v == nil or (issecretvalue and issecretvalue(v)) then return nil end
+    if v == true or v == 1 then return true end
+    if v == false or v == 0 then return false end
 end
 
 -- 돌려주는 값: 숫자(이 거리 안), "far"(가장 먼 기술보다 멀리), nil(모름)
@@ -1266,9 +1269,10 @@ local function TargetRange(unit)
         if hit then break end
     end
     -- 전투 밖이면 상호작용 거리로 구간을 더 잘게
+    --   기술이 이미 "그보다 멀다"고 했으면(maxR) 상호작용 거리는 안 믿어요
     if not (hit and hit <= 5) then
-        if (not hit or hit > 10) and Interact(unit, 3) then return 10 end
-        if (not hit or hit > 28) and Interact(unit, 4) then return 28 end
+        if (not hit or hit > 10) and maxR < 10 and Interact(unit, 3) then return 10 end
+        if (not hit or hit > 28) and maxR < 28 and Interact(unit, 4) then return 28 end
     end
     if hit then return hit end
     if any then return "far", maxR end
@@ -1840,10 +1844,9 @@ local function CreatePet(hud, preview)
     f:HookScript("OnEnter", function(self)
         local h, dmg, rate, lv, nm, test = PetMood()
         if not h then return end
-        if not GameTooltip:IsOwned(self) then
-            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            if test then GameTooltip:SetText("시험 펫") else GameTooltip:SetUnit("pet") end
-        end
+        -- 매번 새로 채워요 (툴팁이 안 닫힌 채 다시 올리면 줄이 계속 쌓이던 것)
+        if not GameTooltip:IsOwned(self) then GameTooltip:SetOwner(self, "ANCHOR_BOTTOM") end
+        if test then GameTooltip:SetText("시험 펫") else GameTooltip:SetUnit("pet") end
         local c = MOOD_COL[h] or { 1, 1, 1 }
         ns.TAdd(GameTooltip, " ")
         ns.TAdd(GameTooltip, "만족도: " .. (MOOD_NAME[h] or "?") .. (dmg and ("  ·  피해 " .. dmg .. "%") or ""), c[1], c[2], c[3])

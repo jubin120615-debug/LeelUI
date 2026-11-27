@@ -259,38 +259,85 @@ local function Layout()
     bar.icon:SetTexture(tex); bar.me.icon:SetTexture(tex)
 end
 
+-- 내 위치 (비행 지도 위 0~1): 비행 지도에서 바로 → 안 되면 지금 지역 지도 → 세계 좌표 → 비행 지도
+local function PlayerPos()
+    local function XY(p)
+        if not p or Secret(p) then return end
+        local x, y = p:GetXY()
+        if x and not Secret(x) and not Secret(y) and x > 0 and x < 1 and y > 0 and y < 1 then return x, y end
+    end
+    local ok, pos = pcall(C_Map.GetPlayerMapPosition, route.map, "player")
+    local x, y = XY(ok and pos)
+    if x then return x, y end
+    local best = C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+    if best and best ~= route.map and C_Map.GetWorldPosFromMapPos and C_Map.GetMapPosFromWorldPos then
+        local ok2, p2 = pcall(C_Map.GetPlayerMapPosition, best, "player")
+        if ok2 and p2 and not Secret(p2) then
+            local ok3, cont, wpos = pcall(C_Map.GetWorldPosFromMapPos, best, p2)
+            if ok3 and cont and wpos then
+                local ok4, _, mp = pcall(C_Map.GetMapPosFromWorldPos, cont, wpos, route.map)
+                if ok4 then return XY(mp) end
+            end
+        end
+    end
+end
+
+-- 구간 시간: 날아본 시간 또는 거리 ÷ 속도
+local function LegTime(j)
+    local m = Times()[LegKey(j)]
+    if m then return m, false end
+    return (route.len[j] or 0) / Speed(), true
+end
+
+-- 위치를 못 읽을 때: 뜬 뒤 지난 시간으로 어디쯤인지
+local function ByTime()
+    local el = GetTime() - fly.started
+    local acc = 0
+    local n = #route.stops - 1
+    for j = 1, n do
+        local T = LegTime(j)
+        if el < acc + T or j == n then
+            fly.legStart = fly.started + acc
+            return j, math.max(0, math.min(1, (el - acc) / math.max(1, T)))
+        end
+        acc = acc + T
+    end
+    return n, 1
+end
+
 local function Paint()
     if not (bar and route and fly) then return end
     local s = route.stops
     -- 지금 위치
-    local k, t = fly.leg, 0
+    local k, t
     if route.testPos then
         k, t = Project(route.testPos[1], route.testPos[2])
     else
-        local okP, pos = pcall(C_Map.GetPlayerMapPosition, route.map, "player")
-        if okP and pos and not Secret(pos) then
-            local px, py = pos:GetXY()
-            if px and not Secret(px) and px > 0 then k, t = Project(px, py) end
-        end
+        local px, py = PlayerPos()
+        if px then k, t = Project(px, py); fly.posSeen = true end
     end
-    k = k or fly.leg
-    if k > fly.leg then
+    if not k then
+        k, t = ByTime(); fly.byTime = true
+        fly.leg = math.max(fly.leg, k)
+    elseif k > fly.leg then
         -- 경유지를 지났어요: 그 구간 시간 저장
         for j = fly.leg, k - 1 do SaveLeg(j, GetTime() - fly.legStart); fly.legStart = GetTime() end
         fly.leg = k
     end
+    k = math.max(k, fly.leg)
     fly.t = t
     -- 남은 거리 · 시간
-    local times = Times()
     local remD = (route.len[k] or 0) * (1 - t)
     local remT, guess = 0, false
-    local m = times[LegKey(k)]
-    if m then remT = math.max(0, m - (GetTime() - fly.legStart))
-    else remT = remD / Speed(); guess = true end
+    local m, g = LegTime(k)
+    if not g then remT = math.max(0, m - (GetTime() - fly.legStart))
+    else remT = m * (1 - t); guess = true end
+    local m = not g and m or nil
     for j = k + 1, #s - 1 do
         remD = remD + (route.len[j] or 0)
-        local mj = times[LegKey(j)]
-        if mj then remT = remT + mj else remT = remT + (route.len[j] or 0) / Speed(); guess = true end
+        local tj, gj = LegTime(j)
+        remT = remT + tj
+        if gj then guess = true end
     end
     -- 일찍 내리기를 눌렀으면 다음 지점까지만
     if fly.early then
@@ -354,9 +401,15 @@ local function Update()
     end
     if not on then
         -- 내렸어요: 마지막 구간 시간 저장 (끝까지 갔을 때 · 일찍 내리기로 다음 지점에 내렸을 때)
-        if route and fly then
-            local k = fly.leg
-            if (fly.t or 0) > 0.85 or k == #route.stops - 1 or fly.early then SaveLeg(k, GetTime() - fly.legStart) end
+        if route and fly and not fly.test then
+            if fly.posSeen then
+                local k = fly.leg
+                if (fly.t or 0) > 0.85 or k == #route.stops - 1 or fly.early then SaveLeg(k, GetTime() - fly.legStart) end
+            elseif not fly.early and route.total > 0 then
+                -- 위치를 못 읽었으면: 전체 비행 시간을 구간 거리 비율로 나눠 저장
+                local total = GetTime() - fly.started
+                for j = 1, #route.stops - 1 do SaveLeg(j, total * (route.len[j] or 0) / route.total) end
+            end
         end
         route, fly = nil, nil
         Stop()

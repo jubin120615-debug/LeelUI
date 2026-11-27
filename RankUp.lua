@@ -118,9 +118,12 @@ local function ScanBars()
         end
     end
 end
+-- name: 주문 이름 하나 · { [이름] = true } 여러 개 · nil = 전부
 local function LowOf(name)
     local list = {}
-    for slot, l in pairs(low) do if not name or l.name == name then list[#list + 1] = slot end end
+    for slot, l in pairs(low) do
+        if not name or (type(name) == "table" and name[l.name]) or l.name == name then list[#list + 1] = slot end
+    end
     table.sort(list)
     return list
 end
@@ -150,7 +153,7 @@ local function Replace(name)
         end
         return GetCursorInfo() ~= nil
     end
-    for _, slot in ipairs(LowOf(name ~= true and name or nil)) do
+    for _, slot in ipairs(LowOf(name ~= true and name or nil)) do   -- (name: 이름 · 이름 묶음 · true = 전부)
         local l = low[slot]
         if l then
             if Pick(l.bestId) then
@@ -293,10 +296,20 @@ local function Btn(p, text, hot, fn)
     b:SetScript("OnClick", fn)
     return b
 end
-local function ShowToast(name)
-    local list = LowOf(name)
-    if #list == 0 then return end
-    local l = low[list[1]]
+-- 연달아 배우면 알약 하나에 모아요 (알약이 떠 있는 동안 배운 것도 더해요)
+local toastNames = {}
+local function ShowToast(names)
+    if not (toast and toast:IsShown()) then wipe(toastNames) end
+    for n in pairs(names) do toastNames[n] = true end
+    -- 이미 바꾼 것 · 낮은 칸이 없는 것은 빼요
+    local order = {}
+    for n in pairs(toastNames) do if #LowOf(n) > 0 then order[#order + 1] = n else toastNames[n] = nil end end
+    if #order == 0 then if toast then toast:Hide() end return end
+    table.sort(order)
+    local list = LowOf(toastNames)
+    local l
+    for _, slot in ipairs(list) do if low[slot].name == order[1] then l = low[slot] break end end
+    l = l or low[list[1]]
     if not toast then
         toast = CreateFrame("Frame", "LeelUI_RankToast", UIParent)
         toast:SetFrameStrata("HIGH"); toast:SetHeight(32)
@@ -306,8 +319,21 @@ local function ShowToast(name)
         local mk = toast:CreateMaskTexture(); mk:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); mk:SetAllPoints(toast.ic); toast.ic:AddMaskTexture(mk)
         toast.fs = ns.Font(toast, 12.5); toast.fs:SetPoint("LEFT", toast.ic, "RIGHT", 8, 0)
         toast.keep = Btn(toast, "그대로", false, function() toast:Hide() end)
-        toast.go = Btn(toast, "바꾸기", true, function() Replace(toast.name or true); toast:Hide() end)
+        toast.go = Btn(toast, "바꾸기", true, function() local nm = toast.name; if type(nm) == "table" then local c = {}; for k in pairs(nm) do c[k] = true end; nm = c end; Replace(nm or true); toast:Hide() end)
         toast.keep:SetPoint("RIGHT", -6, 0); toast.go:SetPoint("RIGHT", toast.keep, "LEFT", -5, 0)
+        -- 마우스 = 배운 것 전부
+        toast:SetScript("OnEnter", function(self)
+            if not self.list or #self.list < 2 then return end
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(ns.L("새로 배운 레벨"), 1, 0.84, 0.88)
+            for _, n in ipairs(self.list) do
+                local sl = LowOf(n)
+                local l1 = sl[1] and low[sl[1]]
+                if l1 then GameTooltip:AddLine((ns.L("%s %d레벨 · 단축바 %d칸 (지금 %d레벨)")):format(n, l1.bestRank, #sl, l1.rank), 1, 1, 1) end
+            end
+            GameTooltip:Show()
+        end)
+        toast:SetScript("OnLeave", function() GameTooltip:Hide() end)
         toast:SetScript("OnUpdate", function(self, el)
             self.t = (self.t or 0) + el
             if self.t > 10 and not self:IsMouseOver() then
@@ -316,19 +342,120 @@ local function ShowToast(name)
             end
         end)
     end
-    toast.name = name
+    toast.name = toastNames
     local tex = (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(l.bestId)) or (GetSpellTexture and GetSpellTexture(l.bestId))
     toast.ic:SetTexture(tex)
     local acc = "|cffffd0db"
-    toast.fs:SetText(ns.L("%s%s %d레벨|r 배웠어요 · 단축바 |cffff9a4d%d칸|r은 아직 %d레벨"):format(acc, l.name, l.bestRank, #list, l.rank))
+    if #order == 1 then
+        toast.fs:SetText(ns.L("%s%s %d레벨|r 배웠어요 · 단축바 |cffff9a4d%d칸|r은 아직 %d레벨"):format(acc, l.name, l.bestRank, #list, l.rank))
+        toast.go.fs:SetText(ns.L("바꾸기"))
+    else
+        -- "되살리기 4 · 치유 3 외 2개 배웠어요 · 단축바 6칸은 아직 낮은 레벨"
+        local parts = {}
+        for i, n in ipairs(order) do
+            if i > 2 then break end
+            local r
+            for _, slot in ipairs(list) do if low[slot].name == n then r = low[slot].bestRank break end end
+            parts[#parts + 1] = n .. " " .. (r or "")
+        end
+        local more = #order > 2 and (ns.L(" 외 %d개"):format(#order - 2)) or ""
+        toast.fs:SetText(ns.L("%s%s%s|r 배웠어요 · 단축바 |cffff9a4d%d칸|r은 아직 낮은 레벨"):format(acc, table.concat(parts, " · "), more, #list))
+        toast.go.fs:SetText(ns.L("모두 바꾸기"))
+    end
+    toast.go:SetWidth(toast.go.fs:GetStringWidth() + 22)
+    toast.list = order
     toast:SetWidth(5 + 24 + 8 + toast.fs:GetStringWidth() + 12 + toast.go:GetWidth() + 5 + toast.keep:GetWidth() + 8)
     toast.t = 0; toast:SetAlpha(1); toast:Show()
 end
 
 ----------------------------------------------------------------------
+-- 5안: 트레이너 창 옆 바구니 · 트레이너가 열린 동안 배운 것이 쌓여요 · 다 배우고 [단축바 모두 바꾸기] 한 번
+--   창을 닫을 때 아직 안 바꾼 칸이 있으면 화면 위 알약으로 한 번 더 물어봐요
+----------------------------------------------------------------------
+local trainerOpen = false
+local basket, basketSet, lastLearned = {}, {}, nil
+local bk
+local function TrainerFrame() return _G.ClassTrainerFrame or _G.TrainerFrame end
+local function BuildBasket()
+    local f = CreateFrame("Frame", "LeelUI_RankBasket", UIParent)
+    f:SetFrameStrata("HIGH"); f:SetWidth(250)
+    f.fill, f.edge = ns.RoundPlate(f, 14, { 0.125, 0.094, 0.086, 0.97 }, { 0.949, 0.702, 0.761, 0.85 })
+    f.title = ns.Font(f, 13, C.tx); f.title:SetPoint("TOPLEFT", 12, -10)
+    f.sub = ns.Font(f, 11.5, { 0.66, 0.59, 0.57 }); f.sub:SetPoint("LEFT", f.title, "RIGHT", 6, -1)
+    f.rows = {}
+    f.go = Btn(f, ns.L("단축바 모두 바꾸기"), true, function()
+        local c = {}; for k in pairs(basketSet) do c[k] = true end
+        Replace(c)
+    end)
+    f.note = ns.Font(f, 10.5, { 0.66, 0.59, 0.57 }); f.note:SetWidth(226); f.note:SetJustifyH("LEFT")
+    f.note:SetText(ns.L("창을 닫을 때 안 바꾼 칸이 있으면 한 번 더 물어봐요"))
+    f:Hide()
+    return f
+end
+local function Row(i)
+    local r = bk.rows[i]
+    if r then return r end
+    r = CreateFrame("Frame", nil, bk); r:SetHeight(26)
+    r.hl = ns.RoundRect(r, 8, { 0.23, 0.1, 0.12 }, "BACKGROUND", 2, 0)
+    r.ic = r:CreateTexture(nil, "ARTWORK"); r.ic:SetSize(20, 20); r.ic:SetPoint("LEFT", 4, 0)
+    local mk = r:CreateMaskTexture(); mk:SetTexture(ns.MEDIA .. "circle", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE"); mk:SetAllPoints(r.ic); r.ic:AddMaskTexture(mk)
+    r.name = ns.Font(r, 12.5, C.tx); r.name:SetPoint("LEFT", r.ic, "RIGHT", 7, 0)
+    r.rk = ns.Font(r, 12, { 0.78, 0.71, 0.69 }); r.rk:SetPoint("RIGHT", -6, 0)
+    r.line = r:CreateTexture(nil, "BORDER"); r.line:SetColorTexture(0.23, 0.165, 0.176, 1); r.line:SetHeight(1)
+    r.line:SetPoint("TOPLEFT", 0, 0); r.line:SetPoint("TOPRIGHT", 0, 0)
+    bk.rows[i] = r
+    return r
+end
+local function PaintBasket()
+    if not (trainerOpen and #basket > 0 and DB().on and DB().toast) then if bk then bk:Hide() end return end
+    bk = bk or BuildBasket()
+    local tf = TrainerFrame()
+    bk:ClearAllPoints()
+    if tf and tf:IsShown() then bk:SetPoint("TOPLEFT", tf, "TOPRIGHT", 6, -2)
+    else bk:SetPoint("LEFT", UIParent, "LEFT", 420, 120) end
+    local slots = LowOf(basketSet)
+    bk.title:SetText(ns.L("방금 배운 것"))
+    bk.sub:SetText(#slots > 0 and (ns.L("· 단축바 %d칸")):format(#slots) or ns.L("· 단축바는 다 새 레벨"))
+    local y = -32
+    for i, n in ipairs(basket) do
+        local r = Row(i)
+        r:ClearAllPoints(); r:SetPoint("TOPLEFT", 8, y); r:SetPoint("TOPRIGHT", -8, y)
+        local b = best[n]
+        local tex = b and ((C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(b.id)) or (GetSpellTexture and GetSpellTexture(b.id)))
+        r.ic:SetTexture(tex or 134400)
+        r.name:SetText(n)
+        local ls = LowOf(n)
+        local old
+        for _, sl in ipairs(ls) do local l = low[sl]; if not old or l.rank < old then old = l.rank end end
+        if old and b then r.rk:SetText(("%d → |cffffd0db%d|r  |cffff9a4d%s|r"):format(old, b.rank, (ns.L("%d칸")):format(#ls)))
+        elseif b then r.rk:SetText(("|cffffd0db%d%s|r"):format(b.rank, ns.L("레벨")) .. "  |cff9be3a8✓|r")
+        else r.rk:SetText("") end
+        for _, t in ipairs(r.hl.tex) do t:SetShown(n == lastLearned) end   -- (둥근 판은 텍스처 묶음이라 하나씩)
+        r.line:SetShown(i > 1)
+        r:Show()
+        y = y - 27
+    end
+    for i = #basket + 1, #bk.rows do bk.rows[i]:Hide() end
+    bk.go:ClearAllPoints(); bk.go:SetPoint("TOPRIGHT", -10, y - 6)
+    bk.go:SetShown(#slots > 0)
+    bk.note:ClearAllPoints(); bk.note:SetPoint("TOPLEFT", 12, y - (#slots > 0 and 32 or 6))
+    bk:SetHeight(-y + (#slots > 0 and 32 or 6) + bk.note:GetStringHeight() + 12)
+    bk:Show()
+end
+local function AddBasket(names)
+    for n in pairs(names) do
+        if best[n] then   -- 레벨이 있는 주문만 (전문 기술 · 제조법은 빼요)
+            if not basketSet[n] then basketSet[n] = true; basket[#basket + 1] = n end
+            lastLearned = n
+        end
+    end
+    PaintBasket()
+end
+
 Refresh = function()
     if not ns.db then return end
     ScanBook(); ScanBars(); PaintMarks()
+    if bk and bk:IsShown() then PaintBasket() end
 end
 ns.RankRefresh = Refresh
 
@@ -339,7 +466,7 @@ ev:SetScript("OnEvent", function(self, e, a1)
     if e == "PLAYER_LOGIN" then
         if not ns.db then return end
         for _, x in ipairs({ "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE", "SPELLS_CHANGED", "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED",
-                             "UPDATE_BONUS_ACTIONBAR", "PLAYER_REGEN_ENABLED", "UPDATE_SHAPESHIFT_FORM" }) do pcall(self.RegisterEvent, self, x) end
+                             "UPDATE_BONUS_ACTIONBAR", "PLAYER_REGEN_ENABLED", "UPDATE_SHAPESHIFT_FORM", "TRAINER_SHOW", "TRAINER_CLOSED" }) do pcall(self.RegisterEvent, self, x) end
         C_Timer.After(2, Refresh)
         return
     end
@@ -352,12 +479,34 @@ ev:SetScript("OnEvent", function(self, e, a1)
             C_Timer.After(1, function()
                 self.wait = false
                 Refresh()
-                if DB().on and DB().toast then
-                    for n in pairs(learned) do if #LowOf(n) > 0 then ShowToast(n); break end end
+                if trainerOpen and DB().on and DB().toast then
+                    AddBasket(learned)
+                elseif DB().on and DB().toast then
+                    local any = false
+                    for n in pairs(learned) do if #LowOf(n) > 0 then any = true end end
+                    if any then ShowToast(learned) end
                 end
                 wipe(learned)
             end)
         end
+        return
+    end
+    if e == "TRAINER_SHOW" then
+        trainerOpen = true; wipe(basket); wipe(basketSet); lastLearned = nil
+        return
+    end
+    if e == "TRAINER_CLOSED" then
+        if not trainerOpen then return end
+        trainerOpen = false
+        if bk then bk:Hide() end
+        -- 아직 안 바꾼 칸이 있으면 화면 위 알약으로 한 번 더
+        local names = {}
+        for k in pairs(basketSet) do names[k] = true end
+        wipe(basket); wipe(basketSet)
+        C_Timer.After(0.2, function()
+            Refresh()
+            if DB().on and DB().toast and #LowOf(names) > 0 then ShowToast(names) end
+        end)
         return
     end
     if e == "PLAYER_REGEN_ENABLED" and pending then

@@ -454,6 +454,7 @@ local function PaintNavBar(nav)
             b.leelSep:Hide()
         end
     end
+    WorldMapFrame.leelNavLast = last
     if header and header.pill then
         header.pill:ClearAllPoints()
         if last then header.pill:SetPoint("LEFT", last, "RIGHT", 6, 0)
@@ -820,7 +821,29 @@ local function CreateCoords()
         local hp = coords.hdr
         if hp then
             hp.me:SetText(coords.me:GetText() or "-"); hp.cur:SetText(cs or "-")
-            local w = math.floor(12 + hp.me:GetStringWidth() + 7 + hp.dot:GetStringWidth() + 7 + hp.curL:GetStringWidth() + 5 + math.max(52, hp.cur:GetStringWidth()) + 6 + (hp.extra or 6))
+            local base = 12 + hp.me:GetStringWidth() + 6 + (hp.extra or 6)
+            local mouseW = 7 + hp.dot:GetStringWidth() + 5 + math.max(52, hp.cur:GetStringWidth())
+            local labelW = 7 + hp.curL:GetStringWidth() - 2
+            -- 왼쪽 지역 이름 · 레벨 알약과 안 겹치게: 자리가 모자라면 "마우스" 글자 → 마우스 좌표 순서로 빼요
+            local lim
+            local pl = header and header.pill
+            if pl and pl:IsShown() then lim = pl:GetRight() end
+            if not lim and wm.leelNavLast and wm.leelNavLast:IsShown() then lim = wm.leelNavLast:GetRight() end
+            local right = hp:GetRight()
+            local avail = (lim and right) and (right - lim - 10) or 9999
+            local typing = coords.way and coords.way.box and coords.way.box:IsShown()
+            local mode = 0
+            if base + mouseW + labelW > avail then mode = 1 end
+            if base + mouseW > avail then mode = 2 end
+            if typing then mode = math.min(mode, 1) end   -- 입력 중에는 칸 자리를 남겨 둬요
+            local w = base + (mode < 2 and mouseW or 0) + (mode < 1 and labelW or 0)
+            w = math.floor(w)
+            if hp.mode ~= mode then
+                hp.mode = mode
+                hp.curL:SetText(mode >= 1 and "" or T("마우스"))
+                hp.dot:SetShown(mode < 2)
+                if not typing then hp.cur:SetShown(mode < 2); hp.curL:SetShown(mode < 2) end
+            end
             if hp.w ~= w then hp.w = w; hp:SetWidth(w) end
         end
 
@@ -1066,7 +1089,7 @@ local function CreateWayBox()
     end)
     eb:SetScript("OnEditFocusLost", function()
         erim:SetVertexColor(C.acc[1], C.acc[2], C.acc[3], 0); HideSoon()
-        eb:Hide(); hp.curL:Show(); hp.cur:Show()
+        eb:Hide(); hp.curL:SetShown((hp.mode or 0) < 2); hp.cur:SetShown((hp.mode or 0) < 2)
     end)
     eb:SetScript("OnEscapePressed", eb.ClearFocus)
     eb:SetScript("OnEnterPressed", Go)
